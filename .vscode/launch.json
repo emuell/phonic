@@ -20,7 +20,27 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "rust: cargo build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'play-mixer'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-mixer",
+          "--package=afstream"
+        ],
+        "filter": {
+          "name": "play-mixer",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "rust: cargo build"
     }
   ]
 }

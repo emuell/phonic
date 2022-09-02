@@ -7,7 +7,8 @@ use crate::player::{
     actor::{Act, Actor, ActorHandle},
     output::{AudioOutput, AudioSink},
 };
-use crate::source::{AudioSource, EmptySource};
+use crate::source::empty::EmptySource;
+use crate::source::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 

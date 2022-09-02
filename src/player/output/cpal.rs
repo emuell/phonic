@@ -1,12 +1,12 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
-use crate::error::Error;
-use crate::player::{
-    actor::{Act, Actor, ActorHandle},
-    output::{AudioOutput, AudioSink},
+use crate::{
+    error::Error,
+    player::output::{AudioOutput, AudioSink},
+    source::{empty::EmptySource, AudioSource},
+    utils::actor::{Act, Actor, ActorHandle},
 };
-use crate::source::{AudioSource, EmptySource};
 
 // -------------------------------------------------------------------------------------------------
 
