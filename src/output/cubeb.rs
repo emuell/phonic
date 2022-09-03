@@ -1,14 +1,12 @@
+use crossbeam_channel::{bounded, Receiver, Sender};
 use std::{env, ffi::CString};
 
-use crossbeam_channel::{bounded, Receiver, Sender};
-
-use crate::error::Error;
-use crate::player::{
-    actor::{Act, Actor, ActorHandle},
+use crate::{
+    error::Error,
     output::{AudioOutput, AudioSink},
+    source::{empty::EmptySource, AudioSource},
+    utils::actor::{Act, Actor, ActorHandle},
 };
-use crate::source::empty::EmptySource;
-use crate::source::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 

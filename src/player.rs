@@ -1,20 +1,17 @@
-pub mod output;
-
 use crossbeam_channel::Sender;
 use std::time::Duration;
 
-use crate::utils::resampler::ResamplingQuality;
 use crate::{
     error::Error,
+    output::{AudioSink, DefaultAudioSink},
     source::{
         decoded::{DecoderPlaybackEvent, DecoderSource, DecoderWorkerMsg},
         mapped::ChannelMappedSource,
         resampled::ResampledSource,
         AudioSource,
     },
+    utils::resampler::ResamplingQuality,
 };
-
-use self::output::{AudioSink, DefaultAudioSink};
 
 // -------------------------------------------------------------------------------------------------
 

@@ -1,8 +1,6 @@
 use afstream::{
-    player::{
-        output::{AudioOutput, DefaultAudioOutput},
-        PlaybackManager,
-    },
+    output::{AudioOutput, DefaultAudioOutput},
+    player::PlaybackManager,
     source::decoded::DecoderPlaybackEvent,
 };
 

@@ -1,7 +1,9 @@
 use afstream::{
-    player::output::{AudioOutput, AudioSink, DefaultAudioOutput},
-    source::decoded::{DecoderPlaybackEvent, DecoderSource},
-    source::mixed::MixedSource,
+    output::{AudioOutput, AudioSink, DefaultAudioOutput},
+    source::{
+        decoded::{DecoderPlaybackEvent, DecoderSource},
+        mixed::MixedSource,
+    },
 };
 
 fn main() -> Result<(), String> {

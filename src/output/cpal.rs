@@ -3,7 +3,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
     error::Error,
-    player::output::{AudioOutput, AudioSink},
+    output::{AudioOutput, AudioSink},
     source::{empty::EmptySource, AudioSource},
     utils::actor::{Act, Actor, ActorHandle},
 };
