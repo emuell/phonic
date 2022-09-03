@@ -41,24 +41,27 @@ impl PlaybackManager {
     }
 
     pub fn play(&mut self, file_path: String) -> Result<(), Error> {
-        let source = DecoderSource::new(file_path.clone(), self.event_send.clone())?;
-        self.current = Some((file_path, source.actor.sender()));
-        if source.sample_rate() == self.sink.sample_rate()
-            && source.channel_count() == self.sink.channel_count()
-        {
-            // We can start playing the source right away.
-            self.sink.play(source);
-        } else {
-            // Some output streams have different sample rate than the source, so we need to
-            // resample before pushing to the sink.
-            let source = ResampledSource::new(
-                Box::new(source),
+        let source = DecoderSource::new(file_path.clone(), Some(self.event_send.clone()))?;
+        self.current = Some((file_path, source.worker_msg_sender()));
+        if source.sample_rate() != self.sink.sample_rate() {
+            // convert source sample-rate to ours
+            let resampled_source = ResampledSource::new(
+                source,
                 self.sink.sample_rate(),
                 ResamplingQuality::SincMediumQuality,
             );
-            // Source output streams also have a different channel count. Map the stereo
-            // channels and silence the others.
-            let source = ChannelMappedSource::new(Box::new(source), self.sink.channel_count());
+            if resampled_source.channel_count() != self.sink.channel_count() {
+                let channel_mapped_source =
+                    ChannelMappedSource::new(resampled_source, self.sink.channel_count());
+                self.sink.play(channel_mapped_source);
+            } else {
+                self.sink.play(resampled_source);
+            }
+        } else if source.channel_count() != self.sink.channel_count() {
+            // convert source channel mapping to ours
+            let channel_mapped_source = ChannelMappedSource::new(source, self.sink.channel_count());
+            self.sink.play(channel_mapped_source);
+        } else {
             self.sink.play(source);
         }
         self.sink.resume();

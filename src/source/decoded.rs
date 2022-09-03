@@ -33,11 +33,12 @@ pub enum DecoderPlaybackEvent {
 
 // -------------------------------------------------------------------------------------------------
 
+/// A source which streams & decodes an audio file asynchromiously in a worker thread
 pub struct DecoderSource {
-    pub actor: ActorHandle<DecoderWorkerMsg>,
+    actor: ActorHandle<DecoderWorkerMsg>,
     file_path: String,
     consumer: Consumer<f32>,
-    event_send: Sender<DecoderPlaybackEvent>,
+    event_send: Option<Sender<DecoderPlaybackEvent>>,
     total_samples: Arc<AtomicU64>,
     position: Arc<AtomicU64>,
     precision: u64,
@@ -48,7 +49,12 @@ pub struct DecoderSource {
 }
 
 impl DecoderSource {
-    pub fn new(file_path: String, event_send: Sender<DecoderPlaybackEvent>) -> Result<Self, Error> {
+    /// Create a new decoding source with an optional DecoderPlaybackEvent channel sender
+    /// to retrieve playback status events
+    pub fn new(
+        file_path: String,
+        event_send: Option<Sender<DecoderPlaybackEvent>>,
+    ) -> Result<Self, Error> {
         const REPORT_PRECISION: Duration = Duration::from_millis(900);
         // create decoder
         let decoder = AudioDecoder::new(file_path.clone())?;
@@ -99,6 +105,10 @@ impl DecoderSource {
         })
     }
 
+    pub(crate) fn worker_msg_sender(&self) -> Sender<DecoderWorkerMsg> {
+        self.actor.sender()
+    }
+
     fn written_samples(&self, position: u64) -> u64 {
         self.position.fetch_add(position, Ordering::Relaxed) + position
     }
@@ -120,21 +130,20 @@ impl AudioSource for DecoderSource {
             return 0;
         }
         let written = self.consumer.read(output).unwrap_or(0);
-
         let position = self.written_samples(written as u64);
-        if self.should_report(position) {
-            // Send a position report, so the upper layers can visualize the playback
-            // progress and preload the next track.  We cannot block here, so if the channel
-            // is full, we just try the next time instead of waiting.
-            if self
-                .event_send
-                .try_send(DecoderPlaybackEvent::Position {
+
+        if let Some(event_send) = &self.event_send {
+            if self.should_report(position) {
+                self.reported = position;
+                // Send a position report, so the upper layers can visualize the playback
+                // progress and preload the next track.  We cannot block here, so if the channel
+                // is full, we just try the next time instead of waiting.
+                if let Err(err) = event_send.try_send(DecoderPlaybackEvent::Position {
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
-                })
-                .is_ok()
-            {
-                self.reported = position;
+                }) {
+                    log::warn!("Failed to send playback event: {}", err)
+                }
             }
         }
 
@@ -142,15 +151,14 @@ impl AudioSource for DecoderSource {
         if position >= total_samples {
             // After reading the total number of samples, we stop. Signal to the upper layer
             // this track is over and short-circuit all further reads from this source.
-            if self
-                .event_send
-                .try_send(DecoderPlaybackEvent::EndOfFile {
+            if let Some(event_send) = &self.event_send {
+                if let Err(err) = event_send.try_send(DecoderPlaybackEvent::EndOfFile {
                     path: self.file_path.clone(),
-                })
-                .is_ok()
-            {
-                self.end_of_track = true;
+                }) {
+                    log::warn!("Failed to send playback event: {}", err)
+                }
             }
+            self.end_of_track = true;
         }
 
         written

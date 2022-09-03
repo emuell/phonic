@@ -3,19 +3,19 @@ use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec}
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct ResampledSource {
-    source: Box<dyn AudioSource>,
+/// A source which resamples the input source to a target sample rate
+pub struct ResampledSource<T> {
+    source: Box<T>,
     resampler: AudioResampler,
     inp: Buf,
     out: Buf,
 }
 
-impl ResampledSource {
-    pub fn new(
-        source: Box<dyn AudioSource>,
-        output_sample_rate: u32,
-        quality: ResamplingQuality,
-    ) -> Self {
+impl<T> ResampledSource<T>
+where
+    T: AudioSource,
+{
+    pub fn new(source: T, output_sample_rate: u32, quality: ResamplingQuality) -> Self {
         const BUFFER_SIZE: usize = 1024;
 
         let spec = ResamplingSpec {
@@ -27,7 +27,7 @@ impl ResampledSource {
         let out_buf = vec![0.0; spec.output_size(BUFFER_SIZE)];
         Self {
             resampler: AudioResampler::new(quality, spec).unwrap(),
-            source,
+            source: Box::new(source),
             inp: Buf {
                 buf: inp_buf,
                 start: 0,
@@ -42,7 +42,10 @@ impl ResampledSource {
     }
 }
 
-impl AudioSource for ResampledSource {
+impl<T> AudioSource for ResampledSource<T>
+where
+    T: AudioSource + 'static,
+{
     fn write(&mut self, output: &mut [f32]) -> usize {
         let mut total = 0;
 
