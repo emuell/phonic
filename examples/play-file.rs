@@ -1,6 +1,6 @@
 use afstream::{
     output::{AudioOutput, DefaultAudioOutput},
-    player::PlaybackManager,
+    player::AudioFilePlayer,
     source::decoded::DecoderPlaybackEvent,
 };
 
@@ -10,14 +10,14 @@ fn main() -> Result<(), String> {
 
     // create playback manager
     let (event_sx, event_rx) = crossbeam_channel::unbounded();
-    let mut playback_manager = PlaybackManager::new(audio_output.sink(), event_sx);
+    let mut player = AudioFilePlayer::new(audio_output.sink(), event_sx);
 
-    // load sound from given file path and play it
-    playback_manager
+    // load sound from given file path and stream it
+    player
         .play("assets/altijd synth bit.wav".to_string())
         .map_err(|err| err.to_string())?;
 
-    // handle events from playback manager
+    // handle player events
     let event_thread = std::thread::spawn(move || loop {
         match event_rx.recv() {
             Ok(event) => match event {

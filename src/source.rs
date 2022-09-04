@@ -1,9 +1,11 @@
+pub mod converted;
 pub mod decoded;
 pub mod empty;
 pub mod mapped;
 pub mod mixed;
 pub mod resampled;
 
+use self::converted::ConvertedSource;
 use self::mapped::ChannelMappedSource;
 use self::resampled::ResampledSource;
 use crate::utils::resampler::ResamplingQuality;
@@ -29,5 +31,12 @@ pub trait AudioSource: Send + 'static {
         Self: Sized,
     {
         ResampledSource::new(self, output_sample_rate, quality)
+    }
+
+    fn converted(self, output_channels: usize, output_sample_rate: u32) -> ConvertedSource
+    where
+        Self: Sized,
+    {
+        ConvertedSource::new(self, output_channels, output_sample_rate)
     }
 }

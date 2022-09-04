@@ -6,22 +6,19 @@ use crate::{
     output::{AudioSink, DefaultAudioSink},
     source::{
         decoded::{DecoderPlaybackEvent, DecoderSource, DecoderWorkerMsg},
-        mapped::ChannelMappedSource,
-        resampled::ResampledSource,
         AudioSource,
     },
-    utils::resampler::ResamplingQuality,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct PlaybackManager {
+pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
     event_send: Sender<DecoderPlaybackEvent>,
     current: Option<(String, Sender<DecoderWorkerMsg>)>,
 }
 
-impl PlaybackManager {
+impl AudioFilePlayer {
     pub fn new(sink: DefaultAudioSink, event_send: Sender<DecoderPlaybackEvent>) -> Self {
         Self {
             sink,
@@ -38,29 +35,14 @@ impl PlaybackManager {
     }
 
     pub fn play(&mut self, file_path: String) -> Result<(), Error> {
+        // create a decoded source
         let source = DecoderSource::new(file_path.clone(), Some(self.event_send.clone()))?;
+        // subscribe to playback envets
         self.current = Some((file_path, source.worker_msg_sender()));
-        if source.sample_rate() != self.sink.sample_rate() {
-            // convert source sample-rate to ours
-            let resampled_source = ResampledSource::new(
-                source,
-                self.sink.sample_rate(),
-                ResamplingQuality::SincMediumQuality,
-            );
-            if resampled_source.channel_count() != self.sink.channel_count() {
-                let channel_mapped_source =
-                    ChannelMappedSource::new(resampled_source, self.sink.channel_count());
-                self.sink.play(channel_mapped_source);
-            } else {
-                self.sink.play(resampled_source);
-            }
-        } else if source.channel_count() != self.sink.channel_count() {
-            // convert source channel mapping to ours
-            let channel_mapped_source = ChannelMappedSource::new(source, self.sink.channel_count());
-            self.sink.play(channel_mapped_source);
-        } else {
-            self.sink.play(source);
-        }
+        // convert channes and rate output, if needed
+        let converted = source.converted(self.sink.channel_count(), self.sink.sample_rate());
+        // play the source
+        self.sink.play(converted);
         self.sink.resume();
         Ok(())
     }

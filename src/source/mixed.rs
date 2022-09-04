@@ -1,5 +1,4 @@
 use super::AudioSource;
-use crate::utils::resampler::ResamplingQuality;
 use crossbeam_queue::SegQueue;
 
 // -------------------------------------------------------------------------------------------------
@@ -36,23 +35,10 @@ impl MixedSource {
     where
         T: AudioSource,
     {
-        // add to pending_sources which will be consumed in the next write
-        if source.sample_rate() != self.sample_rate() {
-            // convert source sample-rate to ours
-            let source = source.resampled(self.sample_rate(), ResamplingQuality::SincMediumQuality);
-            if source.channel_count() != self.channel_count() {
-                let source = source.channel_mapped(self.channel_count());
-                self.pending_sources.push(Box::new(source));
-            } else {
-                self.pending_sources.push(Box::new(source));
-            }
-        } else if source.channel_count() != self.channel_count() {
-            // convert source channel mapping to ours
-            let source = source.channel_mapped(self.channel_count());
-            self.pending_sources.push(Box::new(source));
-        } else {
-            self.pending_sources.push(Box::new(source));
-        }
+        // convert and add to pending_sources which will be consumed in the next write
+        self.pending_sources.push(Box::new(
+            source.converted(self.channel_count, self.sample_rate),
+        ));
     }
 }
 
