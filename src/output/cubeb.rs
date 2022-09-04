@@ -1,5 +1,9 @@
 use crossbeam_channel::{bounded, Receiver, Sender};
-use std::{env, ffi::CString};
+use std::{
+    env,
+    ffi::CString,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     error::Error,
@@ -70,7 +74,7 @@ impl Stream {
 
         let mut callback = StreamCallback {
             callback_recv,
-            source: Box::new(EmptySource),
+            source: Arc::new(Mutex::new(EmptySource)),
             state: CallbackState::Paused,
             buffer: vec![0.0; 1024 * 1024],
         };
@@ -167,9 +171,9 @@ impl AudioSink for CubebSink {
         self.stream_send.send(StreamMsg::SetVolume(volume)).unwrap();
     }
 
-    fn play(&self, source: impl AudioSource) {
+    fn play(&self, source: Arc<Mutex<impl AudioSource>>) {
         self.callback_send
-            .send(CallbackMsg::PlaySource(Box::new(source)))
+            .send(CallbackMsg::PlaySource(source))
             .unwrap()
     }
 
@@ -195,7 +199,7 @@ impl AudioSink for CubebSink {
 // -------------------------------------------------------------------------------------------------
 
 enum CallbackMsg {
-    PlaySource(Box<dyn AudioSource>),
+    PlaySource(Arc<Mutex<dyn AudioSource>>),
     Pause,
     Resume,
 }
@@ -207,7 +211,7 @@ enum CallbackState {
 
 struct StreamCallback {
     callback_recv: Receiver<CallbackMsg>,
-    source: Box<dyn AudioSource>,
+    source: Arc<Mutex<dyn AudioSource>>,
     state: CallbackState,
     buffer: Vec<f32>,
 }
@@ -232,9 +236,10 @@ impl StreamCallback {
         let written = if matches!(self.state, CallbackState::Playing) {
             // Write out as many samples as possible from the audio source to the
             // output buffer.
+            let mut source = self.source.lock().unwrap();
             let n_output_frames = output.len();
             let n_output_samples = n_output_frames * STREAM_CHANNELS;
-            let n_samples = self.source.write(&mut self.buffer[..n_output_samples]);
+            let n_samples = source.write(&mut self.buffer[..n_output_samples]);
             let mut n_frames = 0;
             for (i, o) in self.buffer[..n_samples]
                 .chunks(STREAM_CHANNELS)

@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
@@ -116,8 +118,8 @@ impl AudioSink for CpalSink {
         self.send_to_callback(CallbackMsg::SetVolume(volume));
     }
 
-    fn play(&self, source: impl AudioSource) {
-        self.send_to_callback(CallbackMsg::PlaySource(Box::new(source)));
+    fn play(&self, source: Arc<Mutex<impl AudioSource>>) {
+        self.send_to_callback(CallbackMsg::PlaySource(source));
     }
 
     fn pause(&self) {
@@ -131,7 +133,6 @@ impl AudioSink for CpalSink {
     }
 
     fn stop(&self) {
-        self.play(EmptySource);
         self.pause();
     }
 
@@ -157,7 +158,7 @@ impl Stream {
         let mut callback = StreamCallback {
             callback_recv,
             stream_send,
-            source: Box::new(EmptySource),
+            source: Arc::new(Mutex::new(EmptySource)),
             volume: 1.0, // We start with the full volume.
             state: CallbackState::Paused,
         };
@@ -218,7 +219,7 @@ enum StreamMsg {
 }
 
 enum CallbackMsg {
-    PlaySource(Box<dyn AudioSource>),
+    PlaySource(Arc<Mutex<dyn AudioSource>>),
     SetVolume(f32),
     Pause,
     Resume,
@@ -233,7 +234,7 @@ struct StreamCallback {
     #[allow(unused)]
     stream_send: Sender<StreamMsg>,
     callback_recv: Receiver<CallbackMsg>,
-    source: Box<dyn AudioSource>,
+    source: Arc<Mutex<dyn AudioSource>>,
     state: CallbackState,
     volume: f32,
 }
@@ -261,7 +262,8 @@ impl StreamCallback {
         let written = if matches!(self.state, CallbackState::Playing) {
             // Write out as many samples as possible from the audio source to the
             // output buffer.
-            let written = self.source.write(output);
+            let mut source = self.source.lock().unwrap();
+            let written = source.write(output);
 
             // Apply the global volume level.
             output[..written].iter_mut().for_each(|s| *s *= self.volume);

@@ -1,7 +1,7 @@
 use std::{
     ops::Range,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -26,9 +26,22 @@ use super::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 
+/// A uniquie ID for a newly created DecoderSource
+pub type DecoderFileId = usize;
+
+// -------------------------------------------------------------------------------------------------
+
+/// Events send back from decoder to user
 pub enum DecoderPlaybackEvent {
-    Position { path: String, position: Duration },
-    EndOfFile { path: String },
+    Position {
+        file_id: DecoderFileId,
+        file_path: String,
+        position: Duration,
+    },
+    EndOfFile {
+        file_id: DecoderFileId,
+        file_path: String,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -36,6 +49,7 @@ pub enum DecoderPlaybackEvent {
 /// A source which streams & decodes an audio file asynchromiously in a worker thread
 pub struct DecoderSource {
     actor: ActorHandle<DecoderWorkerMsg>,
+    file_id: usize,
     file_path: String,
     consumer: Consumer<f32>,
     event_send: Option<Sender<DecoderPlaybackEvent>>,
@@ -88,11 +102,14 @@ impl DecoderSource {
             let total_samples = Arc::clone(&total_samples);
             move |this| DecoderWorker::new(this, decoder, buffer, position, total_samples)
         });
-        let _ = actor.send(DecoderWorkerMsg::Read);
+        actor.send(DecoderWorkerMsg::Read)?;
+
+        static FILE_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
         Ok(Self {
-            file_path,
             actor,
+            file_id: FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+            file_path,
             consumer,
             event_send,
             signal_spec,
@@ -107,6 +124,10 @@ impl DecoderSource {
 
     pub(crate) fn worker_msg_sender(&self) -> Sender<DecoderWorkerMsg> {
         self.actor.sender()
+    }
+
+    pub fn file_id(&self) -> DecoderFileId {
+        self.file_id
     }
 
     fn written_samples(&self, position: u64) -> u64 {
@@ -139,7 +160,8 @@ impl AudioSource for DecoderSource {
                 // progress and preload the next track.  We cannot block here, so if the channel
                 // is full, we just try the next time instead of waiting.
                 if let Err(err) = event_send.try_send(DecoderPlaybackEvent::Position {
-                    path: self.file_path.clone(),
+                    file_id: self.file_id,
+                    file_path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
                 }) {
                     log::warn!("Failed to send playback event: {}", err)
@@ -153,7 +175,8 @@ impl AudioSource for DecoderSource {
             // this track is over and short-circuit all further reads from this source.
             if let Some(event_send) = &self.event_send {
                 if let Err(err) = event_send.try_send(DecoderPlaybackEvent::EndOfFile {
-                    path: self.file_path.clone(),
+                    file_id: self.file_id,
+                    file_path: self.file_path.clone(),
                 }) {
                     log::warn!("Failed to send playback event: {}", err)
                 }
