@@ -1,7 +1,7 @@
 use afstream::{
     output::{AudioOutput, DefaultAudioOutput},
     player::AudioFilePlayer,
-    source::decoded::DecodedFilePlaybackStatusMsg,
+    source::file::FilePlaybackStatusMsg,
 };
 
 fn main() -> Result<(), String> {
@@ -9,28 +9,30 @@ fn main() -> Result<(), String> {
     let audio_output = DefaultAudioOutput::open().map_err(|err| err.to_string())?;
     let audio_sink = audio_output.sink();
 
-    // create channel for decoder source events
+    // create channel for playback status events
     let (event_sx, event_rx) = crossbeam_channel::unbounded();
     let mut player = AudioFilePlayer::new(audio_sink, event_sx);
 
-    // create sound sources and memorize file ids
+    // create sound sources and memorize file ids for the playback status
     let mut file_ids = vec![
         player
-            .play_file("assets/altijd synth bit.wav".to_string())
+            // this file is going to be streamed on the fly
+            .play_preloaded_file("assets/altijd synth bit.wav".to_string())
             .map_err(|err| err.to_string())?,
         player
-            .play_file("assets/BSQ_M14.wav".to_string())
+            // this file is going to be entirely decoded first, then played back
+            .play_streamed_file("assets/BSQ_M14.wav".to_string())
             .map_err(|err| err.to_string())?,
     ];
 
     // start playing
     player.start();
 
-    // handle events from the decoder sources
+    // handle events from the file sources
     let event_thread = std::thread::spawn(move || loop {
         match event_rx.recv() {
             Ok(event) => match event {
-                DecodedFilePlaybackStatusMsg::Position {
+                FilePlaybackStatusMsg::Position {
                     file_id,
                     file_path: path,
                     position,
@@ -42,7 +44,7 @@ fn main() -> Result<(), String> {
                         position.as_secs_f32()
                     );
                 }
-                DecodedFilePlaybackStatusMsg::EndOfFile {
+                FilePlaybackStatusMsg::EndOfFile {
                     file_id,
                     file_path: path,
                 } => {
@@ -61,7 +63,7 @@ fn main() -> Result<(), String> {
         }
     });
 
-    // wait until playback finished
+    // wait until playback of all files finished
     event_thread.join().unwrap();
 
     Ok(())

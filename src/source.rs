@@ -1,6 +1,6 @@
 pub mod converted;
-pub mod decoded;
 pub mod empty;
+pub mod file;
 pub mod mapped;
 pub mod mixed;
 pub mod resampled;

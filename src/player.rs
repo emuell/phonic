@@ -6,9 +6,11 @@ use crate::{
     error::Error,
     output::{AudioSink, DefaultAudioSink},
     source::{
-        decoded::{DecodedFileId, DecodedFileMsg, DecodedFilePlaybackStatusMsg, DecodedFileSource},
+        file::{
+            preloaded::PreloadedFileSource, streamed::StreamedFileSource, FileId, FilePlaybackMsg,
+            FilePlaybackStatusMsg, FileSource,
+        },
         mixed::{MixedSource, MixedSourceMsg},
-        AudioSource,
     },
 };
 
@@ -16,13 +18,13 @@ use crate::{
 
 pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
-    playing_files: HashMap<DecodedFileId, Sender<DecodedFileMsg>>,
-    decoder_event_send: Sender<DecodedFilePlaybackStatusMsg>,
+    playing_files: HashMap<FileId, Sender<FilePlaybackMsg>>,
+    decoder_event_send: Sender<FilePlaybackStatusMsg>,
     mixer_event_send: Sender<MixedSourceMsg>,
 }
 
 impl AudioFilePlayer {
-    pub fn new(sink: DefaultAudioSink, event_send: Sender<DecodedFilePlaybackStatusMsg>) -> Self {
+    pub fn new(sink: DefaultAudioSink, event_send: Sender<FilePlaybackStatusMsg>) -> Self {
         // Create a mixer and start playing on the sink
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
         let mixer_event_sender = mixer_source.event_sender();
@@ -43,13 +45,22 @@ impl AudioFilePlayer {
         self.sink.pause()
     }
 
-    pub fn play_file(&mut self, file_path: String) -> Result<DecodedFileId, Error> {
-        // create a decoded source
-        let source = DecodedFileSource::new(file_path, Some(self.decoder_event_send.clone()))?;
+    pub fn play_streamed_file(&mut self, file_path: String) -> Result<FileId, Error> {
+        let source =
+            StreamedFileSource::new(file_path.clone(), Some(self.decoder_event_send.clone()))?;
+        self.play_file(source)
+    }
+
+    pub fn play_preloaded_file(&mut self, file_path: String) -> Result<FileId, Error> {
+        let source =
+            PreloadedFileSource::new(file_path.clone(), Some(self.decoder_event_send.clone()))?;
+        self.play_file(source)
+    }
+
+    pub fn play_file<F: FileSource>(&mut self, source: F) -> Result<FileId, Error> {
         let source_file_id = source.file_id();
         // subscribe to playback envets
-        self.playing_files
-            .insert(source_file_id, source.worker_msg_sender());
+        self.playing_files.insert(source_file_id, source.sender());
         // convert file to mixer's rate and channel layout
         let converted = source.converted(self.sink.channel_count(), self.sink.sample_rate());
         // play the source
@@ -65,7 +76,7 @@ impl AudioFilePlayer {
 
     pub fn seek_file(&self, file_id: usize, position: Duration) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
-            if let Err(err) = worker.send(DecodedFileMsg::Seek(position)) {
+            if let Err(err) = worker.send(FilePlaybackMsg::Seek(position)) {
                 log::error!("failed to send seek command to file: {}", err.to_string());
                 return Err(Error::SendError);
             }
@@ -76,7 +87,7 @@ impl AudioFilePlayer {
 
     pub fn stop_file(&self, file_id: usize) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
-            if let Err(err) = worker.send(DecodedFileMsg::Stop) {
+            if let Err(err) = worker.send(FilePlaybackMsg::Stop) {
                 log::error!("failed to send stop command to file: {}", err.to_string());
                 return Err(Error::SendError);
             }
