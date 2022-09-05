@@ -9,12 +9,17 @@ pub struct ConvertedSource {
 }
 
 impl ConvertedSource {
-    pub fn new<T>(source: T, channel_count: usize, sample_rate: u32) -> Self
+    pub fn new<InputSource>(
+        source: InputSource,
+        channel_count: usize,
+        sample_rate: u32,
+        resample_quality: ResamplingQuality,
+    ) -> Self
     where
-        T: AudioSource + Sized,
+        InputSource: AudioSource + Sized,
     {
         if source.sample_rate() != sample_rate {
-            let resampled = source.resampled(sample_rate, ResamplingQuality::SincMediumQuality);
+            let resampled = source.resampled(sample_rate, resample_quality);
             if resampled.channel_count() != channel_count {
                 let mapped = resampled.channel_mapped(channel_count);
                 Self {

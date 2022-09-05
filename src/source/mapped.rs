@@ -3,18 +3,18 @@ use super::AudioSource;
 // -------------------------------------------------------------------------------------------------
 
 /// A source which changes the channel layout
-pub struct ChannelMappedSource<T> {
-    source: Box<T>,
+pub struct ChannelMappedSource {
+    source: Box<dyn AudioSource>,
     input_channels: usize,
     output_channels: usize,
     buffer: Vec<f32>,
 }
 
-impl<T> ChannelMappedSource<T>
-where
-    T: AudioSource + 'static,
-{
-    pub fn new(source: T, output_channels: usize) -> Self {
+impl ChannelMappedSource {
+    pub fn new<InputSource>(source: InputSource, output_channels: usize) -> Self
+    where
+        InputSource: AudioSource,
+    {
         const BUFFER_SIZE: usize = 16 * 1024;
         let input_channels = source.channel_count();
         Self {
@@ -26,10 +26,7 @@ where
     }
 }
 
-impl<T> AudioSource for ChannelMappedSource<T>
-where
-    T: AudioSource + 'static,
-{
+impl AudioSource for ChannelMappedSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         let input_max = (output.len() / self.output_channels) * self.input_channels;
         let buffer_max = input_max.min(self.buffer.len());

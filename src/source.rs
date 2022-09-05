@@ -5,38 +5,47 @@ pub mod mapped;
 pub mod mixed;
 pub mod resampled;
 
-use self::converted::ConvertedSource;
-use self::mapped::ChannelMappedSource;
-use self::resampled::ResampledSource;
+use self::{converted::ConvertedSource, mapped::ChannelMappedSource, resampled::ResampledSource};
 use crate::utils::resampler::ResamplingQuality;
 
 // Types that can produce audio samples in `f32` format. `Send`able across threads.
 pub trait AudioSource: Send + 'static {
-    // Write at most of `output.len()` samples into the `output`. Returns the
-    // number of written samples. Should take care to always output a full
-    // frame, and should _never_ block.
+    /// Write at most of `output.len()` samples into the interleaved `output`
+    /// Returns the number of written samples.
     fn write(&mut self, output: &mut [f32]) -> usize;
+    /// This source's output channel layout
     fn channel_count(&self) -> usize;
+    /// This source's output sample rate
     fn sample_rate(&self) -> u32;
 
-    fn channel_mapped(self, output_channels: usize) -> ChannelMappedSource<Self>
+    /// Shortcut for creating a new source from self with a remapped channel layout
+    fn channel_mapped(self, output_channels: usize) -> ChannelMappedSource
     where
-        Self: Sized,
+        Self: AudioSource + Sized,
     {
         ChannelMappedSource::new(self, output_channels)
     }
-
-    fn resampled(self, output_sample_rate: u32, quality: ResamplingQuality) -> ResampledSource<Self>
+    /// Shortcut for creating a new source from self with a matched sample rate
+    fn resampled(
+        self,
+        output_sample_rate: u32,
+        resample_quality: ResamplingQuality,
+    ) -> ResampledSource
     where
-        Self: Sized,
+        Self: AudioSource + Sized,
     {
-        ResampledSource::new(self, output_sample_rate, quality)
+        ResampledSource::new(self, output_sample_rate, resample_quality)
     }
-
-    fn converted(self, output_channels: usize, output_sample_rate: u32) -> ConvertedSource
+    /// Shortcut for creating a new source with the given signal specs
+    fn converted(
+        self,
+        output_channels: usize,
+        output_sample_rate: u32,
+        resample_quality: ResamplingQuality,
+    ) -> ConvertedSource
     where
-        Self: Sized,
+        Self: AudioSource + Sized,
     {
-        ConvertedSource::new(self, output_channels, output_sample_rate)
+        ConvertedSource::new(self, output_channels, output_sample_rate, resample_quality)
     }
 }

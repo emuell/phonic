@@ -12,6 +12,8 @@ pub enum ResamplingQuality {
     Linear = libsamplerate::SRC_LINEAR as isize,
 }
 
+pub const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::SincFastest;
+
 // -------------------------------------------------------------------------------------------------
 
 #[derive(Copy, Clone)]

@@ -12,6 +12,7 @@ use crate::{
         },
         mixed::{MixedSource, MixedSourceMsg},
     },
+    utils::resampler::DEFAULT_RESAMPLING_QUALITY,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -62,7 +63,11 @@ impl AudioFilePlayer {
         // subscribe to playback envets
         self.playing_files.insert(source_file_id, source.sender());
         // convert file to mixer's rate and channel layout
-        let converted = source.converted(self.sink.channel_count(), self.sink.sample_rate());
+        let converted = source.converted(
+            self.sink.channel_count(),
+            self.sink.sample_rate(),
+            DEFAULT_RESAMPLING_QUALITY,
+        );
         // play the source
         if let Err(err) = self.mixer_event_send.send(MixedSourceMsg::AddSource {
             source: Box::new(converted),

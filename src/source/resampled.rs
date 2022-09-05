@@ -4,18 +4,22 @@ use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec}
 // -------------------------------------------------------------------------------------------------
 
 /// A source which resamples the input source to a target sample rate
-pub struct ResampledSource<T> {
-    source: Box<T>,
+pub struct ResampledSource {
+    source: Box<dyn AudioSource>,
     resampler: AudioResampler,
-    inp: Buf,
-    out: Buf,
+    inp: ResampleBuffer,
+    out: ResampleBuffer,
 }
 
-impl<T> ResampledSource<T>
-where
-    T: AudioSource,
-{
-    pub fn new(source: T, output_sample_rate: u32, quality: ResamplingQuality) -> Self {
+impl ResampledSource {
+    pub fn new<InputSource>(
+        source: InputSource,
+        output_sample_rate: u32,
+        quality: ResamplingQuality,
+    ) -> Self
+    where
+        InputSource: AudioSource,
+    {
         const BUFFER_SIZE: usize = 1024;
 
         let spec = ResamplingSpec {
@@ -28,12 +32,12 @@ where
         Self {
             resampler: AudioResampler::new(quality, spec).unwrap(),
             source: Box::new(source),
-            inp: Buf {
+            inp: ResampleBuffer {
                 buf: inp_buf,
                 start: 0,
                 end: 0,
             },
-            out: Buf {
+            out: ResampleBuffer {
                 buf: out_buf,
                 start: 0,
                 end: 0,
@@ -42,10 +46,7 @@ where
     }
 }
 
-impl<T> AudioSource for ResampledSource<T>
-where
-    T: AudioSource + 'static,
-{
+impl AudioSource for ResampledSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         let mut total = 0;
 
@@ -87,13 +88,13 @@ where
 
 // -------------------------------------------------------------------------------------------------
 
-struct Buf {
+struct ResampleBuffer {
     buf: Vec<f32>,
     start: usize,
     end: usize,
 }
 
-impl Buf {
+impl ResampleBuffer {
     fn get(&self) -> &[f32] {
         &self.buf[self.start..self.end]
     }
