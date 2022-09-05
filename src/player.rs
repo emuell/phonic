@@ -1,6 +1,5 @@
 use crossbeam_channel::Sender;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::{
@@ -8,7 +7,8 @@ use crate::{
     output::{AudioSink, DefaultAudioSink},
     source::{
         decoded::{DecoderFileId, DecoderPlaybackEvent, DecoderSource, DecoderWorkerMsg},
-        mixed::MixedSource,
+        mixed::{MixedSource, MixedSourceMsg},
+        AudioSource,
     },
 };
 
@@ -18,21 +18,20 @@ pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
     event_send: Sender<DecoderPlaybackEvent>,
     playing_files: HashMap<DecoderFileId, Sender<DecoderWorkerMsg>>,
-    mixer_source: Arc<Mutex<MixedSource>>,
+    mixer_event_sender: crossbeam_channel::Sender<MixedSourceMsg>,
 }
 
 impl AudioFilePlayer {
     pub fn new(sink: DefaultAudioSink, event_send: Sender<DecoderPlaybackEvent>) -> Self {
-        let mixer_source = Arc::new(Mutex::new(MixedSource::new(
-            sink.channel_count(),
-            sink.sample_rate(),
-        )));
-        sink.play(mixer_source.clone());
+        // Create a mixer and start playing on the sink
+        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
+        let mixer_event_sender = mixer_source.event_sender();
+        sink.play(mixer_source);
         Self {
             sink,
             event_send,
             playing_files: HashMap::new(),
-            mixer_source,
+            mixer_event_sender,
         }
     }
 
@@ -47,20 +46,26 @@ impl AudioFilePlayer {
     pub fn play_file(&mut self, file_path: String) -> Result<DecoderFileId, Error> {
         // create a decoded source
         let source = DecoderSource::new(file_path, Some(self.event_send.clone()))?;
-        let file_id = source.file_id();
+        let source_file_id = source.file_id();
         // subscribe to playback envets
         self.playing_files
-            .insert(file_id, source.worker_msg_sender());
+            .insert(source_file_id, source.worker_msg_sender());
+        // convert file to mixer's rate and channel layout
+        let converted = source.converted(self.sink.channel_count(), self.sink.sample_rate());
         // play the source
-        self.mixer_source.lock().unwrap().add(source);
+        if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
+            source: Box::new(converted),
+        }) {
+            log::error!("failed to send mixer event: {}", err);
+        }
         // return file id
-        Ok(file_id)
+        Ok(source_file_id)
     }
 
     pub fn seek_file(&self, file_id: usize, position: Duration) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
             if let Err(err) = worker.send(DecoderWorkerMsg::Seek(position)) {
-                log::warn!("Failed to send seek command to file: {}", err.to_string())
+                log::error!("failed to send seek command to file: {}", err.to_string())
             }
             return Ok(());
         }
@@ -70,7 +75,7 @@ impl AudioFilePlayer {
     pub fn stop_file(&self, file_id: usize) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
             if let Err(err) = worker.send(DecoderWorkerMsg::Stop) {
-                log::warn!("Failed to send stop command to file: {}", err.to_string())
+                log::error!("failed to send stop command to file: {}", err.to_string())
             }
             return Ok(());
         }

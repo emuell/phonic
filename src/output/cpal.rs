@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
@@ -118,8 +116,12 @@ impl AudioSink for CpalSink {
         self.send_to_callback(CallbackMsg::SetVolume(volume));
     }
 
-    fn play(&self, source: Arc<Mutex<impl AudioSource>>) {
-        self.send_to_callback(CallbackMsg::PlaySource(source));
+    fn play(&self, source: impl AudioSource) {
+        // ensure source has our sample rate and channel layout
+        assert_eq!(source.channel_count(), self.channel_count.into());
+        assert_eq!(source.sample_rate(), self.sample_rate.0.into());
+        // send message to activate it in the writer
+        self.send_to_callback(CallbackMsg::PlaySource(Box::new(source)));
     }
 
     fn pause(&self) {
@@ -158,7 +160,7 @@ impl Stream {
         let mut callback = StreamCallback {
             callback_recv,
             stream_send,
-            source: Arc::new(Mutex::new(EmptySource)),
+            source: Box::new(EmptySource),
             volume: 1.0, // We start with the full volume.
             state: CallbackState::Paused,
         };
@@ -219,7 +221,7 @@ enum StreamMsg {
 }
 
 enum CallbackMsg {
-    PlaySource(Arc<Mutex<dyn AudioSource>>),
+    PlaySource(Box<dyn AudioSource>),
     SetVolume(f32),
     Pause,
     Resume,
@@ -234,7 +236,7 @@ struct StreamCallback {
     #[allow(unused)]
     stream_send: Sender<StreamMsg>,
     callback_recv: Receiver<CallbackMsg>,
-    source: Arc<Mutex<dyn AudioSource>>,
+    source: Box<dyn AudioSource>,
     state: CallbackState,
     volume: f32,
 }
@@ -262,8 +264,7 @@ impl StreamCallback {
         let written = if matches!(self.state, CallbackState::Playing) {
             // Write out as many samples as possible from the audio source to the
             // output buffer.
-            let mut source = self.source.lock().unwrap();
-            let written = source.write(output);
+            let written = self.source.write(output);
 
             // Apply the global volume level.
             output[..written].iter_mut().for_each(|s| *s *= self.volume);
