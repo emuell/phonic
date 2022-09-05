@@ -1,7 +1,7 @@
 use afstream::{
     output::{AudioOutput, DefaultAudioOutput},
     player::AudioFilePlayer,
-    source::decoded::DecoderPlaybackEvent,
+    source::decoded::DecodedFilePlaybackStatusMsg,
 };
 
 fn main() -> Result<(), String> {
@@ -30,7 +30,7 @@ fn main() -> Result<(), String> {
     let event_thread = std::thread::spawn(move || loop {
         match event_rx.recv() {
             Ok(event) => match event {
-                DecoderPlaybackEvent::Position {
+                DecodedFilePlaybackStatusMsg::Position {
                     file_id,
                     file_path: path,
                     position,
@@ -42,7 +42,7 @@ fn main() -> Result<(), String> {
                         position.as_secs_f32()
                     );
                 }
-                DecoderPlaybackEvent::EndOfFile {
+                DecodedFilePlaybackStatusMsg::EndOfFile {
                     file_id,
                     file_path: path,
                 } => {

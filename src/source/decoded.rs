@@ -26,20 +26,20 @@ use super::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A uniquie ID for a newly created DecoderSource
-pub type DecoderFileId = usize;
+/// A uniquie ID for a newly created DecodedFileSources
+pub type DecodedFileId = usize;
 
 // -------------------------------------------------------------------------------------------------
 
 /// Events send back from decoder to user
-pub enum DecoderPlaybackEvent {
+pub enum DecodedFilePlaybackStatusMsg {
     Position {
-        file_id: DecoderFileId,
+        file_id: DecodedFileId,
         file_path: String,
         position: Duration,
     },
     EndOfFile {
-        file_id: DecoderFileId,
+        file_id: DecodedFileId,
         file_path: String,
     },
 }
@@ -47,12 +47,12 @@ pub enum DecoderPlaybackEvent {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which streams & decodes an audio file asynchromiously in a worker thread
-pub struct DecoderSource {
-    actor: ActorHandle<DecoderWorkerMsg>,
+pub struct DecodedFileSource {
+    actor: ActorHandle<DecodedFileMsg>,
     file_id: usize,
     file_path: String,
     consumer: Consumer<f32>,
-    event_send: Option<Sender<DecoderPlaybackEvent>>,
+    event_send: Option<Sender<DecodedFilePlaybackStatusMsg>>,
     total_samples: Arc<AtomicU64>,
     position: Arc<AtomicU64>,
     precision: u64,
@@ -62,12 +62,12 @@ pub struct DecoderSource {
     time_base: TimeBase,
 }
 
-impl DecoderSource {
-    /// Create a new decoding source with an optional DecoderPlaybackEvent channel sender
+impl DecodedFileSource {
+    /// Create a new decoded  file source with an optional DecoderPlaybackEvent channel sender
     /// to retrieve playback status events
     pub fn new(
         file_path: String,
-        event_send: Option<Sender<DecoderPlaybackEvent>>,
+        event_send: Option<Sender<DecodedFilePlaybackStatusMsg>>,
     ) -> Result<Self, Error> {
         const REPORT_PRECISION: Duration = Duration::from_millis(900);
         // create decoder
@@ -82,7 +82,7 @@ impl DecoderSource {
 
         // Create a ring-buffer for the decoded samples.  Worker thread is producing,
         // we are consuming in the `AudioSource` impl.
-        let buffer = DecoderWorker::default_buffer();
+        let buffer = DecodedFileWorker::default_buffer();
         let consumer = buffer.consumer();
 
         // We keep track of the current play-head position by sharing an atomic sample
@@ -97,12 +97,12 @@ impl DecoderSource {
 
         // Spawn the worker and kick-start the decoding.  The buffer will start filling
         // now.
-        let actor = DecoderWorker::spawn_with_default_cap("audio_decoding", {
+        let actor = DecodedFileWorker::spawn_with_default_cap("audio_decoding", {
             let position = Arc::clone(&position);
             let total_samples = Arc::clone(&total_samples);
-            move |this| DecoderWorker::new(this, decoder, buffer, position, total_samples)
+            move |this| DecodedFileWorker::new(this, decoder, buffer, position, total_samples)
         });
-        actor.send(DecoderWorkerMsg::Read)?;
+        actor.send(DecodedFileMsg::Read)?;
 
         static FILE_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
@@ -122,11 +122,11 @@ impl DecoderSource {
         })
     }
 
-    pub(crate) fn worker_msg_sender(&self) -> Sender<DecoderWorkerMsg> {
+    pub(crate) fn worker_msg_sender(&self) -> Sender<DecodedFileMsg> {
         self.actor.sender()
     }
 
-    pub fn file_id(&self) -> DecoderFileId {
+    pub fn file_id(&self) -> DecodedFileId {
         self.file_id
     }
 
@@ -145,7 +145,7 @@ impl DecoderSource {
     }
 }
 
-impl AudioSource for DecoderSource {
+impl AudioSource for DecodedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         if self.end_of_track {
             return 0;
@@ -159,7 +159,7 @@ impl AudioSource for DecoderSource {
                 // Send a position report, so the upper layers can visualize the playback
                 // progress and preload the next track.  We cannot block here, so if the channel
                 // is full, we just try the next time instead of waiting.
-                if let Err(err) = event_send.try_send(DecoderPlaybackEvent::Position {
+                if let Err(err) = event_send.try_send(DecodedFilePlaybackStatusMsg::Position {
                     file_id: self.file_id,
                     file_path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
@@ -174,7 +174,7 @@ impl AudioSource for DecoderSource {
             // After reading the total number of samples, we stop. Signal to the upper layer
             // this track is over and short-circuit all further reads from this source.
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.try_send(DecoderPlaybackEvent::EndOfFile {
+                if let Err(err) = event_send.try_send(DecodedFilePlaybackStatusMsg::EndOfFile {
                     file_id: self.file_id,
                     file_path: self.file_path.clone(),
                 }) {
@@ -196,15 +196,15 @@ impl AudioSource for DecoderSource {
     }
 }
 
-impl Drop for DecoderSource {
+impl Drop for DecodedFileSource {
     fn drop(&mut self) {
-        let _ = self.actor.send(DecoderWorkerMsg::Stop);
+        let _ = self.actor.send(DecodedFileMsg::Stop);
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-pub enum DecoderWorkerMsg {
+pub enum DecodedFileMsg {
     Seek(Duration),
     Read,
     Stop,
@@ -212,9 +212,9 @@ pub enum DecoderWorkerMsg {
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct DecoderWorker {
+pub struct DecodedFileWorker {
     /// Sending part of our own actor channel.
-    this: Sender<DecoderWorkerMsg>,
+    this: Sender<DecodedFileMsg>,
     /// Decoder we are reading packets/samples from.
     input: AudioDecoder,
     /// Audio properties of the decoded signal.
@@ -237,7 +237,7 @@ pub struct DecoderWorker {
     is_reading: bool,
 }
 
-impl DecoderWorker {
+impl DecodedFileWorker {
     fn default_buffer() -> SpscRb<f32> {
         const DEFAULT_BUFFER_SIZE: usize = 128 * 1024;
 
@@ -245,7 +245,7 @@ impl DecoderWorker {
     }
 
     fn new(
-        this: Sender<DecoderWorkerMsg>,
+        this: Sender<DecodedFileMsg>,
         input: AudioDecoder,
         output: SpscRb<f32>,
         position: Arc<AtomicU64>,
@@ -282,27 +282,27 @@ impl DecoderWorker {
     }
 }
 
-impl Actor for DecoderWorker {
-    type Message = DecoderWorkerMsg;
+impl Actor for DecodedFileWorker {
+    type Message = DecodedFileMsg;
     type Error = Error;
 
-    fn handle(&mut self, msg: DecoderWorkerMsg) -> Result<Act<Self>, Self::Error> {
+    fn handle(&mut self, msg: DecodedFileMsg) -> Result<Act<Self>, Self::Error> {
         match msg {
-            DecoderWorkerMsg::Seek(time) => self.on_seek(time),
-            DecoderWorkerMsg::Read => self.on_read(),
-            DecoderWorkerMsg::Stop => Ok(Act::Shutdown),
+            DecodedFileMsg::Seek(time) => self.on_seek(time),
+            DecodedFileMsg::Read => self.on_read(),
+            DecodedFileMsg::Stop => Ok(Act::Shutdown),
         }
     }
 }
 
-impl DecoderWorker {
+impl DecodedFileWorker {
     fn on_seek(&mut self, time: Duration) -> Result<Act<Self>, Error> {
         match self.input.seek(time) {
             Ok(timestamp) => {
                 if self.is_reading {
                     self.samples_to_write = 0..0;
                 } else {
-                    self.this.send(DecoderWorkerMsg::Read)?;
+                    self.this.send(DecodedFileMsg::Read)?;
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
@@ -323,7 +323,7 @@ impl DecoderWorker {
                 self.samples_written += written as u64;
                 self.samples_to_write.start += written;
                 self.is_reading = true;
-                self.this.send(DecoderWorkerMsg::Read)?;
+                self.this.send(DecodedFileMsg::Read)?;
                 Ok(Act::Continue)
             } else {
                 // Buffer is full.  Wait a bit a try again.  We also have to indicate that the
@@ -332,7 +332,7 @@ impl DecoderWorker {
                 self.is_reading = false;
                 Ok(Act::WaitOr {
                     timeout: Duration::from_millis(500),
-                    timeout_msg: DecoderWorkerMsg::Read,
+                    timeout_msg: DecodedFileMsg::Read,
                 })
             }
         } else {
@@ -340,7 +340,7 @@ impl DecoderWorker {
                 Some(_) => {
                     self.samples_to_write = 0..self.input_packet.samples().len();
                     self.is_reading = true;
-                    self.this.send(DecoderWorkerMsg::Read)?;
+                    self.this.send(DecodedFileMsg::Read)?;
                 }
                 None => {
                     self.is_reading = false;
