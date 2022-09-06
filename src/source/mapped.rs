@@ -38,37 +38,48 @@ impl AudioSource for ChannelMappedSource {
             1 => {
                 match self.output_channels {
                     1 => {
+                        let mut written = 0_usize;
                         for (i, o) in input_frames.zip(output_frames) {
                             o[0] = i[0];
+                            written += 1;
                         }
+                        written
                     }
-                    _ => {
+                    c => {
+                        let mut written = 0_usize;
                         for (i, o) in input_frames.zip(output_frames) {
                             o[0] = i[0];
                             o[1] = i[0];
                             // Assume the rest is is implicitly silence.
+                            written += c;
                         }
+                        written
                     }
                 }
             }
             _ => {
                 match self.output_channels {
                     1 => {
+                        let mut written = 0_usize;
                         for (i, o) in input_frames.zip(output_frames) {
                             o[0] = i[0];
+                            written += 1;
                         }
+                        written
                     }
-                    _ => {
+                    c => {
+                        let mut written = 0_usize;
                         for (i, o) in input_frames.zip(output_frames) {
                             o[0] = i[0];
                             o[1] = i[1];
                             // Assume the rest is is implicitly silence.
+                            written += c;
                         }
+                        written
                     }
                 }
             }
         }
-        output.len()
     }
 
     fn channel_count(&self) -> usize {
