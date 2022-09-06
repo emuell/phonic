@@ -41,7 +41,7 @@ pub enum FilePlaybackMsg {
 /// A source which decodes an audio file
 pub trait FileSource: AudioSource + Sized {
     /// Create a new file source with an optional FilePlaybackStatusMsg channel sender
-    /// to retrieve playback status events, while the source ius running
+    /// to retrieve playback status events, while the source is running
     fn new(
         file_path: String,
         status_sender: Option<Sender<FilePlaybackStatusMsg>>,

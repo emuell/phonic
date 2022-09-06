@@ -59,7 +59,7 @@ impl FileSource for PreloadedFileSource {
         let buffer_capacity = if let Some(total_samples) = decoded_file.total_samples() {
             total_samples as usize
         } else {
-            16 * 1024 as usize
+            16 * 1024_usize
         };
         // create worker channel
         let (worker_send, worker_recv) = unbounded::<FilePlaybackMsg>();
@@ -70,12 +70,10 @@ impl FileSource for PreloadedFileSource {
             let written = decoded_file.write(&mut temp_buffer[..]);
             if written > 0 {
                 buffer.append(&mut temp_buffer[..written].to_vec());
+            } else if decoded_file.end_of_track() {
+                break;
             } else {
-                if decoded_file.end_of_track() {
-                    break;
-                } else {
-                    thread::sleep(Duration::from_millis(1));
-                }
+                thread::sleep(Duration::from_millis(1));
             }
         }
         Ok(Self {
@@ -111,7 +109,7 @@ impl FileSource for PreloadedFileSource {
     }
 
     fn end_of_track(&self) -> bool {
-        return self.end_of_track;
+        self.end_of_track
     }
 }
 
