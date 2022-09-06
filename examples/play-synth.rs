@@ -34,9 +34,8 @@ fn main() -> Result<(), String> {
                 .take(duration as usize)
                 .zip(0..duration)
                 .map(move |(s, index)| {
-                    let sample = s.to_sample::<f32>() * 0.2;
-                    let env: f32 = (1.0 - (index as f32) / (duration as f32)).powf(2.0);
-                    (sample * env).to_float_frame()
+                    let env: f64 = (1.0 - (index as f64) / (duration as f64)).powf(2.0);
+                    (s * env).to_float_frame()
                 }),
         )
     };

@@ -1,7 +1,5 @@
-use std::sync::atomic::AtomicUsize;
-
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use dasp::{signal::UntilExhausted, Signal};
+use std::sync::atomic::AtomicUsize;
 
 use super::{AudioSource, SynthId, SynthPlaybackMsg, SynthPlaybackStatusMsg, SynthSource};
 
@@ -10,9 +8,9 @@ use super::{AudioSource, SynthId, SynthPlaybackMsg, SynthPlaybackStatusMsg, Synt
 /// A synth source which runs a dasp Signal until it is exhausted
 pub struct DaspSynthSource<SignalType>
 where
-    SignalType: Signal<Frame = f32>,
+    SignalType: dasp::Signal<Frame = f64>,
 {
-    signal: UntilExhausted<SignalType>,
+    signal: dasp::signal::UntilExhausted<SignalType>,
     sample_rate: u32,
     send: Sender<SynthPlaybackMsg>,
     recv: Receiver<SynthPlaybackMsg>,
@@ -23,7 +21,7 @@ where
 
 impl<SignalType> DaspSynthSource<SignalType>
 where
-    SignalType: Signal<Frame = f32>,
+    SignalType: dasp::Signal<Frame = f64>,
 {
     pub fn new(
         signal: SignalType,
@@ -47,7 +45,7 @@ where
 
 impl<SignalType> SynthSource for DaspSynthSource<SignalType>
 where
-    SignalType: Signal<Frame = f32> + Send + 'static,
+    SignalType: dasp::Signal<Frame = f64> + Send + 'static,
 {
     /// Channel to control playback
     fn sender(&self) -> Sender<SynthPlaybackMsg> {
@@ -62,7 +60,7 @@ where
 
 impl<SignalType> AudioSource for DaspSynthSource<SignalType>
 where
-    SignalType: Signal<Frame = f32> + Send + 'static,
+    SignalType: dasp::Signal<Frame = f64> + Send + 'static,
 {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // receive playback events
@@ -81,7 +79,7 @@ where
         // run signal on output until exhausted
         let mut written = 0;
         for (o, i) in output.iter_mut().zip(&mut self.signal) {
-            *o = i;
+            *o = i as f32;
             written += 1;
         }
         if written == 0 && !self.is_exhausted {
