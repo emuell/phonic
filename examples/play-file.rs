@@ -11,16 +11,16 @@ fn main() -> Result<(), String> {
 
     // create channel for playback status events
     let (event_sx, event_rx) = crossbeam_channel::unbounded();
-    let mut player = AudioFilePlayer::new(audio_sink, event_sx);
+    let mut player = AudioFilePlayer::new(audio_sink, Some(event_sx), None);
 
     // create sound sources and memorize file ids for the playback status
-    let mut file_ids = vec![
+    let mut playing_file_ids = vec![
         player
-            // this file is going to be streamed on the fly
+            // this file is going to be entirely decoded first, then played back
             .play_preloaded_file("assets/altijd synth bit.wav".to_string())
             .map_err(|err| err.to_string())?,
         player
-            // this file is going to be entirely decoded first, then played back
+            // this file is going to be streamed on the fly
             .play_streamed_file("assets/BSQ_M14.wav".to_string())
             .map_err(|err| err.to_string())?,
     ];
@@ -49,8 +49,8 @@ fn main() -> Result<(), String> {
                     file_path: path,
                 } => {
                     println!("Playback of #{} '{}' finished", file_id, path);
-                    file_ids.retain(|v| *v != file_id);
-                    if file_ids.is_empty() {
+                    playing_file_ids.retain(|v| *v != file_id);
+                    if playing_file_ids.is_empty() {
                         // stop thread when all files finished
                         break;
                     }

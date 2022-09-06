@@ -4,6 +4,7 @@ pub mod file;
 pub mod mapped;
 pub mod mixed;
 pub mod resampled;
+pub mod synth;
 
 use self::{converted::ConvertedSource, mapped::ChannelMappedSource, resampled::ResampledSource};
 use crate::utils::resampler::ResamplingQuality;

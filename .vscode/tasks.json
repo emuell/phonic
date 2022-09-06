@@ -4,7 +4,7 @@
 		{
 			"type": "cargo",
 			"command": "build",
-			"args": ["--example", "*"],
+			"args": ["--features", "dasp", "--example", "*"],
 			"problemMatcher": [
 				"$rustc"
 			],

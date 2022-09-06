@@ -21,7 +21,25 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "rust: cargo build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'play-synth'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-synth",
+          "--features=dasp",
+          "--package=afstream"
+        ],
+        "filter": {
+          "name": "play-synth",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
     }
   ]
 }
