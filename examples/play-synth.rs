@@ -1,4 +1,4 @@
-use dasp::{signal, Frame, Sample, Signal};
+use dasp::{signal, Frame, Signal};
 
 use afplay::{
     synth::SynthPlaybackStatusMsg,
