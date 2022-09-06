@@ -1,9 +1,8 @@
 use dasp::{signal, Frame, Sample, Signal};
 
-use afstream::{
-    output::{AudioOutput, AudioSink, DefaultAudioOutput},
-    player::AudioFilePlayer,
-    source::synth::SynthPlaybackStatusMsg,
+use afplay::{
+    synth::SynthPlaybackStatusMsg,
+    AudioFilePlayer, {AudioOutput, AudioSink, DefaultAudioOutput},
 };
 
 fn main() -> Result<(), String> {

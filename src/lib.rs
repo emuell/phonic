@@ -1,5 +1,10 @@
-pub mod error;
-pub mod output;
-pub mod player;
-pub mod source;
+mod error;
+mod output;
+mod player;
+mod source;
 mod utils;
+
+pub use error::Error;
+pub use output::{AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
+pub use player::AudioFilePlayer;
+pub use source::*;

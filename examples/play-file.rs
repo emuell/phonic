@@ -1,7 +1,6 @@
-use afstream::{
-    output::{AudioOutput, DefaultAudioOutput},
-    player::AudioFilePlayer,
-    source::file::FilePlaybackStatusMsg,
+use afplay::{
+    file::FilePlaybackStatusMsg,
+    AudioFilePlayer, {AudioOutput, DefaultAudioOutput},
 };
 
 fn main() -> Result<(), String> {

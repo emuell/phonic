@@ -12,7 +12,7 @@
         "args": [
           "build",
           "--example=play-file",
-          "--package=afstream"
+          "--package=afplay"
         ],
         "filter": {
           "name": "play-file",
@@ -31,7 +31,7 @@
           "build",
           "--example=play-synth",
           "--features=dasp",
-          "--package=afstream"
+          "--package=afplay"
         ],
         "filter": {
           "name": "play-synth",

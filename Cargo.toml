@@ -1,13 +1,13 @@
 [package]
-name = "afstream"
+name = "afplay"
 version = "0.1.0"
 edition = "2018"
-authors = ["emuell"]
+description = "A cross-platform audio playback library"
+authors = ["Eduard Müller <mail@emuell.net>"]
 exclude = ["assets", "examples"]
-categories = ["audio", "playback"]
+categories = ["audio", "playback", "games", "sounds"]
 
 [dependencies]
-string-error = "^0.1"
 log = { version = "^0.4", features = ["max_level_debug", "release_max_level_info"] }
 crossbeam-channel = { version = "0.5" }
 crossbeam-queue = { version = "0.3.6" }
@@ -28,6 +28,5 @@ default = ["cpal", "dasp"]
 [[example]]
 name = "play-synth"
 required-features = ["dasp"]
-
 [[example]]
 name = "play-file"
