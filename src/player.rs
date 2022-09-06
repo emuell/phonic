@@ -60,8 +60,15 @@ impl AudioFilePlayer {
     }
 
     /// Stop audio playback. This will only pause and thus not drop any playing sources.
+    /// See also \function stop_all_sources
     pub fn stop(&self) {
         self.sink.pause()
+    }
+
+    pub fn stop_all_sources(&self) -> Result<(), Error> {
+        self.stop_all_files()?;
+        self.stop_all_synths()?;
+        Ok(())
     }
 
     pub fn play_streamed_file(&mut self, file_path: String) -> Result<FileId, Error> {
@@ -117,10 +124,17 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
+    pub fn stop_all_files(&self) -> Result<(), Error> {
+        for file_id in self.playing_files.keys() {
+            self.stop_file(*file_id)?;
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "dasp")]
     pub fn play_dasp_synth<SignalType>(&mut self, signal: SignalType) -> Result<SynthId, Error>
     where
-        SignalType: Signal<Frame = f32> + Send + 'static,
+        SignalType: Signal<Frame = f64> + Send + 'static,
     {
         // create new source and subscribe to playback envets
         let source = DaspSynthSource::new(
@@ -160,5 +174,12 @@ impl AudioFilePlayer {
             return Ok(());
         }
         Err(Error::MediaFileNotFound)
+    }
+
+    pub fn stop_all_synths(&self) -> Result<(), Error> {
+        for synth_id in self.playing_synths.keys() {
+            self.stop_synth(*synth_id)?;
+        }
+        Ok(())
     }
 }
