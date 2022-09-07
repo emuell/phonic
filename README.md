@@ -22,7 +22,7 @@ See [example directory](./examples) for some more working examples.
 
 ```rust
 use dasp::{Frame, Signal};
-use afstream::{file::FilePlaybackStatusMsg, synth::SynthPlaybackStatusMsg, *};
+use afplay::{file::FilePlaybackStatusMsg, synth::SynthPlaybackStatusMsg, *};
 
 // Open default device (cpal or cubeb, whatever is enabled as audio output feature)
 let audio_output = DefaultAudioOutput::open()?;
