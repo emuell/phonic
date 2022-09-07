@@ -40,10 +40,11 @@ impl AudioFilePlayer {
         file_event_send: Option<Sender<FilePlaybackStatusMsg>>,
         synth_event_send: Option<Sender<SynthPlaybackStatusMsg>>,
     ) -> Self {
-        // Create a mixer source and add it to the audio sink
+        // Create a mixer source, add it to the audio sink and start running
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
         let mixer_event_sender = mixer_source.event_sender();
         sink.play(mixer_source);
+        sink.resume();
         Self {
             sink,
             playing_files: HashMap::new(),
@@ -59,8 +60,8 @@ impl AudioFilePlayer {
         self.sink.resume()
     }
 
-    /// Stop audio playback. This will only pause and thus not drop any playing sources.
-    /// See also \function stop_all_sources
+    /// Stop audio playback. This will only pause and thus not drop any playing sources. Use the
+    /// [`start`] function to start it again. Use function [`stop_all_sources`] to drop all sources.
     pub fn stop(&self) {
         self.sink.pause()
     }

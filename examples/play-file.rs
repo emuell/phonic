@@ -12,6 +12,9 @@ fn main() -> Result<(), String> {
     let (event_sx, event_rx) = crossbeam_channel::unbounded();
     let mut player = AudioFilePlayer::new(audio_sink, Some(event_sx), None);
 
+    // pause playing until we've added all sources
+    player.stop();
+
     // create sound sources and memorize file ids for the playback status
     let mut playing_file_ids = vec![
         player

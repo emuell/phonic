@@ -82,9 +82,6 @@ fn main() -> Result<(), String> {
         }
     });
 
-    // start playing
-    player.start();
-
     // wait until playback finished
     event_thread.join().unwrap();
 

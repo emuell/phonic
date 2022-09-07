@@ -50,9 +50,6 @@ let some_large_file_id = player.play_streamed_file(
 let some_dasp_signal = dasp::signal::rate(audio_sample_rate as f64).const_hz(440.0).sine();
 let some_synth_id = player.play_dasp_synth(some_dasp_signal)?;
 
-// Start the playback of all played sources - it was initially paused:
-player.start();
-
 // Somewhere in your code, likely in a background thread, handle playback status events from the player:
 std::thread::spawn(move || loop {
     crossbeam_channel::select! {
