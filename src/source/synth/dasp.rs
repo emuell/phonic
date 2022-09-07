@@ -64,16 +64,15 @@ where
 {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // receive playback events
-        let mut send_exhausted_event = false;
+        let mut keep_playing = true;
         if let Ok(msg) = self.recv.try_recv() {
             match msg {
                 SynthPlaybackMsg::Stop => {
-                    self.is_exhausted = true;
-                    send_exhausted_event = true;
+                    keep_playing = false;
                 }
             }
         }
-        if !send_exhausted_event && self.is_exhausted {
+        if self.is_exhausted {
             return 0;
         }
         // run signal on output until exhausted
@@ -84,13 +83,13 @@ where
         }
         if written == 0 && !self.is_exhausted {
             self.is_exhausted = true;
-            send_exhausted_event = true;
         }
         // send status messages
-        if send_exhausted_event {
+        if self.is_exhausted || !keep_playing {
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.send(SynthPlaybackStatusMsg::Exhausted {
+                if let Err(err) = event_send.send(SynthPlaybackStatusMsg::Stopped {
                     synth_id: self.synth_id,
+                    exhausted: keep_playing,
                 }) {
                     log::warn!("failed to send synth playback status event: {}", err);
                 }

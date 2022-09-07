@@ -13,7 +13,7 @@ pub type SynthId = usize;
 
 /// Events send back from synth to user
 pub enum SynthPlaybackStatusMsg {
-    Exhausted { synth_id: SynthId },
+    Stopped { synth_id: SynthId, exhausted: bool },
 }
 
 // -------------------------------------------------------------------------------------------------

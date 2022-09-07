@@ -1,7 +1,7 @@
 use std::{
     ops::Range,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -36,6 +36,7 @@ pub struct StreamedFileSource {
     signal_spec: SignalSpec,
     time_base: TimeBase,
     total_samples: Arc<AtomicU64>,
+    is_running: Arc<AtomicBool>,
     report_precision: u64,
     reported_pos: Option<u64>,
     position: Arc<AtomicU64>,
@@ -105,12 +106,17 @@ impl FileSource for StreamedFileSource {
         // the underlying decoder returns EOF.
         let total_samples = Arc::new(AtomicU64::new(u64::MAX));
 
-        // Spawn the worker and kick-start the decoding.  The buffer will start filling
-        // now.
+        // Create a shared is_running flag
+        let is_running = Arc::new(AtomicBool::new(true));
+
+        // Spawn the worker and kick-start the decoding. The buffer will start filling now.
         let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
             let position = Arc::clone(&position);
             let total_samples = Arc::clone(&total_samples);
-            move |this| StreamedFileWorker::new(this, decoder, buffer, position, total_samples)
+            let is_running = Arc::clone(&is_running);
+            move |this| {
+                StreamedFileWorker::new(this, decoder, buffer, position, total_samples, is_running)
+            }
         });
         actor.send(FilePlaybackMsg::Read)?;
 
@@ -125,6 +131,7 @@ impl FileSource for StreamedFileSource {
             signal_spec,
             time_base,
             total_samples,
+            is_running,
             position,
             end_of_track,
             report_precision,
@@ -179,13 +186,14 @@ impl AudioSource for StreamedFileSource {
         }
 
         let total_samples = self.total_samples.load(Ordering::Relaxed);
-        if position >= total_samples {
-            // After reading the total number of samples, we stop. Signal to the upper layer
-            // this track is over and short-circuit all further reads from this source.
+        let is_running = self.is_running.load(Ordering::Relaxed);
+        if position >= total_samples || !is_running {
+            // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::EndOfFile {
+                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Stopped {
                     file_id: self.file_id,
                     file_path: self.file_path.clone(),
+                    end_of_file: position >= total_samples,
                 }) {
                     log::warn!("failed to send playback event: {}", err)
                 }
@@ -211,9 +219,8 @@ impl AudioSource for StreamedFileSource {
 
 impl Drop for StreamedFileSource {
     fn drop(&mut self) {
-        if let Err(err) = self.actor.send(FilePlaybackMsg::Stop) {
-            log::warn!("failed to send playback event in drain: {}", err)
-        }
+        // ignore error: channel maybe already is disconnected
+        let _ = self.actor.send(FilePlaybackMsg::Stop);
     }
 }
 
@@ -240,6 +247,8 @@ pub struct StreamedFileWorker {
     samples_to_write: Range<usize>,
     /// Number of samples written into the output channel.
     samples_written: u64,
+    /// Is the worker thread running?
+    is_running: Arc<AtomicBool>,
     /// Are we in the middle of automatic read loop?
     is_reading: bool,
 }
@@ -247,7 +256,6 @@ pub struct StreamedFileWorker {
 impl StreamedFileWorker {
     fn default_buffer() -> SpscRb<f32> {
         const DEFAULT_BUFFER_SIZE: usize = 128 * 1024;
-
         SpscRb::new(DEFAULT_BUFFER_SIZE)
     }
 
@@ -257,6 +265,7 @@ impl StreamedFileWorker {
         output: SpscRb<f32>,
         position: Arc<AtomicU64>,
         total_samples: Arc<AtomicU64>,
+        is_running: Arc<AtomicBool>,
     ) -> Self {
         const DEFAULT_MAX_FRAMES: u64 = 8 * 1024;
 
@@ -265,13 +274,17 @@ impl StreamedFileWorker {
             .max_frames_per_packet
             .unwrap_or(DEFAULT_MAX_FRAMES);
 
-        // Promote the worker thread to audio priority to prevent buffer under-runs on
-        // high CPU usage.
+        // Promote the worker thread to audio priority to prevent buffer under-runs on high CPU usage.
         if let Err(err) =
             audio_thread_priority::promote_current_thread_to_real_time(0, input.signal_spec().rate)
         {
-            log::warn!("failed to promote thread to audio priority: {}", err);
+            log::warn!(
+                "failed to set file worker thread's priority to real-time: {}",
+                err
+            );
         }
+
+        let is_reading = false;
 
         Self {
             output_producer: output.producer(),
@@ -284,7 +297,8 @@ impl StreamedFileWorker {
             total_samples,
             samples_written: 0,
             samples_to_write: 0..0, // Arbitrary empty range.
-            is_reading: false,
+            is_running,
+            is_reading,
         }
     }
 }
@@ -297,12 +311,18 @@ impl Actor for StreamedFileWorker {
         match msg {
             FilePlaybackMsg::Seek(time) => self.on_seek(time),
             FilePlaybackMsg::Read => self.on_read(),
-            FilePlaybackMsg::Stop => Ok(Act::Shutdown),
+            FilePlaybackMsg::Stop => self.on_stop(),
         }
     }
 }
 
 impl StreamedFileWorker {
+    fn on_stop(&mut self) -> Result<Act<Self>, Error> {
+        self.is_reading = false;
+        self.is_running.store(false, Ordering::Relaxed);
+        Ok(Act::Shutdown)
+    }
+
     fn on_seek(&mut self, time: Duration) -> Result<Act<Self>, Error> {
         match self.input.seek(time) {
             Ok(timestamp) => {

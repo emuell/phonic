@@ -66,8 +66,15 @@ fn main() -> Result<(), String> {
     let event_thread = std::thread::spawn(move || loop {
         match event_rx.recv() {
             Ok(event) => match event {
-                SynthPlaybackStatusMsg::Exhausted { synth_id } => {
-                    println!("Playback of synth #{} finished", synth_id);
+                SynthPlaybackStatusMsg::Stopped {
+                    synth_id,
+                    exhausted,
+                } => {
+                    if exhausted {
+                        println!("Playback of synth #{} finished playback", synth_id);
+                    } else {
+                        println!("Playback of synth #{} stopped", synth_id);
+                    }
                     playing_synth_ids.retain(|v| *v != synth_id);
                     if playing_synth_ids.is_empty() {
                         // stop thread when all synths finished

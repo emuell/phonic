@@ -46,11 +46,16 @@ fn main() -> Result<(), String> {
                         position.as_secs_f32()
                     );
                 }
-                FilePlaybackStatusMsg::EndOfFile {
+                FilePlaybackStatusMsg::Stopped {
                     file_id,
-                    file_path: path,
+                    file_path,
+                    end_of_file,
                 } => {
-                    println!("Playback of #{} '{}' finished", file_id, path);
+                    if end_of_file {
+                        println!("Playback of #{} '{}' finished playback", file_id, file_path);
+                    } else {
+                        println!("Playback of #{} '{}' was stopped", file_id, file_path);
+                    }
                     playing_file_ids.retain(|v| *v != file_id);
                     if playing_file_ids.is_empty() {
                         // stop thread when all files finished

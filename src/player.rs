@@ -109,6 +109,8 @@ impl AudioFilePlayer {
                 log::warn!("failed to send seek command to file: {}", err.to_string());
             }
             return Ok(());
+        } else {
+            log::warn!("trying to seek file #{file_id} which is not or no longer playing");
         }
         Err(Error::MediaFileNotFound)
     }
@@ -120,6 +122,8 @@ impl AudioFilePlayer {
             }
             self.playing_files.remove(&file_id);
             return Ok(());
+        } else {
+            log::warn!("trying to stop file #{file_id} which is not or no longer playing");
         }
         Err(Error::MediaFileNotFound)
     }
@@ -173,6 +177,8 @@ impl AudioFilePlayer {
             }
             self.playing_synths.remove(&synth_id);
             return Ok(());
+        } else {
+            log::warn!("trying to stop synth #{synth_id} which is not or no longer playing");
         }
         Err(Error::MediaFileNotFound)
     }

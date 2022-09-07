@@ -116,6 +116,7 @@ impl FileSource for PreloadedFileSource {
 impl AudioSource for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // consume worked messages
+        let mut keep_running = true;
         while let Ok(msg) = self.worker_recv.try_recv() {
             match msg {
                 FilePlaybackMsg::Seek(position) => {
@@ -125,7 +126,7 @@ impl AudioSource for PreloadedFileSource {
                     self.buffer_pos = (buffer_pos as u64).clamp(0, self.buffer.len() as u64);
                 }
                 FilePlaybackMsg::Read => (),
-                FilePlaybackMsg::Stop => self.buffer_pos = self.buffer.len() as u64,
+                FilePlaybackMsg::Stop => keep_running = false,
             }
         }
         // quickly bail out when we finished playing
@@ -153,12 +154,13 @@ impl AudioSource for PreloadedFileSource {
                 }
             }
         }
-        if self.buffer_pos >= self.buffer.len() as u64 {
+        if self.buffer_pos >= self.buffer.len() as u64 || !keep_running {
             self.end_of_track = true;
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::EndOfFile {
+                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Stopped {
                     file_id: self.file_id,
                     file_path: self.file_path.clone(),
+                    end_of_file: self.buffer_pos >= self.buffer.len() as u64,
                 }) {
                     log::warn!("Failed to send playback event: {}", err)
                 }

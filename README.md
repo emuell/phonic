@@ -60,8 +60,13 @@ std::thread::spawn(move || loop {
                         println!("Playback pos of file #{} '{}': {}", 
                             file_id, file_path, position.as_secs_f32());
                     },
-                    FilePlaybackStatusMsg::EndOfFile { file_id, file_path } => {
-                        println!("Playback of #{} '{}' finished", file_id, file_path);
+                    FilePlaybackStatusMsg::Stopped { file_id, file_path, end_of_file } => {
+                        if end_of_file {
+                            println!("Playback of #{} '{}' finished playback", file_id, file_path);
+
+                        } else {
+                            println!("Playback of #{} '{}' was stopped", file_id, file_path);
+                        }
                     }
                 }
             }
@@ -69,8 +74,12 @@ std::thread::spawn(move || loop {
         recv(synth_event_rx) -> msg => {
             if let Ok(synth_event) = msg {
                 match synth_event {
-                    SynthPlaybackStatusMsg::Exhausted { synth_id } => {
-                        println!("Playback of synth #{} finished", synth_id);
+                    SynthPlaybackStatusMsg::Stopped { synth_id, exhausted } => {
+                        if exhausted {
+                            println!("Playback of synth #{} finished playback", synth_id);
+                        } else {
+                            println!("Playback of synth #{} was stopped", synth_id);
+                        }
                     }
                 }
             }

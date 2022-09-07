@@ -21,9 +21,10 @@ pub enum FilePlaybackStatusMsg {
         file_path: String,
         position: Duration,
     },
-    EndOfFile {
+    Stopped {
         file_id: FileId,
         file_path: String,
+        end_of_file: bool,
     },
 }
 
