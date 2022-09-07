@@ -65,7 +65,7 @@ impl AudioFilePlayer {
         self.sink.pause()
     }
 
-    pub fn stop_all_sources(&self) -> Result<(), Error> {
+    pub fn stop_all_sources(&mut self) -> Result<(), Error> {
         self.stop_all_files()?;
         self.stop_all_synths()?;
         Ok(())
@@ -102,31 +102,31 @@ impl AudioFilePlayer {
         Ok(source_file_id)
     }
 
-    pub fn seek_file(&self, file_id: FileId, position: Duration) -> Result<(), Error> {
+    pub fn seek_file(&mut self, file_id: FileId, position: Duration) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
             if let Err(err) = worker.send(FilePlaybackMsg::Seek(position)) {
-                log::error!("failed to send seek command to file: {}", err.to_string());
-                return Err(Error::SendError);
+                log::warn!("failed to send seek command to file: {}", err.to_string());
             }
             return Ok(());
         }
         Err(Error::MediaFileNotFound)
     }
 
-    pub fn stop_file(&self, file_id: FileId) -> Result<(), Error> {
+    pub fn stop_file(&mut self, file_id: FileId) -> Result<(), Error> {
         if let Some(worker) = self.playing_files.get(&file_id) {
             if let Err(err) = worker.send(FilePlaybackMsg::Stop) {
-                log::error!("failed to send stop command to file: {}", err.to_string());
-                return Err(Error::SendError);
+                log::warn!("failed to send stop command to file: {}", err.to_string());
             }
+            self.playing_files.remove(&file_id);
             return Ok(());
         }
         Err(Error::MediaFileNotFound)
     }
 
-    pub fn stop_all_files(&self) -> Result<(), Error> {
-        for file_id in self.playing_files.keys() {
-            self.stop_file(*file_id)?;
+    pub fn stop_all_files(&mut self) -> Result<(), Error> {
+        let file_ids: Vec<FileId> = self.playing_files.keys().map(|x| *x).collect();
+        for file_id in file_ids {
+            self.stop_file(file_id)?;
         }
         Ok(())
     }
@@ -165,20 +165,21 @@ impl AudioFilePlayer {
         Ok(source_synth_id)
     }
 
-    pub fn stop_synth(&self, synth_id: SynthId) -> Result<(), Error> {
+    pub fn stop_synth(&mut self, synth_id: SynthId) -> Result<(), Error> {
         if let Some(worker) = self.playing_synths.get(&synth_id) {
             if let Err(err) = worker.send(SynthPlaybackMsg::Stop) {
-                log::error!("failed to send stop command to synth: {}", err.to_string());
-                return Err(Error::SendError);
+                log::warn!("failed to send stop command to synth: {}", err.to_string());
             }
+            self.playing_synths.remove(&synth_id);
             return Ok(());
         }
         Err(Error::MediaFileNotFound)
     }
 
-    pub fn stop_all_synths(&self) -> Result<(), Error> {
-        for synth_id in self.playing_synths.keys() {
-            self.stop_synth(*synth_id)?;
+    pub fn stop_all_synths(&mut self) -> Result<(), Error> {
+        let synth_ids: Vec<SynthId> = self.playing_synths.keys().map(|x| *x).collect();
+        for synth_id in synth_ids {
+            self.stop_synth(synth_id)?;
         }
         Ok(())
     }
