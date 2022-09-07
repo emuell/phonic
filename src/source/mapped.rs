@@ -89,4 +89,8 @@ impl AudioSource for ChannelMappedSource {
     fn sample_rate(&self) -> u32 {
         self.source.sample_rate()
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted()
+    }
 }

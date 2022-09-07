@@ -174,4 +174,8 @@ impl AudioSource for PreloadedFileSource {
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.end_of_track
+    }
 }

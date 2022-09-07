@@ -18,6 +18,8 @@ pub trait AudioSource: Send + 'static {
     fn channel_count(&self) -> usize;
     /// This source's output sample rate
     fn sample_rate(&self) -> u32;
+    /// returns if the source finished playback, so we don't need to write the source anymore.
+    fn is_exhausted(&self) -> bool;
 
     /// Shortcut for creating a new source from self with a remapped channel layout
     fn channel_mapped(self, output_channels: usize) -> ChannelMappedSource

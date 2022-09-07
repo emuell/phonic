@@ -106,4 +106,8 @@ where
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.is_exhausted
+    }
 }

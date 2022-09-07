@@ -84,6 +84,10 @@ impl AudioSource for ResampledSource {
     fn sample_rate(&self) -> u32 {
         self.resampler.spec.output_rate
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted() && self.inp.is_empty()
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

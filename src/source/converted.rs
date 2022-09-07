@@ -55,4 +55,8 @@ impl AudioSource for ConvertedSource {
     fn sample_rate(&self) -> u32 {
         self.converted.sample_rate()
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.converted.is_exhausted()
+    }
 }

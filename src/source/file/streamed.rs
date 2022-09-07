@@ -206,6 +206,10 @@ impl AudioSource for StreamedFileSource {
     fn sample_rate(&self) -> u32 {
         self.signal_spec.rate
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.end_of_track
+    }
 }
 
 impl Drop for StreamedFileSource {

@@ -17,4 +17,8 @@ impl AudioSource for EmptySource {
     fn sample_rate(&self) -> u32 {
         0
     }
+
+    fn is_exhausted(&self) -> bool {
+        true
+    }
 }

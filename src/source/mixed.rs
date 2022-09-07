@@ -102,8 +102,8 @@ impl AudioSource for MixedSource {
                 let remaining = output.len() - total_written;
                 let to_write = remaining.min(self.temp_out.len());
                 let written = source.write(&mut self.temp_out[..to_write]);
-                if written == 0 {
-                    // no longer playing: mark as inactive
+                if source.is_exhausted() {
+                    // source no longer is playing: mark it as inactive
                     playing_source.is_active = false;
                     break 'source;
                 }
@@ -129,5 +129,10 @@ impl AudioSource for MixedSource {
 
     fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    fn is_exhausted(&self) -> bool {
+        // mixer never is exhausted, as we may get new sources added
+        false
     }
 }
