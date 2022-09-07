@@ -75,7 +75,7 @@ pub trait Actor: Sized {
                 .spawn(move || {
                     factory(send).process(recv);
                 })
-                .unwrap(),
+                .expect("failed to spawn actor thread"),
         }
     }
 
