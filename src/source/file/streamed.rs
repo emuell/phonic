@@ -145,11 +145,8 @@ impl FileSource for StreamedFileSource {
     }
 
     fn total_frames(&self) -> Option<u64> {
-        if let Some(samples) = self.total_samples() {
-            Some(samples / self.channel_count() as u64)
-        } else {
-            None
-        }
+        self.total_samples()
+            .map(|samples| samples / self.channel_count() as u64)
     }
 
     fn end_of_track(&self) -> bool {

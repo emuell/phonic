@@ -118,8 +118,8 @@ impl AudioSink for CpalSink {
 
     fn play(&self, source: impl AudioSource) {
         // ensure source has our sample rate and channel layout
-        assert_eq!(source.channel_count(), self.channel_count.into());
-        assert_eq!(source.sample_rate(), self.sample_rate.0.into());
+        assert_eq!(source.channel_count(), self.channel_count());
+        assert_eq!(source.sample_rate(), self.sample_rate());
         // send message to activate it in the writer
         self.send_to_callback(CallbackMsg::PlaySource(Box::new(source)));
     }
