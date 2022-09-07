@@ -30,7 +30,7 @@
         "args": [
           "build",
           "--example=play-synth",
-          "--features=dasp",
+          "--features=dasp-synth",
           "--package=afplay"
         ],
         "filter": {

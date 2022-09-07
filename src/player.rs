@@ -150,6 +150,7 @@ impl AudioFilePlayer {
         self.play_synth(source)
     }
 
+    #[allow(dead_code)]
     fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<SynthId, Error> {
         let source_synth_id = source.synth_id();
         self.playing_synths.insert(source_synth_id, source.sender());
