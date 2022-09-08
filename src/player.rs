@@ -6,7 +6,9 @@ use std::{
 };
 
 use crate::{
+    converted::ConvertedSource,
     error::Error,
+    file::FilePlaybackOptions,
     output::{AudioSink, DefaultAudioSink},
     source::{
         file::{
@@ -18,26 +20,25 @@ use crate::{
         synth::{SynthPlaybackMessage, SynthSource},
     },
     utils::resampler::DEFAULT_RESAMPLING_QUALITY,
+    AudioSource,
 };
 
 #[cfg(feature = "dasp")]
 use dasp::Signal;
 
 #[cfg(feature = "dasp")]
-use crate::source::synth::dasp::DaspSynthSource;
+use crate::source::synth::{dasp::DaspSynthSource, SynthPlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
 
-enum PlaybackMsgSender {
+enum PlaybackMessageSender {
     File(Sender<FilePlaybackMessage>),
     Synth(Sender<SynthPlaybackMessage>),
 }
 
-// -------------------------------------------------------------------------------------------------
-
 pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
-    playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMsgSender>>>,
+    playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMessageSender>>>,
     playback_status_sender: Sender<PlaybackStatusEvent>,
     mixer_event_sender: Sender<MixedSourceMsg>,
 }
@@ -78,41 +79,70 @@ impl AudioFilePlayer {
         self.sink.pause()
     }
 
-    pub fn play_streamed_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
-        let source = StreamedFileSource::new(file_path, Some(self.playback_status_sender.clone()))?;
-        self.play_file(source)
+    /// Play a new file with default playback options. See [`play_file_with_options`] for more info
+    /// on which options can be applied.
+    pub fn play_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
+        self.play_file_with_options(file_path, FilePlaybackOptions::default())
     }
-
-    pub fn play_preloaded_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
-        let source =
-            PreloadedFileSource::new(file_path, Some(self.playback_status_sender.clone()))?;
-        self.play_file(source)
-    }
-
-    pub fn play_file<F: FileSource>(&mut self, source: F) -> Result<PlaybackId, Error> {
-        let source_file_id = source.playback_id();
-        // subscribe to playback envets
+    /// Play a new file with the given file path and options. See [`FilePlaybackOptions`] for more info
+    /// on which options can be applied.
+    ///
+    /// Newly played sources are always added to the final mix and won't stop other playing sources.
+    pub fn play_file_with_options(
+        &mut self,
+        file_path: &str,
+        options: FilePlaybackOptions,
+    ) -> Result<PlaybackId, Error> {
+        // create new preloaded or streamed source and convert it to our output specs
+        let source_playback_id: PlaybackId;
+        let playback_message_sender: Sender<FilePlaybackMessage>;
+        let source: ConvertedSource = if options.stream {
+            let streamed_source = StreamedFileSource::new(
+                file_path,
+                Some(self.playback_status_sender.clone()),
+                options.volume,
+            )?;
+            source_playback_id = streamed_source.playback_id();
+            playback_message_sender = streamed_source.playback_message_sender();
+            // convert file to mixer's rate and channel layout
+            streamed_source.converted(
+                self.sink.channel_count(),
+                self.sink.sample_rate(),
+                DEFAULT_RESAMPLING_QUALITY,
+            )
+        } else {
+            let preloaded_source = PreloadedFileSource::new(
+                file_path,
+                Some(self.playback_status_sender.clone()),
+                options.volume,
+            )?;
+            source_playback_id = preloaded_source.playback_id();
+            playback_message_sender = preloaded_source.playback_message_sender();
+            // convert file to mixer's rate and channel layout
+            preloaded_source.converted(
+                self.sink.channel_count(),
+                self.sink.sample_rate(),
+                DEFAULT_RESAMPLING_QUALITY,
+            )
+        };
+        // subscribe to playback envets in the newly created source
         self.playing_sources.lock().unwrap().insert(
-            source_file_id,
-            PlaybackMsgSender::File(source.playback_message_sender()),
+            source_playback_id,
+            PlaybackMessageSender::File(playback_message_sender),
         );
-        // convert file to mixer's rate and channel layout
-        let converted = source.converted(
-            self.sink.channel_count(),
-            self.sink.sample_rate(),
-            DEFAULT_RESAMPLING_QUALITY,
-        );
-        // play the source
+        // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
-            source: Box::new(converted),
+            source: Box::new(source),
         }) {
             log::error!("failed to send mixer event: {}", err);
             return Err(Error::SendError);
         }
-        // return new file's id
-        Ok(source_file_id)
+        // return new file's id on success
+        Ok(source_playback_id)
     }
 
+    /// Play a mono f64 dasp signal with default playback options. See [`play_dasp_synth_with_options`]
+    /// for more info.
     #[cfg(feature = "dasp")]
     pub fn play_dasp_synth<SignalType>(
         &mut self,
@@ -122,10 +152,37 @@ impl AudioFilePlayer {
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
+        self.play_dasp_synth_with_options(signal, signal_name, SynthPlaybackOptions::default())
+    }
+    /// Play a mono dasp signal with the given options. See [`SynthPlaybackOptions`] for more info
+    /// about available options.
+    ///
+    /// The signal will be wrapped into a dasp::signal::UntilExhausted so it can be used to play
+    /// create one-shots.
+    ///
+    /// Example one-shot signal:
+    /// `dasp::signal::from_iter(
+    ///     dasp::signal::rate(sample_rate as f64)
+    ///         .const_hz(440.0)
+    ///         .sine()
+    ///         .take(sample_rate as usize * 2),
+    /// )`
+    /// which plays a sine wave at 440 hz for 2 seconds.
+    #[cfg(feature = "dasp")]
+    pub fn play_dasp_synth_with_options<SignalType>(
+        &mut self,
+        signal: SignalType,
+        signal_name: &str,
+        options: SynthPlaybackOptions,
+    ) -> Result<PlaybackId, Error>
+    where
+        SignalType: Signal<Frame = f64> + Send + 'static,
+    {
         // create new source and subscribe to playback envets
         let source = DaspSynthSource::new(
             signal,
             signal_name,
+            options.volume,
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
         );
@@ -137,7 +194,7 @@ impl AudioFilePlayer {
         let source_synth_id = source.playback_id();
         self.playing_sources.lock().unwrap().insert(
             source_synth_id,
-            PlaybackMsgSender::Synth(source.playback_message_sender()),
+            PlaybackMessageSender::Synth(source.playback_message_sender()),
         );
         // convert file to mixer's rate and channel layout
         let converted = source.converted(
@@ -164,7 +221,7 @@ impl AudioFilePlayer {
         position: Duration,
     ) -> Result<(), Error> {
         if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
-            if let PlaybackMsgSender::File(sender) = msg_sender {
+            if let PlaybackMessageSender::File(sender) = msg_sender {
                 if let Err(err) = sender.send(FilePlaybackMessage::Seek(position)) {
                     log::warn!("failed to send seek command to file: {}", err.to_string());
                 }
@@ -182,7 +239,7 @@ impl AudioFilePlayer {
     pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
         if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
             match msg_sender {
-                PlaybackMsgSender::File(file_sender) => {
+                PlaybackMessageSender::File(file_sender) => {
                     if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
                         log::warn!(
                             "failed to send stop command to file source: {}",
@@ -190,7 +247,7 @@ impl AudioFilePlayer {
                         );
                     }
                 }
-                PlaybackMsgSender::Synth(synth_sender) => {
+                PlaybackMessageSender::Synth(synth_sender) => {
                     if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop) {
                         log::warn!(
                             "failed to send stop command to synth source: {}",
@@ -225,7 +282,7 @@ impl AudioFilePlayer {
 impl AudioFilePlayer {
     fn handle_playback_status_messages(
         playback_sender_arg: Option<Sender<PlaybackStatusEvent>>,
-        playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMsgSender>>>,
+        playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMessageSender>>>,
     ) -> Sender<PlaybackStatusEvent> {
         let (send_proxy, recv_proxy) = unbounded::<PlaybackStatusEvent>();
 

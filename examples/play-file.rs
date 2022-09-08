@@ -1,4 +1,7 @@
-use afplay::{playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput, DefaultAudioOutput};
+use afplay::{
+    file::FilePlaybackOptions, playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput,
+    DefaultAudioOutput,
+};
 
 fn main() -> Result<(), String> {
     // Open default device
@@ -15,12 +18,15 @@ fn main() -> Result<(), String> {
     // create sound sources and memorize file ids for the playback status
     let mut playing_file_ids = vec![
         player
-            // this file is going to be entirely decoded first, then played back
-            .play_preloaded_file("assets/altijd synth bit.wav")
+            // files are by default not streamed but are entired loaded first.
+            .play_file("assets/altijd synth bit.wav")
             .map_err(|err| err.to_string())?,
         player
-            // this file is going to be streamed on the fly
-            .play_streamed_file("assets/BSQ_M14.wav")
+            // this file is going to be streamed on the fly with lowered volume
+            .play_file_with_options(
+                "assets/BSQ_M14.wav",
+                FilePlaybackOptions::default().streamed().with_volume(0.75),
+            )
             .map_err(|err| err.to_string())?,
     ];
 

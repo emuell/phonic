@@ -18,6 +18,7 @@ where
 {
     signal: dasp::signal::UntilExhausted<SignalType>,
     sample_rate: u32,
+    volume: f32,
     send: Sender<SynthPlaybackMessage>,
     recv: Receiver<SynthPlaybackMessage>,
     event_send: Option<Sender<PlaybackStatusEvent>>,
@@ -33,6 +34,7 @@ where
     pub fn new(
         signal: SignalType,
         signal_name: &str,
+        volume: f32,
         sample_rate: u32,
         event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
@@ -41,6 +43,7 @@ where
         Self {
             signal: signal.until_exhausted(),
             sample_rate,
+            volume,
             send,
             recv,
             event_send,
@@ -87,6 +90,13 @@ where
             *o = i as f32;
             written += 1;
         }
+        // apply volume when <> 1
+        if (1.0f32 - self.volume).abs() > 0.0001 {
+            for o in output[0..written].as_mut() {
+                *o *= self.volume;
+            }
+        }
+        // check if the signal is exhausted
         if written == 0 && !self.is_exhausted {
             self.is_exhausted = true;
         }

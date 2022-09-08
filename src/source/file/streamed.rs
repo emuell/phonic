@@ -33,6 +33,7 @@ pub struct StreamedFileSource {
     actor: ActorHandle<FilePlaybackMessage>,
     file_id: usize,
     file_path: String,
+    volume: f32,
     consumer: Consumer<f32>,
     event_send: Option<Sender<PlaybackStatusEvent>>,
     signal_spec: SignalSpec,
@@ -80,6 +81,7 @@ impl FileSource for StreamedFileSource {
     fn new(
         file_path: &str,
         event_send: Option<Sender<PlaybackStatusEvent>>,
+        volume: f32,
     ) -> Result<Self, Error> {
         // create decoder
         let decoder = AudioDecoder::new(file_path.to_string())?;
@@ -126,6 +128,7 @@ impl FileSource for StreamedFileSource {
             actor,
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
+            volume,
             consumer,
             event_send,
             signal_spec,
@@ -185,6 +188,14 @@ impl AudioSource for StreamedFileSource {
             }
         }
 
+        // apply volume, when <> 1
+        if (1.0f32 - self.volume).abs() > 0.0001 {
+            for o in output[0..written].as_mut() {
+                *o *= self.volume;
+            }
+        }
+
+        // send exhausted events
         let total_samples = self.total_samples.load(Ordering::Relaxed);
         let is_running = self.is_running.load(Ordering::Relaxed);
         if position >= total_samples || !is_running {

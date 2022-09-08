@@ -1,7 +1,8 @@
 use dasp::{signal, Frame, Signal};
 
 use afplay::{
-    playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput, AudioSink, DefaultAudioOutput,
+    playback::PlaybackStatusEvent, synth::SynthPlaybackOptions, AudioFilePlayer, AudioOutput,
+    AudioSink, DefaultAudioOutput,
 };
 
 fn main() -> Result<(), String> {
@@ -55,10 +56,25 @@ fn main() -> Result<(), String> {
             note_duration,
         ));
 
-    // create audio source for the chord and memorize the id for the playback status
-    let mut playing_synth_ids = vec![player
-        .play_dasp_synth(chord, "my_chord")
-        .map_err(|err| err.to_string())?];
+    let sine = dasp::signal::from_iter(
+        dasp::signal::rate(sample_rate as f64)
+            .const_hz(440.0)
+            .sine()
+            .take(sample_rate as usize * 2),
+    );
+    // create audio source for the chord and sine and memorize the id for the playback status
+    let mut playing_synth_ids = vec![
+        player
+            .play_dasp_synth_with_options(
+                chord,
+                "my_chord",
+                SynthPlaybackOptions::default().with_volume(0.5),
+            )
+            .map_err(|err| err.to_string())?,
+        player
+            .play_dasp_synth(sine, "sine")
+            .map_err(|err| err.to_string())?,
+    ];
 
     // handle events from the file sources
     let event_thread = std::thread::spawn(move || {

@@ -49,9 +49,10 @@ impl FileSource for PreloadedFileSource {
     fn new(
         file_path: &str,
         event_send: Option<Sender<PlaybackStatusEvent>>,
+        volume: f32,
     ) -> Result<Self, Error> {
         // create file source
-        let mut decoded_file = StreamedFileSource::new(file_path, None)?;
+        let mut decoded_file = StreamedFileSource::new(file_path, None, volume)?;
         let sample_rate = decoded_file.sample_rate();
         let channel_count = decoded_file.channel_count();
         let file_id = decoded_file.playback_id();
