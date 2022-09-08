@@ -126,7 +126,8 @@ impl AudioFilePlayer {
             )
         };
         // subscribe to playback envets in the newly created source
-        self.playing_sources.lock().unwrap().insert(
+        let mut playing_sources = self.playing_sources.lock().unwrap();
+        playing_sources.insert(
             source_playback_id,
             PlaybackMessageSender::File(playback_message_sender),
         );
@@ -192,7 +193,8 @@ impl AudioFilePlayer {
     #[allow(dead_code)]
     fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<PlaybackId, Error> {
         let source_synth_id = source.playback_id();
-        self.playing_sources.lock().unwrap().insert(
+        let mut playing_sources = self.playing_sources.lock().unwrap();
+        playing_sources.insert(
             source_synth_id,
             PlaybackMessageSender::Synth(source.playback_message_sender()),
         );
@@ -220,7 +222,8 @@ impl AudioFilePlayer {
         playback_id: PlaybackId,
         position: Duration,
     ) -> Result<(), Error> {
-        if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
+        let playing_sources = self.playing_sources.lock().unwrap();
+        if let Some(msg_sender) = playing_sources.get(&playback_id) {
             if let PlaybackMessageSender::File(sender) = msg_sender {
                 if let Err(err) = sender.send(FilePlaybackMessage::Seek(position)) {
                     log::warn!("failed to send seek command to file: {}", err.to_string());
@@ -237,7 +240,8 @@ impl AudioFilePlayer {
 
     /// Stop a playing file or synth source.
     pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
-        if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
+        let mut playing_sources = self.playing_sources.lock().unwrap();
+        if let Some(msg_sender) = playing_sources.get(&playback_id) {
             match msg_sender {
                 PlaybackMessageSender::File(file_sender) => {
                     if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
@@ -256,7 +260,9 @@ impl AudioFilePlayer {
                     }
                 }
             }
-            self.playing_sources.lock().unwrap().remove(&playback_id);
+            // we shortly will receive an Exhaused event which removes the source, but neverthless
+            // remove it now, to force all following attempts to stop this source to fail
+            playing_sources.remove(&playback_id);
             return Ok(());
         } else {
             log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
