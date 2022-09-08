@@ -1,18 +1,21 @@
-use crossbeam_channel::{select, unbounded, SendError, Sender};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use crossbeam_channel::{unbounded, Sender};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crate::{
     error::Error,
     output::{AudioSink, DefaultAudioSink},
     source::{
         file::{
-            preloaded::PreloadedFileSource, streamed::StreamedFileSource, FileId, FilePlaybackMsg,
-            FilePlaybackStatusMsg, FileSource,
+            preloaded::PreloadedFileSource, streamed::StreamedFileSource, FilePlaybackMessage,
+            FileSource,
         },
         mixed::{MixedSource, MixedSourceMsg},
-        synth::{SynthId, SynthPlaybackMsg, SynthPlaybackStatusMsg, SynthSource},
+        playback::{PlaybackId, PlaybackStatusEvent},
+        synth::{SynthPlaybackMessage, SynthSource},
     },
     utils::resampler::DEFAULT_RESAMPLING_QUALITY,
 };
@@ -25,44 +28,42 @@ use crate::source::synth::dasp::DaspSynthSource;
 
 // -------------------------------------------------------------------------------------------------
 
+enum PlaybackMsgSender {
+    File(Sender<FilePlaybackMessage>),
+    Synth(Sender<SynthPlaybackMessage>),
+}
+
+// -------------------------------------------------------------------------------------------------
+
 pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
-    playing_files: Arc<Mutex<HashMap<FileId, Sender<FilePlaybackMsg>>>>,
-    playing_synths: Arc<Mutex<HashMap<SynthId, Sender<SynthPlaybackMsg>>>>,
-    file_event_send: Sender<FilePlaybackStatusMsg>,
-    #[allow(dead_code)]
-    synth_event_send: Sender<SynthPlaybackStatusMsg>,
-    mixer_event_send: Sender<MixedSourceMsg>,
+    playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMsgSender>>>,
+    playback_status_sender: Sender<PlaybackStatusEvent>,
+    mixer_event_sender: Sender<MixedSourceMsg>,
 }
 
 /// public interface
 impl AudioFilePlayer {
     pub fn new(
         sink: DefaultAudioSink,
-        file_event_send_arg: Option<Sender<FilePlaybackStatusMsg>>,
-        synth_event_send_arg: Option<Sender<SynthPlaybackStatusMsg>>,
+        playback_status_sender_arg: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
-        // Create a proxy for file/synth_event_send, so we can trap stop messages
-        let playing_files = Arc::new(Mutex::new(HashMap::new()));
-        let playing_synths = Arc::new(Mutex::new(HashMap::new()));
-        let (file_event_send, synth_event_send) = Self::handle_playback_status_messages(
-            file_event_send_arg,
-            synth_event_send_arg,
-            Arc::clone(&playing_files),
-            Arc::clone(&playing_synths),
+        // Create a proxy for the playback status channel, so we can trap stop messages
+        let playing_sources = Arc::new(Mutex::new(HashMap::new()));
+        let playback_status_sender = Self::handle_playback_status_messages(
+            playback_status_sender_arg,
+            Arc::clone(&playing_sources),
         );
         // Create a mixer source, add it to the audio sink and start running
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
-        let mixer_event_send = mixer_source.event_sender();
+        let mixer_event_sender = mixer_source.event_sender();
         sink.play(mixer_source);
         sink.resume();
         Self {
             sink,
-            playing_files,
-            playing_synths,
-            file_event_send,
-            synth_event_send,
-            mixer_event_send,
+            playing_sources,
+            playback_status_sender,
+            mixer_event_sender,
         }
     }
 
@@ -77,29 +78,24 @@ impl AudioFilePlayer {
         self.sink.pause()
     }
 
-    pub fn stop_all_sources(&mut self) -> Result<(), Error> {
-        self.stop_all_files()?;
-        self.stop_all_synths()?;
-        Ok(())
-    }
-
-    pub fn play_streamed_file(&mut self, file_path: String) -> Result<FileId, Error> {
-        let source = StreamedFileSource::new(file_path, Some(self.file_event_send.clone()))?;
+    pub fn play_streamed_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
+        let source = StreamedFileSource::new(file_path, Some(self.playback_status_sender.clone()))?;
         self.play_file(source)
     }
 
-    pub fn play_preloaded_file(&mut self, file_path: String) -> Result<FileId, Error> {
-        let source = PreloadedFileSource::new(file_path, Some(self.file_event_send.clone()))?;
+    pub fn play_preloaded_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
+        let source =
+            PreloadedFileSource::new(file_path, Some(self.playback_status_sender.clone()))?;
         self.play_file(source)
     }
 
-    pub fn play_file<F: FileSource>(&mut self, source: F) -> Result<FileId, Error> {
-        let source_file_id = source.file_id();
+    pub fn play_file<F: FileSource>(&mut self, source: F) -> Result<PlaybackId, Error> {
+        let source_file_id = source.playback_id();
         // subscribe to playback envets
-        self.playing_files
-            .lock()
-            .unwrap()
-            .insert(source_file_id, source.sender());
+        self.playing_sources.lock().unwrap().insert(
+            source_file_id,
+            PlaybackMsgSender::File(source.playback_message_sender()),
+        );
         // convert file to mixer's rate and channel layout
         let converted = source.converted(
             self.sink.channel_count(),
@@ -107,7 +103,7 @@ impl AudioFilePlayer {
             DEFAULT_RESAMPLING_QUALITY,
         );
         // play the source
-        if let Err(err) = self.mixer_event_send.send(MixedSourceMsg::AddSource {
+        if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             source: Box::new(converted),
         }) {
             log::error!("failed to send mixer event: {}", err);
@@ -117,64 +113,32 @@ impl AudioFilePlayer {
         Ok(source_file_id)
     }
 
-    pub fn seek_file(&mut self, file_id: FileId, position: Duration) -> Result<(), Error> {
-        if let Some(worker) = self.playing_files.lock().unwrap().get(&file_id) {
-            if let Err(err) = worker.send(FilePlaybackMsg::Seek(position)) {
-                log::warn!("failed to send seek command to file: {}", err.to_string());
-            }
-            return Ok(());
-        } else {
-            log::warn!("trying to seek file #{file_id} which is not or no longer playing");
-        }
-        Err(Error::MediaFileNotFound)
-    }
-
-    pub fn stop_file(&mut self, file_id: FileId) -> Result<(), Error> {
-        if let Some(worker) = self.playing_files.lock().unwrap().get(&file_id) {
-            if let Err(err) = worker.send(FilePlaybackMsg::Stop) {
-                log::warn!("failed to send stop command to file: {}", err.to_string());
-            }
-            self.playing_files.lock().unwrap().remove(&file_id);
-            return Ok(());
-        } else {
-            log::warn!("trying to stop file #{file_id} which is not or no longer playing");
-        }
-        Err(Error::MediaFileNotFound)
-    }
-
-    pub fn stop_all_files(&mut self) -> Result<(), Error> {
-        let file_ids: Vec<FileId>;
-        {
-            let playing_files = self.playing_files.lock().unwrap();
-            file_ids = playing_files.keys().copied().collect();
-        }
-        for file_id in file_ids {
-            self.stop_file(file_id)?;
-        }
-        Ok(())
-    }
-
     #[cfg(feature = "dasp")]
-    pub fn play_dasp_synth<SignalType>(&mut self, signal: SignalType) -> Result<SynthId, Error>
+    pub fn play_dasp_synth<SignalType>(
+        &mut self,
+        signal: SignalType,
+        signal_name: &str,
+    ) -> Result<PlaybackId, Error>
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
         // create new source and subscribe to playback envets
         let source = DaspSynthSource::new(
             signal,
+            signal_name,
             self.sink.sample_rate(),
-            Some(self.synth_event_send.clone()),
+            Some(self.playback_status_sender.clone()),
         );
         self.play_synth(source)
     }
 
     #[allow(dead_code)]
-    fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<SynthId, Error> {
-        let source_synth_id = source.synth_id();
-        self.playing_synths
-            .lock()
-            .unwrap()
-            .insert(source_synth_id, source.sender());
+    fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<PlaybackId, Error> {
+        let source_synth_id = source.playback_id();
+        self.playing_sources.lock().unwrap().insert(
+            source_synth_id,
+            PlaybackMsgSender::Synth(source.playback_message_sender()),
+        );
         // convert file to mixer's rate and channel layout
         let converted = source.converted(
             self.sink.channel_count(),
@@ -182,7 +146,7 @@ impl AudioFilePlayer {
             DEFAULT_RESAMPLING_QUALITY,
         );
         // play the source
-        if let Err(err) = self.mixer_event_send.send(MixedSourceMsg::AddSource {
+        if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             source: Box::new(converted),
         }) {
             log::error!("failed to send mixer event: {}", err);
@@ -192,27 +156,66 @@ impl AudioFilePlayer {
         Ok(source_synth_id)
     }
 
-    pub fn stop_synth(&mut self, synth_id: SynthId) -> Result<(), Error> {
-        if let Some(worker) = self.playing_synths.lock().unwrap().get(&synth_id) {
-            if let Err(err) = worker.send(SynthPlaybackMsg::Stop) {
-                log::warn!("failed to send stop command to synth: {}", err.to_string());
+    /// Change playback position of the given played back source. This is only supported for files and thus
+    /// won't do anyththing for synths.
+    pub fn seek_source(
+        &mut self,
+        playback_id: PlaybackId,
+        position: Duration,
+    ) -> Result<(), Error> {
+        if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
+            if let PlaybackMsgSender::File(sender) = msg_sender {
+                if let Err(err) = sender.send(FilePlaybackMessage::Seek(position)) {
+                    log::warn!("failed to send seek command to file: {}", err.to_string());
+                }
+            } else {
+                log::warn!("trying to seek a synth source, which is not supported");
             }
-            self.playing_synths.lock().unwrap().remove(&synth_id);
             return Ok(());
         } else {
-            log::warn!("trying to stop synth #{synth_id} which is not or no longer playing");
+            log::warn!("trying to seek source #{playback_id} which is not or no longer playing");
         }
         Err(Error::MediaFileNotFound)
     }
 
-    pub fn stop_all_synths(&mut self) -> Result<(), Error> {
-        let synth_ids: Vec<SynthId>;
-        {
-            let playing_synths = self.playing_synths.lock().unwrap();
-            synth_ids = playing_synths.keys().copied().collect();
+    /// Stop a playing file or synth source.
+    pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
+        if let Some(msg_sender) = self.playing_sources.lock().unwrap().get(&playback_id) {
+            match msg_sender {
+                PlaybackMsgSender::File(file_sender) => {
+                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
+                        log::warn!(
+                            "failed to send stop command to file source: {}",
+                            err.to_string()
+                        );
+                    }
+                }
+                PlaybackMsgSender::Synth(synth_sender) => {
+                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop) {
+                        log::warn!(
+                            "failed to send stop command to synth source: {}",
+                            err.to_string()
+                        );
+                    }
+                }
+            }
+            self.playing_sources.lock().unwrap().remove(&playback_id);
+            return Ok(());
+        } else {
+            log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
         }
-        for synth_id in synth_ids {
-            self.stop_synth(synth_id)?;
+        Err(Error::MediaFileNotFound)
+    }
+
+    /// Stop all playing sources.
+    pub fn stop_all_sources(&mut self) -> Result<(), Error> {
+        let playing_ids: Vec<PlaybackId>;
+        {
+            let playing_sources = self.playing_sources.lock().unwrap();
+            playing_ids = playing_sources.keys().copied().collect();
+        }
+        for source_id in playing_ids {
+            self.stop_source(source_id)?;
         }
         Ok(())
     }
@@ -220,84 +223,33 @@ impl AudioFilePlayer {
 
 /// details
 impl AudioFilePlayer {
-    fn handle_file_events(
-        original_sender: &Option<Sender<FilePlaybackStatusMsg>>,
-        playing_files: &Arc<Mutex<HashMap<SynthId, Sender<FilePlaybackMsg>>>>,
-        msg: FilePlaybackStatusMsg,
-    ) -> Result<(), SendError<FilePlaybackStatusMsg>> {
-        if let FilePlaybackStatusMsg::Stopped {
-            file_id,
-            file_path: _,
-            end_of_file: _,
-        } = msg
-        {
-            playing_files.lock().unwrap().remove(&file_id);
-        }
-        if let Some(sender) = original_sender {
-            sender.send(msg)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn handle_synth_events(
-        original_sender: &Option<Sender<SynthPlaybackStatusMsg>>,
-        playing_synths: &Arc<Mutex<HashMap<SynthId, Sender<SynthPlaybackMsg>>>>,
-        msg: SynthPlaybackStatusMsg,
-    ) -> Result<(), SendError<SynthPlaybackStatusMsg>> {
-        #[allow(irrefutable_let_patterns)]
-        if let SynthPlaybackStatusMsg::Stopped {
-            synth_id,
-            exhausted: _,
-        } = msg
-        {
-            playing_synths.lock().unwrap().remove(&synth_id);
-        }
-        if let Some(sender) = original_sender {
-            sender.send(msg)
-        } else {
-            Ok(())
-        }
-    }
-
     fn handle_playback_status_messages(
-        file_event_send_arg: Option<Sender<FilePlaybackStatusMsg>>,
-        synth_event_send_arg: Option<Sender<SynthPlaybackStatusMsg>>,
-        playing_files: Arc<Mutex<HashMap<SynthId, Sender<FilePlaybackMsg>>>>,
-        playing_synths: Arc<Mutex<HashMap<SynthId, Sender<SynthPlaybackMsg>>>>,
-    ) -> (
-        Sender<FilePlaybackStatusMsg>,
-        Sender<SynthPlaybackStatusMsg>,
-    ) {
-        let (file_send_proxy, file_recv_proxy) = unbounded::<FilePlaybackStatusMsg>();
-        let (synth_send_proxy, synth_recv_proxy) = unbounded::<SynthPlaybackStatusMsg>();
+        playback_sender_arg: Option<Sender<PlaybackStatusEvent>>,
+        playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMsgSender>>>,
+    ) -> Sender<PlaybackStatusEvent> {
+        let (send_proxy, recv_proxy) = unbounded::<PlaybackStatusEvent>();
 
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())
-            .spawn(move || loop {
-                select! {
-                    recv(file_recv_proxy) -> file_recv_proxy => {
-                        if let Ok(msg) = file_recv_proxy {
-                            if let Err(err) = Self::handle_file_events(&file_event_send_arg, &playing_files, msg) {
-                                log::warn!("failed to send file status message: {}", err);
-                            }
-                        } else {
-                            break;
-                        }
+            .spawn(move || {
+                while let Ok(msg) = recv_proxy.recv() {
+                    if let PlaybackStatusEvent::Stopped {
+                        id,
+                        path: _,
+                        exhausted: _,
+                    } = msg
+                    {
+                        playing_sources.lock().unwrap().remove(&id);
                     }
-                    recv(synth_recv_proxy) -> synth_recv_proxy => {
-                        if let Ok(msg) = synth_recv_proxy {
-                            if let Err(err) = Self::handle_synth_events(&synth_event_send_arg, &playing_synths, msg) {
-                                log::warn!("failed to send synth status message: {}", err);
-                            }
-                        } else {
-                            break;
+                    if let Some(sender) = &playback_sender_arg {
+                        if let Err(err) = sender.send(msg) {
+                            log::warn!("failed to send file status message: {}", err);
                         }
                     }
                 }
             })
             .expect("failed to spawn audio message thread");
 
-        (file_send_proxy, synth_send_proxy)
+        send_proxy
     }
 }

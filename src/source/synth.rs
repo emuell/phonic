@@ -1,34 +1,23 @@
 #[cfg(feature = "dasp")]
 pub mod dasp;
 
-use super::AudioSource;
 use crossbeam_channel::Sender;
 
-// -------------------------------------------------------------------------------------------------
-
-/// A unique ID for a newly created SynthSources
-pub type SynthId = usize;
+use super::{playback::PlaybackId, AudioSource};
 
 // -------------------------------------------------------------------------------------------------
 
-/// Events send back from synth to user
-pub enum SynthPlaybackStatusMsg {
-    Stopped { synth_id: SynthId, exhausted: bool },
-}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Events to control playback of a DaspSource
-pub enum SynthPlaybackMsg {
+/// Events to control playback of a synth source
+pub enum SynthPlaybackMessage {
+    /// Stop the synth source
     Stop,
 }
 
 // -------------------------------------------------------------------------------------------------
 
 pub trait SynthSource: AudioSource + Sized {
-    /// Channel to control playback
-    fn sender(&self) -> Sender<SynthPlaybackMsg>;
-
-    /// The unique synth ID, can be used to identify files in SynthPlaybackStatusMsg events
-    fn synth_id(&self) -> SynthId;
+    /// Channel sender to control this sources's playback
+    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage>;
+    /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
+    fn playback_id(&self) -> PlaybackId;
 }

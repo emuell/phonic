@@ -21,79 +21,65 @@ It was originally developed and is used in the [AFEC-Explorer](https://github.co
 See [example directory](./examples) for some more working examples. 
 
 ```rust
+use afplay::{playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput, DefaultAudioOutput};
 use dasp::{Frame, Signal};
-use afplay::{file::FilePlaybackStatusMsg, synth::SynthPlaybackStatusMsg, *};
 
 // Open default device (cpal or cubeb, whatever is enabled as audio output feature)
 let audio_output = DefaultAudioOutput::open()?;
 let audio_sink = audio_output.sink();
 
-// Create an optional channel for file playback status events (Position, EndOfFile events)
-let (file_event_sx, file_event_rx) = crossbeam_channel::unbounded();
-// Create an optional channel for synth status events (Exhausted events)
-let (synth_event_sx, synth_event_rx) = crossbeam_channel::unbounded();
-
+// Create an optional channel to receive playback status events (Position, Stopped events)
+let (playback_status_sender, playback_status_receiver) = crossbeam_channel::unbounded();
 // Create a player which we'll use to play, mix and manage file or synth sources.
-let mut player = AudioFilePlayer::new(audio_sink, Some(file_event_sx), Some(synth_event_sx));
+let mut player = AudioFilePlayer::new(audio_sink, Some(playback_status_sender));
 
 // Create sound sources and memorize their ids for the playback status and control.
 // The first file is preloaded - which means its entirely decoded first, then played back buffered:
-let some_small_file_id = player.play_preloaded_file(
-    "some_small_file.wav".to_string())?;
+let small_file_id = player.play_preloaded_file("PATH_TO/some_small_file.wav")?;
 // The second file is going to be decoded and streamed on the fly, which is handy for large files.
 // The player mixes all added files, so we'll hear both files at once later:
-let some_large_file_id = player.play_streamed_file(
-    "some_really_really_large_/BSQ_M1file_.mp3".to_string())?;
+let large_file_id = player.play_streamed_file("PATH_TO/some_long_file.mp3")?;
 
 // We're playing a sinple synth tone as well. You can pass any dasp::signal::Signal here. 
 // It will be wrapped in a dasp::signal::UntilExhausted, so it can be used for one-shots to.
-let some_dasp_signal = dasp::signal::rate(audio_sample_rate as f64).const_hz(440.0).sine();
-let some_synth_id = player.play_dasp_synth(some_dasp_signal)?;
+// NB: The optional `dasp-synth` feature needs to be enabled in afplay for this to work! 
+let dasp_signal = dasp::signal::rate(audio_sample_rate as f64).const_hz(440.0).sine();
+let synth_id = player.play_dasp_synth(some_dasp_signal, "my_synth_sound".to_string())?;
 
-// Somewhere in your code, likely in a background thread, handle playback status events from the player:
-std::thread::spawn(move || loop {
-    crossbeam_channel::select! {
-        recv(file_event_rx) -> msg => {
-            if let Ok(file_event) = msg {
-                match file_event {
-                    FilePlaybackStatusMsg::Position { file_id, file_path, position } => {
-                        println!("Playback pos of file #{} '{}': {}", 
-                            file_id, file_path, position.as_secs_f32());
-                    },
-                    FilePlaybackStatusMsg::Stopped { file_id, file_path, end_of_file } => {
-                        if end_of_file {
-                            println!("Playback of #{} '{}' finished playback", file_id, file_path);
-
-                        } else {
-                            println!("Playback of #{} '{}' was stopped", file_id, file_path);
-                        }
-                    }
-                }
+// Somewhere in your code you can optionally handle playback status events from the player:
+std::thread::spawn(move || {
+    while let Ok(event) = playback_status_receiver.recv() {
+        match event {
+            PlaybackStatusEvent::Position { id, path, position } => {
+                println!(
+                    "Playback pos of source #{} '{}': {}",
+                    id,
+                    path,
+                    position.as_secs_f32()
+                );
             }
-        },
-        recv(synth_event_rx) -> msg => {
-            if let Ok(synth_event) = msg {
-                match synth_event {
-                    SynthPlaybackStatusMsg::Stopped { synth_id, exhausted } => {
-                        if exhausted {
-                            println!("Playback of synth #{} finished playback", synth_id);
-                        } else {
-                            println!("Playback of synth #{} was stopped", synth_id);
-                        }
-                    }
+            PlaybackStatusEvent::Stopped {
+                id,
+                path,
+                exhausted,
+            } => {
+                if exhausted {
+                    println!("Playback of #{} '{}' finished", id, path);
+                } else {
+                    println!("Playback of #{} '{}' was stopped", id, path);
                 }
             }
         }
     }
 });
 
-// All playing file sources can be seeked or stopped:
-player.seek_file(some_large_file_id, std::time::Duration::from_secs(5))?;
-player.stop_file(some_small_file_id)?;
+// All playing *file* sources can be seeked or stopped:
+player.seek_source(large_file_id, std::time::Duration::from_secs(5))?;
+player.stop_source(small_file_id)?;
 
-// New files can be started any time. as before they will be mixed together with whatever 
+// New files can be started any time. Tthey will be mixed together with whatever 
 // else is currently playing.
-let _some_new_file_id = player.play_preloaded_file("bang.wav".to_string())?;
+let _another_file_id = player.play_preloaded_file("PATH_TO/bang.wav")?;
 
 // Finally: stop and drop all playing sources
 player.stop_all_sources()?;

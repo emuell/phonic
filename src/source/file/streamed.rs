@@ -1,7 +1,7 @@
 use std::{
     ops::Range,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::Duration,
@@ -14,25 +14,27 @@ use symphonia::core::{
     units::TimeBase,
 };
 
+use super::{FilePlaybackMessage, FileSource};
 use crate::{
     error::Error,
+    source::playback::{PlaybackId, PlaybackStatusEvent},
+    source::AudioSource,
     utils::{
         actor::{Act, Actor, ActorHandle},
         decoder::AudioDecoder,
+        id::unique_usize_id,
     },
 };
-
-use super::{AudioSource, FileId, FilePlaybackMsg, FilePlaybackStatusMsg, FileSource};
 
 // -------------------------------------------------------------------------------------------------
 
 /// A source which streams & decodes an audio file asynchromiously in a worker thread
 pub struct StreamedFileSource {
-    actor: ActorHandle<FilePlaybackMsg>,
+    actor: ActorHandle<FilePlaybackMessage>,
     file_id: usize,
     file_path: String,
     consumer: Consumer<f32>,
-    event_send: Option<Sender<FilePlaybackStatusMsg>>,
+    event_send: Option<Sender<PlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     time_base: TimeBase,
     total_samples: Arc<AtomicU64>,
@@ -76,11 +78,11 @@ impl StreamedFileSource {
 
 impl FileSource for StreamedFileSource {
     fn new(
-        file_path: String,
-        event_send: Option<Sender<FilePlaybackStatusMsg>>,
+        file_path: &str,
+        event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // create decoder
-        let decoder = AudioDecoder::new(file_path.clone())?;
+        let decoder = AudioDecoder::new(file_path.to_string())?;
         // Gather the source signal parameters and compute how often we should report
         // the play-head position.
         let signal_spec = decoder.signal_spec();
@@ -118,14 +120,12 @@ impl FileSource for StreamedFileSource {
                 StreamedFileWorker::new(this, decoder, buffer, position, total_samples, is_running)
             }
         });
-        actor.send(FilePlaybackMsg::Read)?;
-
-        static FILE_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+        actor.send(FilePlaybackMessage::Read)?;
 
         Ok(Self {
             actor,
-            file_id: FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
-            file_path,
+            file_id: unique_usize_id(),
+            file_path: file_path.to_string(),
             consumer,
             event_send,
             signal_spec,
@@ -139,11 +139,11 @@ impl FileSource for StreamedFileSource {
         })
     }
 
-    fn sender(&self) -> Sender<FilePlaybackMsg> {
+    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.actor.sender()
     }
 
-    fn file_id(&self) -> FileId {
+    fn playback_id(&self) -> PlaybackId {
         self.file_id
     }
 
@@ -175,9 +175,9 @@ impl AudioSource for StreamedFileSource {
                 // Send a position report, so the upper layers can visualize the playback
                 // progress and preload the next track.  We cannot block here, so if the channel
                 // is full, we just try the next time instead of waiting.
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Position {
-                    file_id: self.file_id,
-                    file_path: self.file_path.clone(),
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                    id: self.file_id,
+                    path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
                 }) {
                     log::warn!("failed to send playback event: {}", err)
@@ -190,10 +190,10 @@ impl AudioSource for StreamedFileSource {
         if position >= total_samples || !is_running {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Stopped {
-                    file_id: self.file_id,
-                    file_path: self.file_path.clone(),
-                    end_of_file: position >= total_samples,
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                    id: self.file_id,
+                    path: self.file_path.clone(),
+                    exhausted: position >= total_samples,
                 }) {
                     log::warn!("failed to send playback event: {}", err)
                 }
@@ -220,7 +220,7 @@ impl AudioSource for StreamedFileSource {
 impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
-        let _ = self.actor.send(FilePlaybackMsg::Stop);
+        let _ = self.actor.send(FilePlaybackMessage::Stop);
     }
 }
 
@@ -228,7 +228,7 @@ impl Drop for StreamedFileSource {
 
 pub struct StreamedFileWorker {
     /// Sending part of our own actor channel.
-    this: Sender<FilePlaybackMsg>,
+    this: Sender<FilePlaybackMessage>,
     /// Decoder we are reading packets/samples from.
     input: AudioDecoder,
     /// Audio properties of the decoded signal.
@@ -260,7 +260,7 @@ impl StreamedFileWorker {
     }
 
     fn new(
-        this: Sender<FilePlaybackMsg>,
+        this: Sender<FilePlaybackMessage>,
         input: AudioDecoder,
         output: SpscRb<f32>,
         position: Arc<AtomicU64>,
@@ -304,14 +304,14 @@ impl StreamedFileWorker {
 }
 
 impl Actor for StreamedFileWorker {
-    type Message = FilePlaybackMsg;
+    type Message = FilePlaybackMessage;
     type Error = Error;
 
-    fn handle(&mut self, msg: FilePlaybackMsg) -> Result<Act<Self>, Self::Error> {
+    fn handle(&mut self, msg: FilePlaybackMessage) -> Result<Act<Self>, Self::Error> {
         match msg {
-            FilePlaybackMsg::Seek(time) => self.on_seek(time),
-            FilePlaybackMsg::Read => self.on_read(),
-            FilePlaybackMsg::Stop => self.on_stop(),
+            FilePlaybackMessage::Seek(time) => self.on_seek(time),
+            FilePlaybackMessage::Read => self.on_read(),
+            FilePlaybackMessage::Stop => self.on_stop(),
         }
     }
 }
@@ -329,7 +329,7 @@ impl StreamedFileWorker {
                 if self.is_reading {
                     self.samples_to_write = 0..0;
                 } else {
-                    self.this.send(FilePlaybackMsg::Read)?;
+                    self.this.send(FilePlaybackMessage::Read)?;
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
@@ -350,7 +350,7 @@ impl StreamedFileWorker {
                 self.samples_written += written as u64;
                 self.samples_to_write.start += written;
                 self.is_reading = true;
-                self.this.send(FilePlaybackMsg::Read)?;
+                self.this.send(FilePlaybackMessage::Read)?;
                 Ok(Act::Continue)
             } else {
                 // Buffer is full.  Wait a bit a try again.  We also have to indicate that the
@@ -359,7 +359,7 @@ impl StreamedFileWorker {
                 self.is_reading = false;
                 Ok(Act::WaitOr {
                     timeout: Duration::from_millis(500),
-                    timeout_msg: FilePlaybackMsg::Read,
+                    timeout_msg: FilePlaybackMessage::Read,
                 })
             }
         } else {
@@ -367,7 +367,7 @@ impl StreamedFileWorker {
                 Some(_) => {
                     self.samples_to_write = 0..self.input_packet.samples().len();
                     self.is_reading = true;
-                    self.this.send(FilePlaybackMsg::Read)?;
+                    self.this.send(FilePlaybackMessage::Read)?;
                 }
                 None => {
                     self.is_reading = false;

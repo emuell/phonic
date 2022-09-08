@@ -4,36 +4,21 @@ pub mod streamed;
 use crossbeam_channel::Sender;
 use std::time::Duration;
 
-use super::AudioSource;
+use super::{
+    playback::{PlaybackId, PlaybackStatusEvent},
+    AudioSource,
+};
 use crate::error::Error;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A uniquie ID for a newly created DecodedFileSources
-pub type FileId = usize;
-
-// -------------------------------------------------------------------------------------------------
-
-/// Events send back from decoder to user
-pub enum FilePlaybackStatusMsg {
-    Position {
-        file_id: FileId,
-        file_path: String,
-        position: Duration,
-    },
-    Stopped {
-        file_id: FileId,
-        file_path: String,
-        end_of_file: bool,
-    },
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// Events to control playback of a FileSource
-pub enum FilePlaybackMsg {
+pub enum FilePlaybackMessage {
+    /// Seek the file source to a new position
     Seek(Duration),
+    /// Start reading streamed sources (internally used only)
     Read,
+    /// Stop the source
     Stop,
 }
 
@@ -44,21 +29,20 @@ pub trait FileSource: AudioSource + Sized {
     /// Create a new file source with an optional FilePlaybackStatusMsg channel sender
     /// to retrieve playback status events, while the source is running
     fn new(
-        file_path: String,
-        status_sender: Option<Sender<FilePlaybackStatusMsg>>,
+        file_path: &str,
+        status_sender: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error>;
 
-    /// Channel to control playback
-    fn sender(&self) -> Sender<FilePlaybackMsg>;
+    /// Channel to control file playback.
+    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
+    /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
+    fn playback_id(&self) -> PlaybackId;
 
-    /// The unique file ID, can be used to identify files in FilePlaybackStatusMsg events
-    fn file_id(&self) -> FileId;
-
-    /// Total number of sample frames in the decoded file: may not be known before playback finished
+    /// Total number of sample frames in the decoded file: may not be known before playback finished.
     fn total_frames(&self) -> Option<u64>;
     /// Current playback pos in frames
     fn current_frame_position(&self) -> u64;
 
-    /// True the source played through the entire file, else false
+    /// True when the source played through the entire file, else false.
     fn end_of_track(&self) -> bool;
 }

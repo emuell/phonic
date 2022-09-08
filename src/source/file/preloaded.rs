@@ -2,22 +2,24 @@ use std::{thread, time::Duration};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
-use crate::error::Error;
-
-use super::{
-    streamed::StreamedFileSource, FileId, FilePlaybackMsg, FilePlaybackStatusMsg, FileSource,
+use super::{streamed::StreamedFileSource, FilePlaybackMessage, FileSource};
+use crate::{
+    error::Error,
+    source::{
+        file::{PlaybackId, PlaybackStatusEvent},
+        AudioSource,
+    },
 };
-use crate::source::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 
 /// Preloaded file source
 pub struct PreloadedFileSource {
-    file_id: FileId,
+    file_id: PlaybackId,
     file_path: String,
-    worker_send: Sender<FilePlaybackMsg>,
-    worker_recv: Receiver<FilePlaybackMsg>,
-    playback_status_send: Option<Sender<FilePlaybackStatusMsg>>,
+    worker_send: Sender<FilePlaybackMessage>,
+    worker_recv: Receiver<FilePlaybackMessage>,
+    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
     buffer: Vec<f32>,
     buffer_pos: u64,
     channel_count: usize,
@@ -45,14 +47,14 @@ impl PreloadedFileSource {
 
 impl FileSource for PreloadedFileSource {
     fn new(
-        file_path: String,
-        event_send: Option<Sender<FilePlaybackStatusMsg>>,
+        file_path: &str,
+        event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // create file source
-        let mut decoded_file = StreamedFileSource::new(file_path.clone(), None)?;
+        let mut decoded_file = StreamedFileSource::new(file_path, None)?;
         let sample_rate = decoded_file.sample_rate();
         let channel_count = decoded_file.channel_count();
-        let file_id = decoded_file.file_id();
+        let file_id = decoded_file.playback_id();
         let precision = (sample_rate as f64
             * channel_count as f64
             * StreamedFileSource::REPORT_PRECISION.as_secs_f64()) as u64;
@@ -62,7 +64,7 @@ impl FileSource for PreloadedFileSource {
             16 * 1024_usize
         };
         // create worker channel
-        let (worker_send, worker_recv) = unbounded::<FilePlaybackMsg>();
+        let (worker_send, worker_recv) = unbounded::<FilePlaybackMessage>();
         // write source into buffer
         let mut temp_buffer: Vec<f32> = vec![0.0; 1024];
         let mut buffer = Vec::with_capacity(buffer_capacity);
@@ -78,7 +80,7 @@ impl FileSource for PreloadedFileSource {
         }
         Ok(Self {
             file_id,
-            file_path,
+            file_path: file_path.to_string(),
             worker_recv,
             worker_send,
             playback_status_send: event_send,
@@ -92,11 +94,11 @@ impl FileSource for PreloadedFileSource {
         })
     }
 
-    fn sender(&self) -> Sender<FilePlaybackMsg> {
+    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.worker_send.clone()
     }
 
-    fn file_id(&self) -> FileId {
+    fn playback_id(&self) -> PlaybackId {
         self.file_id
     }
 
@@ -119,14 +121,14 @@ impl AudioSource for PreloadedFileSource {
         let mut keep_running = true;
         while let Ok(msg) = self.worker_recv.try_recv() {
             match msg {
-                FilePlaybackMsg::Seek(position) => {
+                FilePlaybackMessage::Seek(position) => {
                     let buffer_pos = position.as_secs_f64()
                         * self.sample_rate as f64
                         * self.channel_count as f64;
                     self.buffer_pos = (buffer_pos as u64).clamp(0, self.buffer.len() as u64);
                 }
-                FilePlaybackMsg::Read => (),
-                FilePlaybackMsg::Stop => keep_running = false,
+                FilePlaybackMessage::Read => (),
+                FilePlaybackMessage::Stop => keep_running = false,
             }
         }
         // quickly bail out when we finished playing
@@ -145,9 +147,9 @@ impl AudioSource for PreloadedFileSource {
         if let Some(event_send) = &self.playback_status_send {
             if self.should_report_pos(self.buffer_pos) {
                 self.reported_pos = Some(self.buffer_pos);
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Position {
-                    file_id: self.file_id,
-                    file_path: self.file_path.clone(),
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                    id: self.file_id,
+                    path: self.file_path.clone(),
                     position: self.samples_to_duration(self.buffer_pos),
                 }) {
                     log::warn!("Failed to send playback event: {}", err)
@@ -157,10 +159,10 @@ impl AudioSource for PreloadedFileSource {
         if self.buffer_pos >= self.buffer.len() as u64 || !keep_running {
             self.end_of_track = true;
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(FilePlaybackStatusMsg::Stopped {
-                    file_id: self.file_id,
-                    file_path: self.file_path.clone(),
-                    end_of_file: self.buffer_pos >= self.buffer.len() as u64,
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                    id: self.file_id,
+                    path: self.file_path.clone(),
+                    exhausted: self.buffer_pos >= self.buffer.len() as u64,
                 }) {
                     log::warn!("Failed to send playback event: {}", err)
                 }

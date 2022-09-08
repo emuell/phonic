@@ -1,8 +1,7 @@
 use dasp::{signal, Frame, Signal};
 
 use afplay::{
-    synth::SynthPlaybackStatusMsg,
-    AudioFilePlayer, {AudioOutput, AudioSink, DefaultAudioOutput},
+    playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput, AudioSink, DefaultAudioOutput,
 };
 
 fn main() -> Result<(), String> {
@@ -12,10 +11,9 @@ fn main() -> Result<(), String> {
     let sample_rate = audio_sink.sample_rate();
 
     // create channel for playback status events
-    let (event_sx, event_rx) = crossbeam_channel::unbounded();
+    let (status_sender, status_receiver) = crossbeam_channel::unbounded();
     // create a source player
-    let file_event_sx = None;
-    let mut player = AudioFilePlayer::new(audio_sink, file_event_sx, Some(event_sx));
+    let mut player = AudioFilePlayer::new(audio_sink, Some(status_sender));
 
     // Creates a signal of a detuned sine.
     let generate_note = |pitch: f64, amplitude: f64, duration: u32| {
@@ -59,32 +57,34 @@ fn main() -> Result<(), String> {
 
     // create audio source for the chord and memorize the id for the playback status
     let mut playing_synth_ids = vec![player
-        .play_dasp_synth(chord)
+        .play_dasp_synth(chord, "my_chord")
         .map_err(|err| err.to_string())?];
 
     // handle events from the file sources
-    let event_thread = std::thread::spawn(move || loop {
-        match event_rx.recv() {
-            Ok(event) => match event {
-                SynthPlaybackStatusMsg::Stopped {
-                    synth_id,
+    let event_thread = std::thread::spawn(move || {
+        while let Ok(event) = status_receiver.recv() {
+            match event {
+                PlaybackStatusEvent::Stopped {
+                    id,
+                    path,
                     exhausted,
                 } => {
                     if exhausted {
-                        println!("Playback of synth #{} finished playback", synth_id);
+                        println!("Playback of synth #{} '{}' finished playback", id, path);
                     } else {
-                        println!("Playback of synth #{} stopped", synth_id);
+                        println!("Playback of synth #{} '{}' stopped", id, path);
                     }
-                    playing_synth_ids.retain(|v| *v != synth_id);
+                    playing_synth_ids.retain(|v| *v != id);
                     if playing_synth_ids.is_empty() {
-                        // stop thread when all synths finished
+                        // stop this example when all synths finished
                         break;
                     }
                 }
-            },
-            Err(err) => {
-                log::info!("Playback event channel closed: '{err}'");
-                break;
+                PlaybackStatusEvent::Position {
+                    id: _,
+                    path: _,
+                    position: _,
+                } => (),
             }
         }
     });

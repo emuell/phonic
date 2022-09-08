@@ -1,7 +1,13 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use std::sync::atomic::AtomicUsize;
 
-use super::{AudioSource, SynthId, SynthPlaybackMsg, SynthPlaybackStatusMsg, SynthSource};
+use super::{SynthPlaybackMessage, SynthSource};
+use crate::{
+    source::{
+        playback::{PlaybackId, PlaybackStatusEvent},
+        AudioSource,
+    },
+    utils::id::unique_usize_id,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -12,10 +18,11 @@ where
 {
     signal: dasp::signal::UntilExhausted<SignalType>,
     sample_rate: u32,
-    send: Sender<SynthPlaybackMsg>,
-    recv: Receiver<SynthPlaybackMsg>,
-    event_send: Option<Sender<SynthPlaybackStatusMsg>>,
-    synth_id: SynthId,
+    send: Sender<SynthPlaybackMessage>,
+    recv: Receiver<SynthPlaybackMessage>,
+    event_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_id: PlaybackId,
+    playback_name: String,
     is_exhausted: bool,
 }
 
@@ -25,11 +32,11 @@ where
 {
     pub fn new(
         signal: SignalType,
+        signal_name: &str,
         sample_rate: u32,
-        event_send: Option<Sender<SynthPlaybackStatusMsg>>,
+        event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
-        static SYNTH_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
-        let (send, recv) = unbounded::<SynthPlaybackMsg>();
+        let (send, recv) = unbounded::<SynthPlaybackMessage>();
         let is_exhausted = false;
         Self {
             signal: signal.until_exhausted(),
@@ -37,7 +44,8 @@ where
             send,
             recv,
             event_send,
-            synth_id: SYNTH_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            playback_id: unique_usize_id(),
+            playback_name: signal_name.to_string(),
             is_exhausted,
         }
     }
@@ -47,14 +55,12 @@ impl<SignalType> SynthSource for DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64> + Send + 'static,
 {
-    /// Channel to control playback
-    fn sender(&self) -> Sender<SynthPlaybackMsg> {
+    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
         self.send.clone()
     }
 
-    /// The unique synth ID, can be used to identify files in SynthPlaybackStatusMsg events
-    fn synth_id(&self) -> SynthId {
-        self.synth_id
+    fn playback_id(&self) -> PlaybackId {
+        self.playback_id
     }
 }
 
@@ -67,7 +73,7 @@ where
         let mut keep_playing = true;
         if let Ok(msg) = self.recv.try_recv() {
             match msg {
-                SynthPlaybackMsg::Stop => {
+                SynthPlaybackMessage::Stop => {
                     keep_playing = false;
                 }
             }
@@ -87,9 +93,10 @@ where
         // send status messages
         if self.is_exhausted || !keep_playing {
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.send(SynthPlaybackStatusMsg::Stopped {
-                    synth_id: self.synth_id,
-                    exhausted: keep_playing,
+                if let Err(err) = event_send.send(PlaybackStatusEvent::Stopped {
+                    id: self.playback_id,
+                    path: self.playback_name.clone(),
+                    exhausted: self.is_exhausted,
                 }) {
                     log::warn!("failed to send synth playback status event: {}", err);
                 }
