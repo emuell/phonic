@@ -1,6 +1,7 @@
-use std::{thread, time::Duration};
+use std::time::Duration;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use symphonia::core::audio::SampleBuffer;
 
 use super::{streamed::StreamedFileSource, FilePlaybackMessage, FileSource};
 use crate::{
@@ -9,6 +10,7 @@ use crate::{
         file::{PlaybackId, PlaybackStatusEvent},
         AudioSource,
     },
+    utils::{decoder::AudioDecoder, id::unique_usize_id},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -17,8 +19,9 @@ use crate::{
 pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: String,
-    worker_send: Sender<FilePlaybackMessage>,
-    worker_recv: Receiver<FilePlaybackMessage>,
+    volume: f32,
+    playback_message_send: Sender<FilePlaybackMessage>,
+    playback_message_receive: Receiver<FilePlaybackMessage>,
     playback_status_send: Option<Sender<PlaybackStatusEvent>>,
     buffer: Vec<f32>,
     buffer_pos: u64,
@@ -48,55 +51,67 @@ impl PreloadedFileSource {
 impl FileSource for PreloadedFileSource {
     fn new(
         file_path: &str,
-        event_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         volume: f32,
     ) -> Result<Self, Error> {
-        // create file source
-        let mut decoded_file = StreamedFileSource::new(file_path, None, volume)?;
-        let sample_rate = decoded_file.sample_rate();
-        let channel_count = decoded_file.channel_count();
-        let file_id = decoded_file.playback_id();
-        let precision = (sample_rate as f64
-            * channel_count as f64
-            * StreamedFileSource::REPORT_PRECISION.as_secs_f64()) as u64;
-        let buffer_capacity = if let Some(total_samples) = decoded_file.total_samples() {
-            total_samples as usize
+        // create decoder and get signal specs
+        let mut audio_decoder = AudioDecoder::new(file_path.to_string())?;
+        let sample_rate = audio_decoder.signal_spec().rate;
+        let channel_count = audio_decoder.signal_spec().channels.count();
+
+        // create a channel for playback messages
+        let (playback_message_send, playback_message_receive) = unbounded::<FilePlaybackMessage>();
+
+        // decode the entire file into our buffer
+        let buffer_capacity = if let Some(total_frames) = audio_decoder.codec_params().n_frames {
+            // Note: this is a hint only!
+            total_frames as usize * channel_count
         } else {
             16 * 1024_usize
         };
-        // create worker channel
-        let (worker_send, worker_recv) = unbounded::<FilePlaybackMessage>();
-        // write source into buffer
-        let mut temp_buffer: Vec<f32> = vec![0.0; 1024];
         let mut buffer = Vec::with_capacity(buffer_capacity);
-        loop {
-            let written = decoded_file.write(&mut temp_buffer[..]);
-            if written > 0 {
-                buffer.append(&mut temp_buffer[..written].to_vec());
-            } else if decoded_file.end_of_track() {
-                break;
-            } else {
-                thread::sleep(Duration::from_millis(1));
-            }
+
+        let mut temp_sample_buffer = SampleBuffer::<f32>::new(
+            audio_decoder
+                .codec_params()
+                .max_frames_per_packet
+                .unwrap_or(16 * 1024 * channel_count as u64),
+            audio_decoder.signal_spec(),
+        );
+        while audio_decoder.read_packet(&mut temp_sample_buffer).is_some() {
+            buffer.append(&mut temp_sample_buffer.samples().to_vec());
         }
+        // TODO: should pass a proper error here
+        if buffer.is_empty() {
+            return Err(Error::AudioDecodingError(Box::new(
+                symphonia::core::errors::Error::DecodeError("failed to decode file"),
+            )));
+        }
+
+        let report_precision = (sample_rate as f64
+            * channel_count as f64
+            * StreamedFileSource::REPORT_PRECISION.as_secs_f64())
+            as u64;
+
         Ok(Self {
-            file_id,
+            file_id: unique_usize_id(),
             file_path: file_path.to_string(),
-            worker_recv,
-            worker_send,
-            playback_status_send: event_send,
+            volume,
+            playback_message_receive,
+            playback_message_send,
+            playback_status_send,
             buffer,
             buffer_pos: 0_u64,
             channel_count,
             sample_rate,
-            report_precision: precision,
+            report_precision,
             reported_pos: None,
             end_of_track: false,
         })
     }
 
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
-        self.worker_send.clone()
+        self.playback_message_send.clone()
     }
 
     fn playback_id(&self) -> PlaybackId {
@@ -120,7 +135,7 @@ impl AudioSource for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // consume worked messages
         let mut keep_running = true;
-        while let Ok(msg) = self.worker_recv.try_recv() {
+        while let Ok(msg) = self.playback_message_receive.try_recv() {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
                     let buffer_pos = position.as_secs_f64()
@@ -136,12 +151,12 @@ impl AudioSource for PreloadedFileSource {
         if self.end_of_track {
             return 0;
         }
-        // write preloaded source at current position
+        // write preloaded source at current position and apply volume
         let pos = self.buffer_pos as usize;
         let remaining = self.buffer.len() - pos;
         let remaining_buffer = &self.buffer[pos..pos + remaining];
         for (o, i) in output.iter_mut().zip(remaining_buffer.iter()) {
-            *o = *i;
+            *o = *i * self.volume;
         }
         // send playback events
         self.buffer_pos += remaining.min(output.len()) as u64;
