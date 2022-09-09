@@ -46,11 +46,14 @@ let mut player = AudioFilePlayer::new(audio_sink, Some(playback_status_sender));
 let small_file_id = player.play_file("PATH_TO/some_small_file.wav")?;
 // The next file is going to be decoded and streamed on the fly, which is handy for very long
 // files such as music, as it can start playing right away and won't need to allocate memory
-// for the entire file. As the player mixes down all playing files, we'll hear both files at the
-// same time now:
+// for the entire file. We're also repeating the playback 2 times so it's playing 3 times in 
+// total. As the player mixes down everything, we'll hear both files at the same time now:
 let long_file_id = player.play_file_with_options(
     "PATH_TO/some_long_file.mp3",
-    FilePlaybackOptions::default().streamed().with_volume(0.5),
+    FilePlaybackOptions::default()
+        .streamed()
+        .with_volume_db(-6.0)
+        .repeat(2),
 )?;
 
 // !! NB: optional `dasp-synth` feature needs to be enabled for the following to work !!
