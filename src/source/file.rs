@@ -8,7 +8,7 @@ use super::{
     playback::{PlaybackId, PlaybackStatusEvent},
     AudioSource,
 };
-use crate::error::Error;
+use crate::{error::Error, utils::db_to_linear};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -44,6 +44,10 @@ impl FilePlaybackOptions {
 
     pub fn with_volume(mut self, volume: f32) -> Self {
         self.volume = volume;
+        self
+    }
+    pub fn with_volume_db(mut self, volume_db: f32) -> Self {
+        self.volume = db_to_linear(volume_db);
         self
     }
 }

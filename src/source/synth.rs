@@ -4,6 +4,7 @@ pub mod dasp;
 use crossbeam_channel::Sender;
 
 use super::{playback::PlaybackId, AudioSource};
+use crate::utils::db_to_linear;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -23,6 +24,10 @@ impl Default for SynthPlaybackOptions {
 impl SynthPlaybackOptions {
     pub fn with_volume(mut self, volume: f32) -> Self {
         self.volume = volume;
+        self
+    }
+    pub fn with_volume_db(mut self, volume_db: f32) -> Self {
+        self.volume = db_to_linear(volume_db);
         self
     }
 }

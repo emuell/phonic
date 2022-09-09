@@ -18,14 +18,16 @@ fn main() -> Result<(), String> {
     // create sound sources and memorize file ids for the playback status
     let mut playing_file_ids = vec![
         player
-            // files are by default not streamed but are entired loaded first.
+            // files are by default not streamed but are preloaded and player buffered.
             .play_file("assets/altijd synth bit.wav")
             .map_err(|err| err.to_string())?,
         player
-            // this file is going to be streamed on the fly with lowered volume
+            // this file is going to be streamed on the fly with a lowered volume
             .play_file_with_options(
                 "assets/BSQ_M14.wav",
-                FilePlaybackOptions::default().streamed().with_volume(0.75),
+                FilePlaybackOptions::default()
+                    .streamed()
+                    .with_volume_db(-3.0),
             )
             .map_err(|err| err.to_string())?,
     ];
