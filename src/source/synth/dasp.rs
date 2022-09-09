@@ -6,7 +6,7 @@ use crate::{
         playback::{PlaybackId, PlaybackStatusEvent},
         AudioSource,
     },
-    utils::id::unique_usize_id,
+    utils::unique_usize_id,
 };
 
 // -------------------------------------------------------------------------------------------------

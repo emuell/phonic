@@ -10,7 +10,7 @@ use crate::{
         file::{PlaybackId, PlaybackStatusEvent},
         AudioSource,
     },
-    utils::{decoder::AudioDecoder, id::unique_usize_id},
+    utils::{decoder::AudioDecoder, unique_usize_id},
 };
 
 // -------------------------------------------------------------------------------------------------
