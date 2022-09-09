@@ -9,6 +9,7 @@ categories = ["audio", "playback", "games", "sounds"]
 
 [dependencies]
 log = { version = "^0.4", features = ["max_level_debug", "release_max_level_info"] }
+lazy_static = { version = "1.4.0" }
 crossbeam-channel = { version = "0.5" }
 crossbeam-queue = { version = "0.3.6" }
 audio_thread_priority = { version = "^0.26", default-features = false, features = ["winapi"] }
