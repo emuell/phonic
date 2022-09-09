@@ -3,6 +3,7 @@
 pub mod actor;
 pub mod decoder;
 pub mod resampler;
+pub mod fader;
 
 use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicUsize, Ordering};
