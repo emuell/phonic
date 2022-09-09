@@ -73,8 +73,8 @@ pub enum FilePlaybackMessage {
     Seek(Duration),
     /// Start reading streamed sources (internally used only)
     Read,
-    /// Stop the source
-    Stop,
+    /// Stop the source with the given fade-out duration
+    Stop(Duration),
 }
 
 // -------------------------------------------------------------------------------------------------

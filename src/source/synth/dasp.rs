@@ -6,7 +6,10 @@ use crate::{
         playback::{PlaybackId, PlaybackStatusEvent},
         AudioSource,
     },
-    utils::unique_usize_id,
+    utils::{
+        fader::{FaderState, VolumeFader},
+        unique_usize_id,
+    },
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -19,12 +22,13 @@ where
     signal: dasp::signal::UntilExhausted<SignalType>,
     sample_rate: u32,
     volume: f32,
+    stop_fader: VolumeFader,
     send: Sender<SynthPlaybackMessage>,
     recv: Receiver<SynthPlaybackMessage>,
     event_send: Option<Sender<PlaybackStatusEvent>>,
     playback_id: PlaybackId,
     playback_name: String,
-    is_exhausted: bool,
+    playback_finished: bool,
 }
 
 impl<SignalType> DaspSynthSource<SignalType>
@@ -39,17 +43,19 @@ where
         event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
         let (send, recv) = unbounded::<SynthPlaybackMessage>();
+        let channel_count = 1;
         let is_exhausted = false;
         Self {
             signal: signal.until_exhausted(),
-            volume: options.volume,
             sample_rate,
+            volume: options.volume,
+            stop_fader: VolumeFader::new(channel_count, sample_rate),
             send,
             recv,
             event_send,
             playback_id: unique_usize_id(),
             playback_name: signal_name.to_string(),
-            is_exhausted,
+            playback_finished: is_exhausted,
         }
     }
 }
@@ -73,45 +79,56 @@ where
 {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // receive playback events
-        let mut keep_playing = true;
+        let mut stop_playing = false;
         if let Ok(msg) = self.recv.try_recv() {
             match msg {
-                SynthPlaybackMessage::Stop => {
-                    keep_playing = false;
+                SynthPlaybackMessage::Stop(fadeout) => {
+                    if fadeout.is_zero() {
+                        stop_playing = true;
+                    } else {
+                        self.stop_fader.start(fadeout);
+                    }
                 }
             }
         }
-        if self.is_exhausted {
+
+        // return empty handed when playback finished
+        if self.playback_finished {
             return 0;
         }
+
         // run signal on output until exhausted
         let mut written = 0;
         for (o, i) in output.iter_mut().zip(&mut self.signal) {
             *o = i as f32;
             written += 1;
         }
+
         // apply volume when <> 1
         if (1.0f32 - self.volume).abs() > 0.0001 {
             for o in output[0..written].as_mut() {
                 *o *= self.volume;
             }
         }
-        // check if the signal is exhausted
-        if written == 0 && !self.is_exhausted {
-            self.is_exhausted = true;
-        }
-        // send status messages
-        if self.is_exhausted || !keep_playing {
+        // apply volume fader
+        self.stop_fader.process(&mut output[0..written]);
+
+        // check if the signal is exhausted and send Stopped event
+        let is_exhausted = written == 0;
+        let fadeout_completed = self.stop_fader.state() == FaderState::Finished;
+        if stop_playing || is_exhausted || fadeout_completed {
+            self.playback_finished = true;
             if let Some(event_send) = &self.event_send {
                 if let Err(err) = event_send.send(PlaybackStatusEvent::Stopped {
                     id: self.playback_id,
                     path: self.playback_name.clone(),
-                    exhausted: self.is_exhausted,
+                    exhausted: self.playback_finished,
                 }) {
                     log::warn!("failed to send synth playback status event: {}", err);
                 }
             }
         }
+
         written
     }
 
@@ -124,6 +141,6 @@ where
     }
 
     fn is_exhausted(&self) -> bool {
-        self.is_exhausted
+        self.playback_finished
     }
 }

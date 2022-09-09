@@ -10,7 +10,11 @@ use crate::{
         file::{PlaybackId, PlaybackStatusEvent},
         AudioSource,
     },
-    utils::{decoder::AudioDecoder, unique_usize_id},
+    utils::{
+        decoder::AudioDecoder,
+        fader::{FaderState, VolumeFader},
+        unique_usize_id,
+    },
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -30,7 +34,8 @@ pub struct PreloadedFileSource {
     sample_rate: u32,
     report_precision: u64,
     reported_pos: Option<u64>,
-    end_of_track: bool,
+    stop_fader: VolumeFader,
+    playback_finished: bool,
 }
 
 impl PreloadedFileSource {
@@ -108,7 +113,8 @@ impl FileSource for PreloadedFileSource {
             sample_rate,
             report_precision,
             reported_pos: None,
-            end_of_track: false,
+            stop_fader: VolumeFader::new(channel_count, sample_rate),
+            playback_finished: false,
         })
     }
 
@@ -129,14 +135,13 @@ impl FileSource for PreloadedFileSource {
     }
 
     fn end_of_track(&self) -> bool {
-        self.end_of_track
+        self.playback_finished
     }
 }
 
 impl AudioSource for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // consume playback messages
-        let mut keep_running = true;
         while let Ok(msg) = self.playback_message_receive.try_recv() {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
@@ -146,30 +151,45 @@ impl AudioSource for PreloadedFileSource {
                     self.buffer_pos = (buffer_pos as u64).clamp(0, self.buffer.len() as u64);
                 }
                 FilePlaybackMessage::Read => (),
-                FilePlaybackMessage::Stop => keep_running = false,
+                FilePlaybackMessage::Stop(fadeout) => {
+                    if fadeout.is_zero() {
+                        self.playback_finished = true;
+                    } else {
+                        self.stop_fader.start(fadeout);
+                    }
+                }
             }
         }
 
-        // quickly bail out when we finished playing
-        if self.end_of_track {
+        // quickly bail out when we've finished playing
+        if self.playback_finished {
             return 0;
         }
 
-        // write preloaded source at current position and apply volume
+        // write from buffer at current position and apply volume, fadeout and repeats
         let mut total_written = 0_usize;
         while total_written < output.len() {
+            // write from buffer into output
             let pos = self.buffer_pos as usize;
             let remaining = self.buffer.len() - pos;
             let remaining_buffer = &self.buffer[pos..pos + remaining];
-            let target = &mut output[total_written..];
-            for (o, i) in target.iter_mut().zip(remaining_buffer.iter()) {
+            let remaining_target = &mut output[total_written..];
+            for (o, i) in remaining_target.iter_mut().zip(remaining_buffer.iter()) {
                 *o = *i * self.volume;
             }
-            let written = remaining.min(target.len());
+
+            // apply stop fader
+            let written = remaining.min(remaining_target.len());
+            let written_target = &mut output[total_written..total_written + written];
+            self.stop_fader.process(written_target);
+
+            // maintain buffer pos
             self.buffer_pos += written as u64;
             total_written += written;
+
             // loop or stop when reaching end of file
-            if self.buffer_pos >= self.buffer.len() as u64 {
+            let end_of_file = self.buffer_pos >= self.buffer.len() as u64;
+            if end_of_file {
                 if self.repeat > 0 {
                     if self.repeat != usize::MAX {
                         self.repeat -= 1;
@@ -182,7 +202,7 @@ impl AudioSource for PreloadedFileSource {
             }
         }
 
-        // send playback events
+        // send Position change Event
         if let Some(event_send) = &self.playback_status_send {
             if self.should_report_pos(self.buffer_pos) {
                 self.reported_pos = Some(self.buffer_pos);
@@ -196,8 +216,11 @@ impl AudioSource for PreloadedFileSource {
                 }
             }
         }
-        if self.buffer_pos >= self.buffer.len() as u64 || !keep_running {
-            self.end_of_track = true;
+
+        // check if we've finished playing and send Stopped events
+        let end_of_file = self.buffer_pos >= self.buffer.len() as u64;
+        let fadeout_completed = self.stop_fader.state() == FaderState::Finished;
+        if end_of_file || fadeout_completed {
             if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
                     id: self.file_id,
@@ -207,6 +230,8 @@ impl AudioSource for PreloadedFileSource {
                     log::warn!("Failed to send playback event: {}", err)
                 }
             }
+            // mark playback as finished
+            self.playback_finished = true;
         }
 
         total_written as usize
@@ -221,6 +246,6 @@ impl AudioSource for PreloadedFileSource {
     }
 
     fn is_exhausted(&self) -> bool {
-        self.end_of_track
+        self.playback_finished
     }
 }

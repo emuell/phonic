@@ -13,6 +13,7 @@ It was originally developed and is used in the [AFEC-Explorer](https://github.co
 - Audio output for Windows, macOS and Linux is handled via [cpal](https://github.com/RustAudio/cpal) or [cubeb](https://github.com/mozilla/cubeb).
 - Decodes and thus plays back *most common audio file formats*, thanks to [Symphonia](https://github.com/pdeljanov/Symphonia).
 - Files are *automatically resampled* and *channel mapped* to the audio output's signal specs, thanks to [libsamplerate](https://github.com/RamiHg/rust-libsamplerate).
+- File and synth playback can be easily smoothly stopped (de-clicked by default) via *volume fading* (de-clicking for seeking is a TODO)
 
 ### Examples
 

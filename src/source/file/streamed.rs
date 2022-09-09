@@ -22,6 +22,7 @@ use crate::{
     utils::{
         actor::{Act, Actor, ActorHandle},
         decoder::AudioDecoder,
+        fader::{FaderState, VolumeFader},
         unique_usize_id,
     },
 };
@@ -34,6 +35,7 @@ pub struct StreamedFileSource {
     file_id: usize,
     file_path: String,
     volume: f32,
+    stop_fader: VolumeFader,
     consumer: Consumer<f32>,
     worker_state: SharedFileWorkerState,
     event_send: Option<Sender<PlaybackStatusEvent>>,
@@ -95,7 +97,7 @@ impl FileSource for StreamedFileSource {
             * Self::REPORT_PRECISION.as_secs_f64()) as u64;
         let reported_pos = None;
 
-        // Create a ring-buffer for the decoded samples.  Worker thread is producing,
+        // Create a ring-buffer for the decoded samples. Worker thread is producing,
         // we are consuming in the `AudioSource` impl.
         let buffer = StreamedFileWorker::default_buffer();
         let consumer = buffer.consumer();
@@ -109,10 +111,14 @@ impl FileSource for StreamedFileSource {
             // we track the total number of samples in this stream in this atomic, set when
             // the underlying decoder returns EOF.
             total_samples: Arc::new(AtomicU64::new(u64::MAX)),
+            // True when worker reached EOF
+            end_of_file: Arc::new(AtomicBool::new(false)),
             // False, when worked received a stop event
             is_playing: Arc::new(AtomicBool::new(true)),
-            // True when worker reached EOF
-            is_exhausted: Arc::new(AtomicBool::new(false)),
+            // True when the worker received a fadeout stop
+            is_fading_out: Arc::new(AtomicBool::new(false)),
+            // When fading out, the requested fade_out duration in ms
+            fade_out_duration_ms: Arc::new(AtomicU64::new(0)),
         };
 
         let playback_finished = false;
@@ -130,6 +136,7 @@ impl FileSource for StreamedFileSource {
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
             volume: options.volume,
+            stop_fader: VolumeFader::new(signal_spec.channels.count(), signal_spec.rate),
             consumer,
             event_send,
             signal_spec,
@@ -159,18 +166,42 @@ impl FileSource for StreamedFileSource {
     }
 
     fn end_of_track(&self) -> bool {
-        self.playback_finished && self.worker_state.is_exhausted.load(Ordering::Relaxed)
+        self.playback_finished && self.worker_state.end_of_file.load(Ordering::Relaxed)
     }
 }
 
 impl AudioSource for StreamedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
+        // return empty handed when playback finished
         if self.playback_finished {
             return 0;
         }
+        // consume output from our ring-buffer
         let written = self.consumer.read(output).unwrap_or(0);
         let position = self.written_samples(written as u64);
 
+        // apply volume parameter
+        if (1.0f32 - self.volume).abs() > 0.0001 {
+            for o in output[0..written].as_mut() {
+                *o *= self.volume;
+            }
+        }
+
+        // apply fade-out stop
+        let is_stopping = self.worker_state.is_fading_out.load(Ordering::Relaxed);
+        if is_stopping {
+            if self.stop_fader.state() == FaderState::Stopped {
+                let duration = Duration::from_millis(
+                    self.worker_state
+                        .fade_out_duration_ms
+                        .load(Ordering::Relaxed),
+                );
+                self.stop_fader.start(duration);
+            }
+            self.stop_fader.process(&mut output[0..written]);
+        }
+
+        // send position change events
         if let Some(event_send) = &self.event_send {
             if self.should_report_pos(position) {
                 self.reported_pos = Some(position);
@@ -185,17 +216,11 @@ impl AudioSource for StreamedFileSource {
             }
         }
 
-        // apply volume, when <> 1
-        if (1.0f32 - self.volume).abs() > 0.0001 {
-            for o in output[0..written].as_mut() {
-                *o *= self.volume;
-            }
-        }
-
-        // send exhausted events
+        // check if playback finished and send Stopped events
         let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);
-        let is_exhausted = self.worker_state.is_exhausted.load(Ordering::Relaxed);
-        if (is_exhausted && written == 0) || !is_playing {
+        let is_exhausted = written == 0 && self.worker_state.end_of_file.load(Ordering::Relaxed);
+        let fadeout_completed = is_stopping && self.stop_fader.state() == FaderState::Finished;
+        if !is_playing || is_exhausted || fadeout_completed {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
@@ -206,9 +231,13 @@ impl AudioSource for StreamedFileSource {
                     log::warn!("failed to send playback event: {}", err)
                 }
             }
+            // stop our worker
+            self.worker_state.is_playing.store(false, Ordering::Relaxed);
+            // and stop processing
             self.playback_finished = true;
         }
 
+        // return dirty output len
         written
     }
 
@@ -228,7 +257,7 @@ impl AudioSource for StreamedFileSource {
 impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
-        let _ = self.actor.send(FilePlaybackMessage::Stop);
+        let _ = self.actor.send(FilePlaybackMessage::Stop(Duration::ZERO));
     }
 }
 
@@ -236,14 +265,18 @@ impl Drop for StreamedFileSource {
 
 #[derive(Clone)]
 struct SharedFileWorkerState {
-    /// Shared atomic position.  We update this on seek only.
+    /// Current position. We update this on seek and EOF only.
     position: Arc<AtomicU64>,
-    /// Shared atomic for total number of samples.  We set this on EOF.
+    /// Total number of samples. We set this on EOF.
     total_samples: Arc<AtomicU64>,
-    /// Shared atomic activation state. Is the worker thread not stopped?
+    /// Is the worker thread not stopped?
     is_playing: Arc<AtomicBool>,
-    /// Shared atomic file pos state. Did the worker thread played until the end of the file?
-    is_exhausted: Arc<AtomicBool>,
+    /// Did the worker thread played until the end of the file?
+    end_of_file: Arc<AtomicBool>,
+    /// True when a stop fadeout was requested.
+    is_fading_out: Arc<AtomicBool>,
+    /// Stop fadeout duration in ms
+    fade_out_duration_ms: Arc<AtomicU64>,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -327,16 +360,29 @@ impl Actor for StreamedFileWorker {
         match msg {
             FilePlaybackMessage::Seek(time) => self.on_seek(time),
             FilePlaybackMessage::Read => self.on_read(),
-            FilePlaybackMessage::Stop => self.on_stop(),
+            FilePlaybackMessage::Stop(fadeout) => self.on_stop(fadeout),
         }
     }
 }
 
 impl StreamedFileWorker {
-    fn on_stop(&mut self) -> Result<Act<Self>, Error> {
-        self.is_reading = false;
-        self.shared_state.is_playing.store(false, Ordering::Relaxed);
-        Ok(Act::Shutdown)
+    fn on_stop(&mut self, fadeout: Duration) -> Result<Act<Self>, Error> {
+        if fadeout.is_zero() {
+            // immediately stop reading
+            self.is_reading = false;
+            self.shared_state.is_playing.store(false, Ordering::Relaxed);
+            Ok(Act::Shutdown)
+        } else {
+            // duration and fade out state will be picked up by our parent source
+            self.shared_state
+                .fade_out_duration_ms
+                .store(fadeout.as_millis() as u64, Ordering::Relaxed);
+            self.shared_state
+                .is_fading_out
+                .store(true, Ordering::Relaxed);
+            // keep running until fade-out completed
+            Ok(Act::Continue)
+        }
     }
 
     fn on_seek(&mut self, time: Duration) -> Result<Act<Self>, Error> {
@@ -362,9 +408,15 @@ impl StreamedFileWorker {
     }
 
     fn on_read(&mut self) -> Result<Act<Self>, Error> {
+        // check if we no longer need to run the worker
+        if !self.shared_state.is_playing.load(Ordering::Relaxed) {
+            return Ok(Act::Shutdown);
+        }
+        // check if we need to fetch more input samples
         if !self.samples_to_write.is_empty() {
-            let writable = &self.input_packet.samples()[self.samples_to_write.clone()];
-            if let Ok(written) = self.output_producer.write(writable) {
+            let input = &self.input_packet.samples()[self.samples_to_write.clone()];
+            // TODO: self.output_fader.process(&mut input_mut.borrow_mut());
+            if let Ok(written) = self.output_producer.write(input) {
                 self.samples_written += written as u64;
                 self.samples_to_write.start += written;
                 self.is_reading = true;
@@ -381,6 +433,7 @@ impl StreamedFileWorker {
                 })
             }
         } else {
+            // fetch more input samples
             match self.input.read_packet(&mut self.input_packet) {
                 Some(_) => {
                     // continue reading
@@ -404,9 +457,7 @@ impl StreamedFileWorker {
                     } else {
                         // stop reading and mark as exhausted
                         self.is_reading = false;
-                        self.shared_state
-                            .is_exhausted
-                            .store(true, Ordering::Relaxed);
+                        self.shared_state.end_of_file.store(true, Ordering::Relaxed);
                         self.shared_state
                             .total_samples
                             .store(self.samples_written, Ordering::Relaxed);

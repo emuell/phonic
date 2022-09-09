@@ -19,7 +19,7 @@ use crate::{
         playback::{PlaybackId, PlaybackStatusEvent},
         synth::{SynthPlaybackMessage, SynthSource},
     },
-    utils::resampler::DEFAULT_RESAMPLING_QUALITY,
+    utils::resampler::ResamplingQuality,
     AudioSource,
 };
 
@@ -45,6 +45,9 @@ pub struct AudioFilePlayer {
 
 /// public interface
 impl AudioFilePlayer {
+    const DEFAULT_STOP_FADEOUT_SECS: f32 = 0.05;
+    const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::SincFastest;
+
     pub fn new(
         sink: DefaultAudioSink,
         playback_status_sender_arg: Option<Sender<PlaybackStatusEvent>>,
@@ -108,7 +111,7 @@ impl AudioFilePlayer {
             streamed_source.converted(
                 self.sink.channel_count(),
                 self.sink.sample_rate(),
-                DEFAULT_RESAMPLING_QUALITY,
+                Self::DEFAULT_RESAMPLING_QUALITY,
             )
         } else {
             let preloaded_source = PreloadedFileSource::new(
@@ -122,7 +125,7 @@ impl AudioFilePlayer {
             preloaded_source.converted(
                 self.sink.channel_count(),
                 self.sink.sample_rate(),
-                DEFAULT_RESAMPLING_QUALITY,
+                Self::DEFAULT_RESAMPLING_QUALITY,
             )
         };
         // subscribe to playback envets in the newly created source
@@ -202,7 +205,7 @@ impl AudioFilePlayer {
         let converted = source.converted(
             self.sink.channel_count(),
             self.sink.sample_rate(),
-            DEFAULT_RESAMPLING_QUALITY,
+            Self::DEFAULT_RESAMPLING_QUALITY,
         );
         // play the source
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
@@ -238,13 +241,24 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
-    /// Stop a playing file or synth source.
+    /// Stop a playing file or synth source with default fade-out duration.
     pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
+        self.stop_source_with_fadeout(
+            playback_id,
+            Duration::from_secs_f32(Self::DEFAULT_STOP_FADEOUT_SECS),
+        )
+    }
+    /// Stop a playing file or synth source with the given fade-out duration.
+    pub fn stop_source_with_fadeout(
+        &mut self,
+        playback_id: PlaybackId,
+        fadeout: Duration,
+    ) -> Result<(), Error> {
         let mut playing_sources = self.playing_sources.lock().unwrap();
         if let Some(msg_sender) = playing_sources.get(&playback_id) {
             match msg_sender {
                 PlaybackMessageSender::File(file_sender) => {
-                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
+                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop(fadeout)) {
                         log::warn!(
                             "failed to send stop command to file source: {}",
                             err.to_string()
@@ -252,7 +266,7 @@ impl AudioFilePlayer {
                     }
                 }
                 PlaybackMessageSender::Synth(synth_sender) => {
-                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop) {
+                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop(fadeout)) {
                         log::warn!(
                             "failed to send stop command to synth source: {}",
                             err.to_string()
@@ -265,19 +279,19 @@ impl AudioFilePlayer {
             playing_sources.remove(&playback_id);
             return Ok(());
         } else {
-            log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
+            // log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
         }
         Err(Error::MediaFileNotFound)
     }
 
     /// Stop all playing sources.
     pub fn stop_all_sources(&mut self) -> Result<(), Error> {
-        let playing_ids: Vec<PlaybackId>;
+        let playing_source_ids: Vec<PlaybackId>;
         {
             let playing_sources = self.playing_sources.lock().unwrap();
-            playing_ids = playing_sources.keys().copied().collect();
+            playing_source_ids = playing_sources.keys().copied().collect();
         }
-        for source_id in playing_ids {
+        for source_id in playing_source_ids {
             self.stop_source(source_id)?;
         }
         Ok(())

@@ -2,6 +2,7 @@
 pub mod dasp;
 
 use crossbeam_channel::Sender;
+use std::time::Duration;
 
 use super::{playback::PlaybackId, AudioSource};
 use crate::utils::db_to_linear;
@@ -37,7 +38,7 @@ impl SynthPlaybackOptions {
 /// Events to control playback of a synth source
 pub enum SynthPlaybackMessage {
     /// Stop the synth source
-    Stop,
+    Stop(Duration),
 }
 
 // -------------------------------------------------------------------------------------------------
