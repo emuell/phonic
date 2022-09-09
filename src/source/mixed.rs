@@ -88,6 +88,10 @@ impl AudioSource for MixedSource {
                 }
             }
         }
+        // return empty handed when we have no sources
+        if self.playing_sources.is_empty() {
+            return 0;
+        }
         // clear output as we're only adding below
         for o in output.iter_mut() {
             *o = 0_f32;
@@ -119,8 +123,8 @@ impl AudioSource for MixedSource {
         }
         // drain inactive sources
         self.playing_sources.retain(|s| s.is_active);
-        // return modified output len
-        max_written
+        // return modified output len (we've cleared output entirely)
+        output.len()
     }
 
     fn channel_count(&self) -> usize {
