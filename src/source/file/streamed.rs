@@ -35,22 +35,20 @@ pub struct StreamedFileSource {
     file_path: String,
     volume: f32,
     consumer: Consumer<f32>,
+    worker_state: SharedFileWorkerState,
     event_send: Option<Sender<PlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     time_base: TimeBase,
-    total_samples: Arc<AtomicU64>,
-    is_running: Arc<AtomicBool>,
     report_precision: u64,
     reported_pos: Option<u64>,
-    position: Arc<AtomicU64>,
-    end_of_track: bool,
+    playback_finished: bool,
 }
 
 impl StreamedFileSource {
     pub(crate) const REPORT_PRECISION: Duration = Duration::from_millis(500);
 
     pub(crate) fn total_samples(&self) -> Option<u64> {
-        let total = self.total_samples.load(Ordering::Relaxed);
+        let total = self.worker_state.total_samples.load(Ordering::Relaxed);
         if total == u64::MAX {
             None
         } else {
@@ -59,7 +57,10 @@ impl StreamedFileSource {
     }
 
     pub(crate) fn written_samples(&self, position: u64) -> u64 {
-        self.position.fetch_add(position, Ordering::Relaxed) + position
+        self.worker_state
+            .position
+            .fetch_add(position, Ordering::Relaxed)
+            + position
     }
 
     fn should_report_pos(&self, pos: u64) -> bool {
@@ -82,6 +83,7 @@ impl FileSource for StreamedFileSource {
         file_path: &str,
         event_send: Option<Sender<PlaybackStatusEvent>>,
         volume: f32,
+        repeat: usize,
     ) -> Result<Self, Error> {
         // create decoder
         let decoder = AudioDecoder::new(file_path.to_string())?;
@@ -99,28 +101,27 @@ impl FileSource for StreamedFileSource {
         let buffer = StreamedFileWorker::default_buffer();
         let consumer = buffer.consumer();
 
-        // We keep track of the current play-head position by sharing an atomic sample
-        // counter with the decoding worker.  Worker is setting this on seek, we are
-        // incrementing on reading from the ring-buffer.
-        let position = Arc::new(AtomicU64::new(0));
-        let end_of_track = false;
+        let worker_state = SharedFileWorkerState {
+            // We keep track of the current play-head position by sharing an atomic sample
+            // counter with the decoding worker.  Worker is setting this on seek, we are
+            // incrementing on reading from the ring-buffer.
+            position: Arc::new(AtomicU64::new(0)),
+            // Because the `n_frames` count that Symphonia gives us can be a bit unreliable,
+            // we track the total number of samples in this stream in this atomic, set when
+            // the underlying decoder returns EOF.
+            total_samples: Arc::new(AtomicU64::new(u64::MAX)),
+            // False, when worked received a stop event
+            is_playing: Arc::new(AtomicBool::new(true)),
+            // True when worker reached EOF
+            is_exhausted: Arc::new(AtomicBool::new(false)),
+        };
 
-        // Because the `n_frames` count that Symphonia gives us can be a bit unreliable,
-        // we track the total number of samples in this stream in this atomic, set when
-        // the underlying decoder returns EOF.
-        let total_samples = Arc::new(AtomicU64::new(u64::MAX));
-
-        // Create a shared is_running flag
-        let is_running = Arc::new(AtomicBool::new(true));
+        let playback_finished = false;
 
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
         let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
-            let position = Arc::clone(&position);
-            let total_samples = Arc::clone(&total_samples);
-            let is_running = Arc::clone(&is_running);
-            move |this| {
-                StreamedFileWorker::new(this, decoder, buffer, position, total_samples, is_running)
-            }
+            let shared_state = worker_state.clone();
+            move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
         });
         actor.send(FilePlaybackMessage::Read)?;
 
@@ -133,10 +134,8 @@ impl FileSource for StreamedFileSource {
             event_send,
             signal_spec,
             time_base,
-            total_samples,
-            is_running,
-            position,
-            end_of_track,
+            worker_state,
+            playback_finished,
             report_precision,
             reported_pos,
         })
@@ -151,7 +150,7 @@ impl FileSource for StreamedFileSource {
     }
 
     fn current_frame_position(&self) -> u64 {
-        self.position.load(Ordering::Relaxed) / self.channel_count() as u64
+        self.worker_state.position.load(Ordering::Relaxed) / self.channel_count() as u64
     }
 
     fn total_frames(&self) -> Option<u64> {
@@ -160,13 +159,13 @@ impl FileSource for StreamedFileSource {
     }
 
     fn end_of_track(&self) -> bool {
-        self.end_of_track
+        self.playback_finished && self.worker_state.is_exhausted.load(Ordering::Relaxed)
     }
 }
 
 impl AudioSource for StreamedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
-        if self.end_of_track {
+        if self.playback_finished {
             return 0;
         }
         let written = self.consumer.read(output).unwrap_or(0);
@@ -175,9 +174,7 @@ impl AudioSource for StreamedFileSource {
         if let Some(event_send) = &self.event_send {
             if self.should_report_pos(position) {
                 self.reported_pos = Some(position);
-                // Send a position report, so the upper layers can visualize the playback
-                // progress and preload the next track.  We cannot block here, so if the channel
-                // is full, we just try the next time instead of waiting.
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.file_id,
                     path: self.file_path.clone(),
@@ -196,20 +193,20 @@ impl AudioSource for StreamedFileSource {
         }
 
         // send exhausted events
-        let total_samples = self.total_samples.load(Ordering::Relaxed);
-        let is_running = self.is_running.load(Ordering::Relaxed);
-        if position >= total_samples || !is_running {
+        let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);
+        let is_exhausted = self.worker_state.is_exhausted.load(Ordering::Relaxed);
+        if (is_exhausted && written == 0) || !is_playing {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     path: self.file_path.clone(),
-                    exhausted: position >= total_samples,
+                    exhausted: is_exhausted,
                 }) {
                     log::warn!("failed to send playback event: {}", err)
                 }
             }
-            self.end_of_track = true;
+            self.playback_finished = true;
         }
 
         written
@@ -224,7 +221,7 @@ impl AudioSource for StreamedFileSource {
     }
 
     fn is_exhausted(&self) -> bool {
-        self.end_of_track
+        self.playback_finished
     }
 }
 
@@ -237,7 +234,21 @@ impl Drop for StreamedFileSource {
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct StreamedFileWorker {
+#[derive(Clone)]
+struct SharedFileWorkerState {
+    /// Shared atomic position.  We update this on seek only.
+    position: Arc<AtomicU64>,
+    /// Shared atomic for total number of samples.  We set this on EOF.
+    total_samples: Arc<AtomicU64>,
+    /// Shared atomic activation state. Is the worker thread not stopped?
+    is_playing: Arc<AtomicBool>,
+    /// Shared atomic file pos state. Did the worker thread played until the end of the file?
+    is_exhausted: Arc<AtomicBool>,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+struct StreamedFileWorker {
     /// Sending part of our own actor channel.
     this: Sender<FilePlaybackMessage>,
     /// Decoder we are reading packets/samples from.
@@ -250,18 +261,16 @@ pub struct StreamedFileWorker {
     output: SpscRb<f32>,
     /// Producing part of the output ring-buffer.
     output_producer: Producer<f32>,
-    /// Shared atomic position.  We update this on seek only.
-    position: Arc<AtomicU64>,
-    /// Shared atomic for total number of samples.  We set this on EOF.
-    total_samples: Arc<AtomicU64>,
+    // Shared state with StreamedFileSource
+    shared_state: SharedFileWorkerState,
     /// Range of samples in `resampled` that are awaiting flush into `output`.
     samples_to_write: Range<usize>,
     /// Number of samples written into the output channel.
     samples_written: u64,
-    /// Is the worker thread running?
-    is_running: Arc<AtomicBool>,
     /// Are we in the middle of automatic read loop?
     is_reading: bool,
+    /// Number of times we should repeat the source
+    repeat: usize,
 }
 
 impl StreamedFileWorker {
@@ -274,9 +283,8 @@ impl StreamedFileWorker {
         this: Sender<FilePlaybackMessage>,
         input: AudioDecoder,
         output: SpscRb<f32>,
-        position: Arc<AtomicU64>,
-        total_samples: Arc<AtomicU64>,
-        is_running: Arc<AtomicBool>,
+        shared_state: SharedFileWorkerState,
+        repeat: usize,
     ) -> Self {
         const DEFAULT_MAX_FRAMES: u64 = 8 * 1024;
 
@@ -295,8 +303,6 @@ impl StreamedFileWorker {
             );
         }
 
-        let is_reading = false;
-
         Self {
             output_producer: output.producer(),
             input_packet: SampleBuffer::new(max_input_frames, input.signal_spec()),
@@ -304,12 +310,11 @@ impl StreamedFileWorker {
             input,
             this,
             output,
-            position,
-            total_samples,
+            shared_state,
             samples_written: 0,
-            samples_to_write: 0..0, // Arbitrary empty range.
-            is_running,
-            is_reading,
+            samples_to_write: 0..0,
+            is_reading: false,
+            repeat,
         }
     }
 }
@@ -330,7 +335,7 @@ impl Actor for StreamedFileWorker {
 impl StreamedFileWorker {
     fn on_stop(&mut self) -> Result<Act<Self>, Error> {
         self.is_reading = false;
-        self.is_running.store(false, Ordering::Relaxed);
+        self.shared_state.is_playing.store(false, Ordering::Relaxed);
         Ok(Act::Shutdown)
     }
 
@@ -344,7 +349,9 @@ impl StreamedFileWorker {
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
-                self.position.store(position, Ordering::Relaxed);
+                self.shared_state
+                    .position
+                    .store(position, Ordering::Relaxed);
                 self.output.clear();
             }
             Err(err) => {
@@ -376,14 +383,34 @@ impl StreamedFileWorker {
         } else {
             match self.input.read_packet(&mut self.input_packet) {
                 Some(_) => {
+                    // continue reading
                     self.samples_to_write = 0..self.input_packet.samples().len();
                     self.is_reading = true;
                     self.this.send(FilePlaybackMessage::Read)?;
                 }
                 None => {
-                    self.is_reading = false;
-                    self.total_samples
-                        .store(self.samples_written, Ordering::Relaxed);
+                    // reached EOF
+                    if self.repeat > 0 {
+                        if self.repeat != usize::MAX {
+                            self.repeat -= 1;
+                        }
+                        // seek to start and continue reading
+                        self.input.seek(Duration::ZERO)?;
+                        self.samples_written = 0;
+                        self.samples_to_write = 0..0;
+                        self.shared_state.position.store(0, Ordering::Relaxed);
+                        self.is_reading = true;
+                        self.this.send(FilePlaybackMessage::Read)?;
+                    } else {
+                        // stop reading and mark as exhausted
+                        self.is_reading = false;
+                        self.shared_state
+                            .is_exhausted
+                            .store(true, Ordering::Relaxed);
+                        self.shared_state
+                            .total_samples
+                            .store(self.samples_written, Ordering::Relaxed);
+                    }
                 }
             }
             Ok(Act::Continue)

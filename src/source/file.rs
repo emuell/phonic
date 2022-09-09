@@ -21,6 +21,9 @@ pub struct FilePlaybackOptions {
     pub stream: bool,
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
     pub volume: f32,
+    /// By default 0: when > 0 the number of times the file should be looped.
+    /// Set to usize::MAX to repeat forever.
+    pub repeat: usize,
 }
 
 impl Default for FilePlaybackOptions {
@@ -28,6 +31,7 @@ impl Default for FilePlaybackOptions {
         Self {
             stream: false,
             volume: 1.0f32,
+            repeat: 0,
         }
     }
 }
@@ -48,6 +52,15 @@ impl FilePlaybackOptions {
     }
     pub fn with_volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn repeat(mut self, count: usize) -> Self {
+        self.repeat = count;
+        self
+    }
+    pub fn repeat_forever(mut self) -> Self {
+        self.repeat = usize::MAX;
         self
     }
 }
@@ -74,6 +87,7 @@ pub trait FileSource: AudioSource + Sized {
         file_path: &str,
         status_sender: Option<Sender<PlaybackStatusEvent>>,
         volume: f32,
+        repeat: usize,
     ) -> Result<Self, Error>;
 
     /// Channel to control file playback.

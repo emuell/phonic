@@ -20,6 +20,7 @@ pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: String,
     volume: f32,
+    repeat: usize,
     playback_message_send: Sender<FilePlaybackMessage>,
     playback_message_receive: Receiver<FilePlaybackMessage>,
     playback_status_send: Option<Sender<PlaybackStatusEvent>>,
@@ -53,6 +54,7 @@ impl FileSource for PreloadedFileSource {
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         volume: f32,
+        repeat: usize,
     ) -> Result<Self, Error> {
         // create decoder and get signal specs
         let mut audio_decoder = AudioDecoder::new(file_path.to_string())?;
@@ -97,6 +99,7 @@ impl FileSource for PreloadedFileSource {
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
             volume,
+            repeat,
             playback_message_receive,
             playback_message_send,
             playback_status_send,
@@ -133,7 +136,7 @@ impl FileSource for PreloadedFileSource {
 
 impl AudioSource for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
-        // consume worked messages
+        // consume playback messages
         let mut keep_running = true;
         while let Ok(msg) = self.playback_message_receive.try_recv() {
             match msg {
@@ -147,22 +150,44 @@ impl AudioSource for PreloadedFileSource {
                 FilePlaybackMessage::Stop => keep_running = false,
             }
         }
+
         // quickly bail out when we finished playing
         if self.end_of_track {
             return 0;
         }
+
         // write preloaded source at current position and apply volume
-        let pos = self.buffer_pos as usize;
-        let remaining = self.buffer.len() - pos;
-        let remaining_buffer = &self.buffer[pos..pos + remaining];
-        for (o, i) in output.iter_mut().zip(remaining_buffer.iter()) {
-            *o = *i * self.volume;
+        let mut total_written = 0_usize;
+        while total_written < output.len() {
+            let pos = self.buffer_pos as usize;
+            let remaining = self.buffer.len() - pos;
+            let remaining_buffer = &self.buffer[pos..pos + remaining];
+            let target = &mut output[total_written..];
+            for (o, i) in target.iter_mut().zip(remaining_buffer.iter()) {
+                *o = *i * self.volume;
+            }
+            let written = remaining.min(target.len());
+            self.buffer_pos += written as u64;
+            total_written += written;
+            // loop or stop when reaching end of file
+            if self.buffer_pos >= self.buffer.len() as u64 {
+                if self.repeat > 0 {
+                    if self.repeat != usize::MAX {
+                        self.repeat -= 1;
+                    }
+                    self.buffer_pos = 0;
+                    self.reported_pos = None; // force reporting a new pos
+                } else {
+                    break;
+                }
+            }
         }
+
         // send playback events
-        self.buffer_pos += remaining.min(output.len()) as u64;
         if let Some(event_send) = &self.playback_status_send {
             if self.should_report_pos(self.buffer_pos) {
                 self.reported_pos = Some(self.buffer_pos);
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.file_id,
                     path: self.file_path.clone(),
@@ -184,7 +209,8 @@ impl AudioSource for PreloadedFileSource {
                 }
             }
         }
-        remaining.min(output.len())
+
+        total_written as usize
     }
 
     fn channel_count(&self) -> usize {

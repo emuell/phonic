@@ -22,12 +22,14 @@ fn main() -> Result<(), String> {
             .play_file("assets/altijd synth bit.wav")
             .map_err(|err| err.to_string())?,
         player
-            // this file is going to be streamed on the fly with a lowered volume
+            // this file is going to be streamed on the fly with a lowered volume.
+            // we're also lowering the volume and do loop the file 2 times
             .play_file_with_options(
                 "assets/BSQ_M14.wav",
                 FilePlaybackOptions::default()
                     .streamed()
-                    .with_volume_db(-3.0),
+                    .with_volume_db(-3.0)
+                    .repeat(2),
             )
             .map_err(|err| err.to_string())?,
     ];

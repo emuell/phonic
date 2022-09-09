@@ -101,6 +101,7 @@ impl AudioFilePlayer {
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options.volume,
+                options.repeat,
             )?;
             source_playback_id = streamed_source.playback_id();
             playback_message_sender = streamed_source.playback_message_sender();
@@ -115,6 +116,7 @@ impl AudioFilePlayer {
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options.volume,
+                options.repeat,
             )?;
             source_playback_id = preloaded_source.playback_id();
             playback_message_sender = preloaded_source.playback_message_sender();
