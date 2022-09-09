@@ -1,6 +1,6 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
-use super::{SynthPlaybackMessage, SynthSource};
+use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
     source::{
         playback::{PlaybackId, PlaybackStatusEvent},
@@ -34,7 +34,7 @@ where
     pub fn new(
         signal: SignalType,
         signal_name: &str,
-        volume: f32,
+        options: SynthPlaybackOptions,
         sample_rate: u32,
         event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
@@ -42,8 +42,8 @@ where
         let is_exhausted = false;
         Self {
             signal: signal.until_exhausted(),
+            volume: options.volume,
             sample_rate,
-            volume,
             send,
             recv,
             event_send,

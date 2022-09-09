@@ -14,7 +14,7 @@ use symphonia::core::{
     units::TimeBase,
 };
 
-use super::{FilePlaybackMessage, FileSource};
+use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::playback::{PlaybackId, PlaybackStatusEvent},
@@ -82,8 +82,7 @@ impl FileSource for StreamedFileSource {
     fn new(
         file_path: &str,
         event_send: Option<Sender<PlaybackStatusEvent>>,
-        volume: f32,
-        repeat: usize,
+        options: FilePlaybackOptions,
     ) -> Result<Self, Error> {
         // create decoder
         let decoder = AudioDecoder::new(file_path.to_string())?;
@@ -121,6 +120,7 @@ impl FileSource for StreamedFileSource {
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
         let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
             let shared_state = worker_state.clone();
+            let repeat = options.repeat;
             move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
         });
         actor.send(FilePlaybackMessage::Read)?;
@@ -129,7 +129,7 @@ impl FileSource for StreamedFileSource {
             actor,
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
-            volume,
+            volume: options.volume,
             consumer,
             event_send,
             signal_spec,

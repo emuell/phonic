@@ -100,8 +100,7 @@ impl AudioFilePlayer {
             let streamed_source = StreamedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
-                options.volume,
-                options.repeat,
+                options,
             )?;
             source_playback_id = streamed_source.playback_id();
             playback_message_sender = streamed_source.playback_message_sender();
@@ -115,8 +114,7 @@ impl AudioFilePlayer {
             let preloaded_source = PreloadedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
-                options.volume,
-                options.repeat,
+                options,
             )?;
             source_playback_id = preloaded_source.playback_id();
             playback_message_sender = preloaded_source.playback_message_sender();
@@ -185,7 +183,7 @@ impl AudioFilePlayer {
         let source = DaspSynthSource::new(
             signal,
             signal_name,
-            options.volume,
+            options,
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
         );

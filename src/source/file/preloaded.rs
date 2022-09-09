@@ -3,7 +3,7 @@ use std::time::Duration;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use symphonia::core::audio::SampleBuffer;
 
-use super::{streamed::StreamedFileSource, FilePlaybackMessage, FileSource};
+use super::{streamed::StreamedFileSource, FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::{
@@ -53,8 +53,7 @@ impl FileSource for PreloadedFileSource {
     fn new(
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
-        volume: f32,
-        repeat: usize,
+        options: FilePlaybackOptions,
     ) -> Result<Self, Error> {
         // create decoder and get signal specs
         let mut audio_decoder = AudioDecoder::new(file_path.to_string())?;
@@ -98,8 +97,8 @@ impl FileSource for PreloadedFileSource {
         Ok(Self {
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
-            volume,
-            repeat,
+            volume: options.volume,
+            repeat: options.repeat,
             playback_message_receive,
             playback_message_send,
             playback_status_send,

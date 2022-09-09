@@ -86,8 +86,7 @@ pub trait FileSource: AudioSource + Sized {
     fn new(
         file_path: &str,
         status_sender: Option<Sender<PlaybackStatusEvent>>,
-        volume: f32,
-        repeat: usize,
+        options: FilePlaybackOptions,
     ) -> Result<Self, Error>;
 
     /// Channel to control file playback.
