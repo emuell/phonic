@@ -19,8 +19,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A clonable, buffered file source which decodes the entire file into a buffer and then plays
-/// it back from a buffer.
+/// A buffered, clonable file source, which decodes the entire file into a buffer before its
+/// played back.
 pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: String,
@@ -120,12 +120,13 @@ impl PreloadedFileSource {
 
 impl Clone for PreloadedFileSource {
     fn clone(&self) -> Self {
-        // Clone all but the unique file id property
+        // Generate a new unique file id and event channel when getting cloned
+        let (playback_message_send, playback_message_receive) = unbounded::<FilePlaybackMessage>();
         Self {
             file_id: unique_usize_id(),
             file_path: self.file_path.clone(),
-            playback_message_send: self.playback_message_send.clone(),
-            playback_message_receive: self.playback_message_receive.clone(),
+            playback_message_send,
+            playback_message_receive,
             playback_status_send: self.playback_status_send.clone(),
             buffer: self.buffer.clone(),
             ..*self
