@@ -12,7 +12,6 @@
         "args": [
           "build",
           "--example=play-file",
-          "--package=afplay"
         ],
         "filter": {
           "name": "play-file",
@@ -31,10 +30,27 @@
           "build",
           "--example=play-synth",
           "--features=dasp-synth",
-          "--package=afplay"
         ],
         "filter": {
           "name": "play-synth",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'play-interactive'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-interactive",
+          "--features=dasp-synth",
+        ],
+        "filter": {
+          "name": "play-interactive",
           "kind": "example"
         }
       },

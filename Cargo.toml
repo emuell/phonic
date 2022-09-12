@@ -23,6 +23,12 @@ cpal = { version = "^0.14", optional = true }
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.39.0", features = ["Win32_System_Com"], optional = true }
 
+[dev-dependencies]
+device_query = { version = "1.1.1" }
+
+[profile.release]
+debug = 1
+
 [features]
 cpal-output = ["cpal"]
 cubeb-output = ["cubeb", "windows"]
@@ -30,7 +36,10 @@ dasp-synth = ["dasp"]
 default = ["cpal-output"]
 
 [[example]]
+name = "play-file"
+[[example]]
 name = "play-synth"
 required-features = ["dasp-synth"]
 [[example]]
-name = "play-file"
+name = "play-interactive"
+required-features = ["dasp-synth"]
