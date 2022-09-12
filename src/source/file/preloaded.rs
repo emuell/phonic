@@ -19,7 +19,9 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// Preloaded file source
+/// A clonable, preloaded file source which decodes the entire file into a buffer and then plays
+/// it back from a buffer.
+#[derive(Clone)]
 pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: String,
