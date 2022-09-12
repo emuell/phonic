@@ -19,9 +19,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A clonable, preloaded file source which decodes the entire file into a buffer and then plays
+/// A clonable, buffered file source which decodes the entire file into a buffer and then plays
 /// it back from a buffer.
-#[derive(Clone)]
 pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: String,
@@ -41,23 +40,7 @@ pub struct PreloadedFileSource {
 }
 
 impl PreloadedFileSource {
-    fn should_report_pos(&self, pos: u64) -> bool {
-        if let Some(reported) = self.reported_pos {
-            reported > pos || pos - reported >= self.report_precision
-        } else {
-            true
-        }
-    }
-
-    fn samples_to_duration(&self, samples: u64) -> Duration {
-        let frames = samples / self.channel_count as u64;
-        let seconds = frames as f64 / self.sample_rate as f64;
-        Duration::from_millis((seconds * 1000.0) as u64)
-    }
-}
-
-impl FileSource for PreloadedFileSource {
-    fn new(
+    pub fn new(
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
@@ -120,6 +103,36 @@ impl FileSource for PreloadedFileSource {
         })
     }
 
+    fn should_report_pos(&self, pos: u64) -> bool {
+        if let Some(reported) = self.reported_pos {
+            reported > pos || pos - reported >= self.report_precision
+        } else {
+            true
+        }
+    }
+
+    fn samples_to_duration(&self, samples: u64) -> Duration {
+        let frames = samples / self.channel_count as u64;
+        let seconds = frames as f64 / self.sample_rate as f64;
+        Duration::from_millis((seconds * 1000.0) as u64)
+    }
+}
+
+impl Clone for PreloadedFileSource {
+    fn clone(&self) -> Self {
+        // Clone all but the unique file id property
+        Self {
+            file_id: unique_usize_id(),
+            file_path: self.file_path.clone(),
+            playback_message_send: self.playback_message_send.clone(),
+            playback_message_receive: self.playback_message_receive.clone(),
+            playback_status_send: self.playback_status_send.clone(),
+            buffer: self.buffer.clone(),
+            ..*self
+        }
+    }
+}
+impl FileSource for PreloadedFileSource {
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.playback_message_send.clone()
     }

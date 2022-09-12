@@ -49,39 +49,7 @@ pub struct StreamedFileSource {
 impl StreamedFileSource {
     pub(crate) const REPORT_PRECISION: Duration = Duration::from_millis(500);
 
-    pub(crate) fn total_samples(&self) -> Option<u64> {
-        let total = self.worker_state.total_samples.load(Ordering::Relaxed);
-        if total == u64::MAX {
-            None
-        } else {
-            Some(total)
-        }
-    }
-
-    pub(crate) fn written_samples(&self, position: u64) -> u64 {
-        self.worker_state
-            .position
-            .fetch_add(position, Ordering::Relaxed)
-            + position
-    }
-
-    fn should_report_pos(&self, pos: u64) -> bool {
-        if let Some(reported) = self.reported_pos {
-            reported > pos || pos - reported >= self.report_precision
-        } else {
-            true
-        }
-    }
-
-    fn samples_to_duration(&self, samples: u64) -> Duration {
-        let frames = samples / self.signal_spec.channels.count() as u64;
-        let time = self.time_base.calc_time(frames);
-        Duration::from_secs(time.seconds) + Duration::from_secs_f64(time.frac)
-    }
-}
-
-impl FileSource for StreamedFileSource {
-    fn new(
+    pub fn new(
         file_path: &str,
         event_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
@@ -148,6 +116,38 @@ impl FileSource for StreamedFileSource {
         })
     }
 
+    pub(crate) fn total_samples(&self) -> Option<u64> {
+        let total = self.worker_state.total_samples.load(Ordering::Relaxed);
+        if total == u64::MAX {
+            None
+        } else {
+            Some(total)
+        }
+    }
+
+    pub(crate) fn written_samples(&self, position: u64) -> u64 {
+        self.worker_state
+            .position
+            .fetch_add(position, Ordering::Relaxed)
+            + position
+    }
+
+    fn should_report_pos(&self, pos: u64) -> bool {
+        if let Some(reported) = self.reported_pos {
+            reported > pos || pos - reported >= self.report_precision
+        } else {
+            true
+        }
+    }
+
+    fn samples_to_duration(&self, samples: u64) -> Duration {
+        let frames = samples / self.signal_spec.channels.count() as u64;
+        let time = self.time_base.calc_time(frames);
+        Duration::from_secs(time.seconds) + Duration::from_secs_f64(time.frac)
+    }
+}
+
+impl FileSource for StreamedFileSource {
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.actor.sender()
     }

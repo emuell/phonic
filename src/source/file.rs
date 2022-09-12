@@ -81,14 +81,6 @@ pub enum FilePlaybackMessage {
 
 /// A source which decodes an audio file
 pub trait FileSource: AudioSource + Sized {
-    /// Create a new file source with an optional FilePlaybackStatusMsg channel sender
-    /// to retrieve playback status events, while the source is running
-    fn new(
-        file_path: &str,
-        status_sender: Option<Sender<PlaybackStatusEvent>>,
-        options: FilePlaybackOptions,
-    ) -> Result<Self, Error>;
-
     /// Channel to control file playback.
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
