@@ -69,6 +69,15 @@ impl AudioFilePlayer {
         }
     }
 
+    /// Our audio device's actual sample rate.
+    pub fn output_sample_rate(&self) -> u32 {
+        self.sink.sample_rate()
+    }
+    /// Our audio device's actual sample channel count.
+    pub fn output_channel_count(&self) -> usize {
+        self.sink.channel_count()
+    }
+
     /// Start audio playback.
     pub fn start(&self) {
         self.sink.resume()
@@ -117,22 +126,21 @@ impl AudioFilePlayer {
         file_source: Source,
         playback_speed: Option<f64>,
     ) -> Result<PlaybackId, Error> {
-        // create new preloaded or streamed source and convert it to our output specs
-        let source_playback_id = file_source.playback_id();
+        // memorize source in playing sources map
+        let playback_id = file_source.playback_id();
         let playback_message_sender: Sender<FilePlaybackMessage> =
             file_source.playback_message_sender();
+        let mut playing_sources = self.playing_sources.lock().unwrap();
+        playing_sources.insert(
+            playback_id,
+            PlaybackMessageSender::File(playback_message_sender),
+        );
         // convert file to mixer's rate and channel layout and apply optional pitch
         let converted_source = file_source.converted_with_speed(
             self.sink.channel_count(),
             self.sink.sample_rate(),
             playback_speed.unwrap_or(1.0),
             Self::DEFAULT_RESAMPLING_QUALITY,
-        );
-        // subscribe to playback envets in the newly created source
-        let mut playing_sources = self.playing_sources.lock().unwrap();
-        playing_sources.insert(
-            source_playback_id,
-            PlaybackMessageSender::File(playback_message_sender),
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
@@ -142,7 +150,7 @@ impl AudioFilePlayer {
             return Err(Error::SendError);
         }
         // return new file's id on success
-        Ok(source_playback_id)
+        Ok(playback_id)
     }
 
     /// Play a mono f64 dasp signal with default playback options. See [`play_dasp_synth_with_options`]
@@ -182,7 +190,6 @@ impl AudioFilePlayer {
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
-        // create new source and subscribe to playback envets
         let source = DaspSynthSource::new(
             signal,
             signal_name,
@@ -195,10 +202,11 @@ impl AudioFilePlayer {
 
     #[allow(dead_code)]
     fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<PlaybackId, Error> {
-        let source_synth_id = source.playback_id();
+        // memorize source in playing sources map
+        let playback_id = source.playback_id();
         let mut playing_sources = self.playing_sources.lock().unwrap();
         playing_sources.insert(
-            source_synth_id,
+            playback_id,
             PlaybackMessageSender::Synth(source.playback_message_sender()),
         );
         // convert file to mixer's rate and channel layout
@@ -215,7 +223,7 @@ impl AudioFilePlayer {
             return Err(Error::SendError);
         }
         // return new synth's id
-        Ok(source_synth_id)
+        Ok(playback_id)
     }
 
     /// Change playback position of the given played back source. This is only supported for files and thus
