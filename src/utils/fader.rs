@@ -18,6 +18,7 @@ pub enum FaderState {
 ///
 /// Fader initially is disabled and needs to be started first. Fading is applied by ramping
 /// down volume exponentially on each sample frame with the configured duration.
+#[derive(Clone, Copy)]
 pub struct VolumeFader {
     state: FaderState,
     current_volume: f32,
