@@ -2,25 +2,16 @@
 
 pub mod actor;
 pub mod decoder;
-pub mod resampler;
 pub mod fader;
+pub mod resampler;
 
 use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // -------------------------------------------------------------------------------------------------
 
+/// dB value, which is treated as zero volume factor  
 const MINUS_INF_IN_DB: f32 = -200.0f32;
-
-// -------------------------------------------------------------------------------------------------
-
-macro_rules! assert_eq_with_epsilon {
-    ($x:expr, $y:expr, $d:expr) => {
-        if !($x - $y < $d || $y - $x < $d) {
-            panic!();
-        }
-    };
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -32,6 +23,7 @@ pub fn unique_usize_id() -> usize {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Convert a linear volume factor to dB.
 pub fn linear_to_db(value: f32) -> f32 {
     lazy_static! {
         static ref LIN_TO_DB_FACTOR: f32 = 20.0f32 / 10.0f32.ln();
@@ -46,8 +38,9 @@ pub fn linear_to_db(value: f32) -> f32 {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Convert volume in dB to a linear volume factor.
 pub fn db_to_linear(value: f32) -> f32 {
-    lazy_static::lazy_static! {
+    lazy_static! {
         static ref DB_TO_LIN_FACTOR: f32 = 10.0f32.ln() / 20.0f32;
     }
     if value == 0.0f32 {
@@ -60,9 +53,33 @@ pub fn db_to_linear(value: f32) -> f32 {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Calculate playback speed from a MIDI note, using middle C (note number 60) as base note.
+pub fn speed_from_note(note: u32) -> f64 {
+    // Middle Note C6 = MIDI note 60
+    pitch_from_note(note) / pitch_from_note(60)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Calculate Hz from a MIDI note with equal tuning based on A4 = a' = 440 Hz.
+pub fn pitch_from_note(note: u32) -> f64 {
+    // A4 = MIDI note 69
+    440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
+}
+
+// -------------------------------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    macro_rules! assert_eq_with_epsilon {
+        ($x:expr, $y:expr, $d:expr) => {
+            if !($x - $y < $d || $y - $x < $d) {
+                panic!();
+            }
+        };
+    }
 
     #[test]
     fn lin_db_conversion() {
