@@ -50,8 +50,20 @@ pub trait AudioSource: Send + 'static {
     {
         ResampledSource::new(self, output_sample_rate, resample_quality)
     }
+    /// Shortcut for creating a sample rate adjusted and pitched source from self.
+    fn resampled_with_speed(
+        self,
+        output_sample_rate: u32,
+        speed: f64,
+        resample_quality: ResamplingQuality,
+    ) -> ResampledSource
+    where
+        Self: AudioSource + Sized,
+    {
+        ResampledSource::new_with_speed(self, output_sample_rate, speed, resample_quality)
+    }
 
-    /// Shortcut for creating a new source with the given signal specs
+    /// Shortcut for creating a new source with the given signal specs.
     fn converted(
         self,
         output_channels: usize,
@@ -62,5 +74,24 @@ pub trait AudioSource: Send + 'static {
         Self: AudioSource + Sized,
     {
         ConvertedSource::new(self, output_channels, output_sample_rate, resample_quality)
+    }
+    /// Shortcut for creating a new source with the given signal specs and custom speed.
+    fn converted_with_speed(
+        self,
+        output_channels: usize,
+        output_sample_rate: u32,
+        speed: f64,
+        resample_quality: ResamplingQuality,
+    ) -> ConvertedSource
+    where
+        Self: AudioSource + Sized,
+    {
+        ConvertedSource::new_with_speed(
+            self,
+            output_channels,
+            output_sample_rate,
+            speed,
+            resample_quality,
+        )
     }
 }

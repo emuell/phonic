@@ -3,18 +3,33 @@ use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec}
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which resamples the input source to a target sample rate
+/// A source which resamples the input source, either to adjust source's sample rate to a
+/// target rate or to play back a source with a different pitch.
 pub struct ResampledSource {
     source: Box<dyn AudioSource>,
+    output_sample_rate: u32,
     resampler: AudioResampler,
     inp: ResampleBuffer,
     out: ResampleBuffer,
 }
 
 impl ResampledSource {
+    /// Create a new resampled sources with the given sample rate adjustment.
     pub fn new<InputSource>(
         source: InputSource,
         output_sample_rate: u32,
+        quality: ResamplingQuality,
+    ) -> Self
+    where
+        InputSource: AudioSource,
+    {
+        Self::new_with_speed(source, output_sample_rate, 1.0, quality)
+    }
+    /// Create a new resampled sources with the given sample rate and playback speed adjument.
+    pub fn new_with_speed<InputSource>(
+        source: InputSource,
+        output_sample_rate: u32,
+        speed: f64,
         quality: ResamplingQuality,
     ) -> Self
     where
@@ -25,13 +40,14 @@ impl ResampledSource {
         let spec = ResamplingSpec {
             channels: source.channel_count(),
             input_rate: source.sample_rate(),
-            output_rate: output_sample_rate,
+            output_rate: (output_sample_rate as f64 / speed) as u32,
         };
         let inp_buf = vec![0.0; BUFFER_SIZE];
         let out_buf = vec![0.0; spec.output_size(BUFFER_SIZE)];
         Self {
             resampler: AudioResampler::new(quality, spec).unwrap(),
             source: Box::new(source),
+            output_sample_rate,
             inp: ResampleBuffer {
                 buf: inp_buf,
                 start: 0,
@@ -78,11 +94,11 @@ impl AudioSource for ResampledSource {
     }
 
     fn channel_count(&self) -> usize {
-        self.resampler.spec.channels
+        self.source.channel_count()
     }
 
     fn sample_rate(&self) -> u32 {
-        self.resampler.spec.output_rate
+        self.output_sample_rate
     }
 
     fn is_exhausted(&self) -> bool {

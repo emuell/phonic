@@ -8,7 +8,7 @@ use super::{
     playback::{PlaybackId, PlaybackStatusEvent},
     AudioSource,
 };
-use crate::{error::Error, utils::db_to_linear};
+use crate::utils::db_to_linear;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -21,6 +21,8 @@ pub struct FilePlaybackOptions {
     pub stream: bool,
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
     pub volume: f32,
+    /// By default 1.0f64. Customize to pitch the playback speed up or down.
+    pub speed: f64,
     /// By default 0: when > 0 the number of times the file should be looped.
     /// Set to usize::MAX to repeat forever.
     pub repeat: usize,
@@ -30,7 +32,8 @@ impl Default for FilePlaybackOptions {
     fn default() -> Self {
         Self {
             stream: false,
-            volume: 1.0f32,
+            volume: 1.0,
+            speed: 1.0,
             repeat: 0,
         }
     }
@@ -52,6 +55,11 @@ impl FilePlaybackOptions {
     }
     pub fn with_volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn with_speed(mut self, speed: f64) -> Self {
+        self.speed = speed;
         self
     }
 

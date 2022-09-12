@@ -1,6 +1,6 @@
 use afplay::{
-    file::FilePlaybackOptions, playback::PlaybackStatusEvent, AudioFilePlayer, AudioOutput,
-    DefaultAudioOutput,
+    convert::speed_from_note, file::FilePlaybackOptions, playback::PlaybackStatusEvent,
+    AudioFilePlayer, AudioOutput, DefaultAudioOutput,
 };
 
 fn main() -> Result<(), String> {
@@ -29,7 +29,8 @@ fn main() -> Result<(), String> {
                 FilePlaybackOptions::default()
                     .streamed()
                     .with_volume_db(-3.0)
-                    .repeat(2),
+                    .with_speed(speed_from_note(64))
+                    .repeat(3),
             )
             .map_err(|err| err.to_string())?,
     ];

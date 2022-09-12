@@ -6,7 +6,6 @@ use std::{
 };
 
 use crate::{
-    converted::ConvertedSource,
     error::Error,
     file::FilePlaybackOptions,
     output::{AudioSink, DefaultAudioSink},
@@ -20,7 +19,6 @@ use crate::{
         synth::{SynthPlaybackMessage, SynthSource},
     },
     utils::resampler::ResamplingQuality,
-    AudioSource,
 };
 
 #[cfg(feature = "dasp")]
@@ -96,38 +94,40 @@ impl AudioFilePlayer {
         file_path: &str,
         options: FilePlaybackOptions,
     ) -> Result<PlaybackId, Error> {
-        // create new preloaded or streamed source and convert it to our output specs
-        let source_playback_id: PlaybackId;
-        let playback_message_sender: Sender<FilePlaybackMessage>;
-        let source: ConvertedSource = if options.stream {
+        if options.stream {
             let streamed_source = StreamedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            source_playback_id = streamed_source.playback_id();
-            playback_message_sender = streamed_source.playback_message_sender();
-            // convert file to mixer's rate and channel layout
-            streamed_source.converted(
-                self.sink.channel_count(),
-                self.sink.sample_rate(),
-                Self::DEFAULT_RESAMPLING_QUALITY,
-            )
+            self.play_file_source(streamed_source, Some(options.speed))
         } else {
             let preloaded_source = PreloadedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            source_playback_id = preloaded_source.playback_id();
-            playback_message_sender = preloaded_source.playback_message_sender();
-            // convert file to mixer's rate and channel layout
-            preloaded_source.converted(
-                self.sink.channel_count(),
-                self.sink.sample_rate(),
-                Self::DEFAULT_RESAMPLING_QUALITY,
-            )
-        };
+            self.play_file_source(preloaded_source, Some(options.speed))
+        }
+    }
+
+    /// Play a self created or cloned file source.
+    pub fn play_file_source<Source: FileSource>(
+        &mut self,
+        file_source: Source,
+        playback_speed: Option<f64>,
+    ) -> Result<PlaybackId, Error> {
+        // create new preloaded or streamed source and convert it to our output specs
+        let source_playback_id = file_source.playback_id();
+        let playback_message_sender: Sender<FilePlaybackMessage> =
+            file_source.playback_message_sender();
+        // convert file to mixer's rate and channel layout and apply optional pitch
+        let converted_source = file_source.converted_with_speed(
+            self.sink.channel_count(),
+            self.sink.sample_rate(),
+            playback_speed.unwrap_or(1.0),
+            Self::DEFAULT_RESAMPLING_QUALITY,
+        );
         // subscribe to playback envets in the newly created source
         let mut playing_sources = self.playing_sources.lock().unwrap();
         playing_sources.insert(
@@ -136,7 +136,7 @@ impl AudioFilePlayer {
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
-            source: Box::new(source),
+            source: Box::new(converted_source),
         }) {
             log::error!("failed to send mixer event: {}", err);
             return Err(Error::SendError);
