@@ -5,14 +5,12 @@ use crate::error::Error;
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub enum ResamplingQuality {
-    SincBestQuality = libsamplerate::SRC_SINC_BEST_QUALITY as isize,
-    SincMediumQuality = libsamplerate::SRC_SINC_MEDIUM_QUALITY as isize,
-    SincFastest = libsamplerate::SRC_SINC_FASTEST as isize,
-    ZeroOrderHold = libsamplerate::SRC_ZERO_ORDER_HOLD as isize,
-    Linear = libsamplerate::SRC_LINEAR as isize,
+    SincBestQuality = libsamplerate_sys::SRC_SINC_BEST_QUALITY as isize,
+    SincMediumQuality = libsamplerate_sys::SRC_SINC_MEDIUM_QUALITY as isize,
+    SincFastest = libsamplerate_sys::SRC_SINC_FASTEST as isize,
+    Linear = libsamplerate_sys::SRC_LINEAR as isize,
+    ZeroOrderHold = libsamplerate_sys::SRC_ZERO_ORDER_HOLD as isize,
 }
-
-pub const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::SincFastest;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -42,14 +40,14 @@ impl ResamplingSpec {
 
 pub struct AudioResampler {
     pub spec: ResamplingSpec,
-    state: *mut libsamplerate::SRC_STATE,
+    state: *mut libsamplerate_sys::SRC_STATE,
 }
 
 impl AudioResampler {
     pub fn new(quality: ResamplingQuality, spec: ResamplingSpec) -> Result<Self, Error> {
         let mut error_int = 0i32;
         let state = unsafe {
-            libsamplerate::src_new(
+            libsamplerate_sys::src_new(
                 quality as i32,
                 spec.channels as i32,
                 &mut error_int as *mut i32,
@@ -69,7 +67,7 @@ impl AudioResampler {
             output.copy_from_slice(input);
             return Ok((input.len(), output.len()));
         }
-        let mut src = libsamplerate::SRC_DATA {
+        let mut src = libsamplerate_sys::SRC_DATA {
             data_in: input.as_ptr(),
             data_out: output.as_mut_ptr(),
             input_frames: (input.len() / self.spec.channels) as _,
@@ -79,7 +77,7 @@ impl AudioResampler {
             input_frames_used: 0,
             output_frames_gen: 0,
         };
-        let error_int = unsafe { libsamplerate::src_process(self.state, &mut src as *mut _) };
+        let error_int = unsafe { libsamplerate_sys::src_process(self.state, &mut src as *mut _) };
         if error_int != 0 {
             Err(Error::ResamplingError(error_int))
         } else {
@@ -92,7 +90,7 @@ impl AudioResampler {
 
 impl Drop for AudioResampler {
     fn drop(&mut self) {
-        unsafe { libsamplerate::src_delete(self.state) };
+        unsafe { libsamplerate_sys::src_delete(self.state) };
     }
 }
 
