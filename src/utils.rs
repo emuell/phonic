@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_macros)]
 
 pub mod actor;
+pub mod buffer;
 pub mod decoder;
 pub mod fader;
 pub mod resampler;
