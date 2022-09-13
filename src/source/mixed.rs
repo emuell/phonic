@@ -1,4 +1,4 @@
-use crate::utils::resampler::DEFAULT_RESAMPLING_QUALITY;
+use crate::{converted::ConvertedSource, utils::resampler::DEFAULT_RESAMPLING_QUALITY};
 
 use super::AudioSource;
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -18,7 +18,7 @@ pub enum MixedSourceMsg {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which converts and mixes other sources together
+/// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<PlayingSource>,
     event_send: Sender<MixedSourceMsg>,
@@ -45,7 +45,8 @@ impl MixedSource {
 
     /// Add a source to the mix
     pub fn add(&mut self, source: impl AudioSource) {
-        let converted = Box::new(source.converted(
+        let converted = Box::new(ConvertedSource::new(
+            source,
             self.channel_count,
             self.sample_rate,
             DEFAULT_RESAMPLING_QUALITY,

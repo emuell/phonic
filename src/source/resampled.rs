@@ -3,6 +3,11 @@ use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec}
 
 // -------------------------------------------------------------------------------------------------
 
+/// Interpolation mode of the resampler.
+pub type Quality = ResamplingQuality;
+
+// -------------------------------------------------------------------------------------------------
+
 /// A source which resamples the input source, either to adjust source's sample rate to a
 /// target rate or to play back a source with a different pitch.
 pub struct ResampledSource {
@@ -15,11 +20,7 @@ pub struct ResampledSource {
 
 impl ResampledSource {
     /// Create a new resampled sources with the given sample rate adjustment.
-    pub fn new<InputSource>(
-        source: InputSource,
-        output_sample_rate: u32,
-        quality: ResamplingQuality,
-    ) -> Self
+    pub fn new<InputSource>(source: InputSource, output_sample_rate: u32, quality: Quality) -> Self
     where
         InputSource: AudioSource,
     {
@@ -30,7 +31,7 @@ impl ResampledSource {
         source: InputSource,
         output_sample_rate: u32,
         speed: f64,
-        quality: ResamplingQuality,
+        quality: Quality,
     ) -> Self
     where
         InputSource: AudioSource,

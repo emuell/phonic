@@ -1,9 +1,12 @@
 use super::AudioSource;
-use crate::utils::resampler::ResamplingQuality;
+use crate::{
+    mapped::ChannelMappedSource, resampled::Quality as ResamplingQuality,
+    resampled::ResampledSource,
+};
 
 // -------------------------------------------------------------------------------------------------
-/// A source which adjusts the input source to a target channel layout and sample rate
 
+/// A source which adjusts the input source to a target channel layout and sample rate.
 pub struct ConvertedSource {
     converted: Box<dyn AudioSource>,
 }
@@ -32,9 +35,10 @@ impl ConvertedSource {
         InputSource: AudioSource + Sized,
     {
         if source.sample_rate() != sample_rate || speed != 1.0 {
-            let resampled = source.resampled_with_speed(sample_rate, speed, resample_quality);
+            let resampled =
+                ResampledSource::new_with_speed(source, sample_rate, speed, resample_quality);
             if resampled.channel_count() != channel_count {
-                let mapped = resampled.channel_mapped(channel_count);
+                let mapped = ChannelMappedSource::new(resampled, channel_count);
                 Self {
                     converted: Box::new(mapped),
                 }
@@ -44,7 +48,7 @@ impl ConvertedSource {
                 }
             }
         } else if source.channel_count() != channel_count {
-            let mapped = source.channel_mapped(channel_count);
+            let mapped = ChannelMappedSource::new(source, channel_count);
             Self {
                 converted: Box::new(mapped),
             }

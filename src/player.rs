@@ -6,9 +6,11 @@ use std::{
 };
 
 use crate::{
+    converted::ConvertedSource,
     error::Error,
     file::FilePlaybackOptions,
     output::{AudioSink, DefaultAudioSink},
+    resampled::Quality as ResamplingQuality,
     source::{
         file::{
             preloaded::PreloadedFileSource, streamed::StreamedFileSource, FilePlaybackMessage,
@@ -18,7 +20,6 @@ use crate::{
         playback::{PlaybackId, PlaybackStatusEvent},
         synth::{SynthPlaybackMessage, SynthSource},
     },
-    utils::resampler::ResamplingQuality,
 };
 
 #[cfg(feature = "dasp")]
@@ -136,7 +137,8 @@ impl AudioFilePlayer {
             PlaybackMessageSender::File(playback_message_sender),
         );
         // convert file to mixer's rate and channel layout and apply optional pitch
-        let converted_source = file_source.converted_with_speed(
+        let converted_source = ConvertedSource::new_with_speed(
+            file_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
             playback_speed.unwrap_or(1.0),
@@ -210,7 +212,8 @@ impl AudioFilePlayer {
             PlaybackMessageSender::Synth(source.playback_message_sender()),
         );
         // convert file to mixer's rate and channel layout
-        let converted = source.converted(
+        let converted = ConvertedSource::new(
+            source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
             Self::DEFAULT_RESAMPLING_QUALITY,
