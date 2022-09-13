@@ -81,13 +81,17 @@ fn main() -> Result<(), Error> {
             }
             Keycode::Up => {
                 let mut current = current_octave.lock().unwrap();
-                *current = (*current + 1).min(8);
-                println!("Changed octave to '{}'", *current);
+                if *current < 8 {
+                    *current += 1;
+                    println!("Changed octave to '{}'", *current);
+                }
             }
             Keycode::Down => {
                 let mut current = current_octave.lock().unwrap();
-                *current = (*current - 1).max(0);
-                println!("Changed octave to '{}'", *current);
+                if *current > 1 {
+                    *current -= 1;
+                    println!("Changed octave to '{}'", *current);
+                }
             }
             Keycode::Left => {
                 let mut current = curent_loop_seek_start.lock().unwrap();
