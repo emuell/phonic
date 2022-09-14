@@ -3,6 +3,7 @@ mod output;
 mod player;
 mod source;
 mod utils;
+mod waveform;
 
 pub use error::Error;
 pub mod convert {
@@ -11,3 +12,4 @@ pub mod convert {
 pub use output::{AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
 pub use player::AudioFilePlayer;
 pub use source::*;
+pub use waveform::{generate_waveform, WaveformPoint};

@@ -103,6 +103,11 @@ impl PreloadedFileSource {
         })
     }
 
+    /// Access to the preloaded file's buffer
+    pub(crate) fn buffer(&self) -> &[f32] {
+        &self.buffer
+    }
+
     fn should_report_pos(&self, pos: u64) -> bool {
         if let Some(reported) = self.reported_pos {
             reported > pos || pos - reported >= self.report_precision
