@@ -66,23 +66,28 @@ impl ResampledSource {
 impl AudioSource for ResampledSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         let mut total = 0;
-
         while total < output.len() {
             if self.out.is_empty() {
+                // when there's no input, try fetch some from our source
                 if self.inp.is_empty() {
-                    let n = self.source.write(&mut self.inp.buf);
-                    self.inp.buf[n..].iter_mut().for_each(|s| *s = 0.0);
+                    let input_read = self.source.write(&mut self.inp.buf);
                     self.inp.start = 0;
-                    self.inp.end = self.inp.buf.len();
+                    self.inp.end = input_read;
+                    self.inp.buf[input_read..].iter_mut().for_each(|s| *s = 0.0);
                 }
-                let (inp_consumed, out_written) = self
-                    .resampler
-                    .process(&self.inp.buf[self.inp.start..], &mut self.out.buf)
-                    .unwrap();
+                // run resampler to generate some output
+                let input = &self.inp.buf[self.inp.start..self.inp.end];
+                let output = &mut self.out.buf;
+                let (inp_consumed, out_written) = self.resampler.process(input, output).unwrap();
                 self.inp.start += inp_consumed;
                 self.out.start = 0;
                 self.out.end = out_written;
+                if out_written == 0 {
+                    // resampler produced no more output: we're done
+                    break;
+                }
             }
+            // write resampler temp output to output
             let source = self.out.get();
             let target = &mut output[total..];
             let to_write = self.out.len().min(target.len());
@@ -90,7 +95,6 @@ impl AudioSource for ResampledSource {
             total += to_write;
             self.out.start += to_write;
         }
-
         total
     }
 
@@ -103,7 +107,7 @@ impl AudioSource for ResampledSource {
     }
 
     fn is_exhausted(&self) -> bool {
-        self.source.is_exhausted() && self.inp.is_empty()
+        self.source.is_exhausted() && self.inp.is_empty() && self.out.is_empty()
     }
 }
 

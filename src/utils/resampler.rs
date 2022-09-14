@@ -8,8 +8,8 @@ pub enum ResamplingQuality {
     SincBestQuality = libsamplerate_sys::SRC_SINC_BEST_QUALITY as isize,
     SincMediumQuality = libsamplerate_sys::SRC_SINC_MEDIUM_QUALITY as isize,
     SincFastest = libsamplerate_sys::SRC_SINC_FASTEST as isize,
-    Linear = libsamplerate_sys::SRC_LINEAR as isize,
     ZeroOrderHold = libsamplerate_sys::SRC_ZERO_ORDER_HOLD as isize,
+    Linear = libsamplerate_sys::SRC_LINEAR as isize,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -61,17 +61,16 @@ impl AudioResampler {
     }
 
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<(usize, usize), Error> {
-        if self.spec.input_rate == self.spec.output_rate {
-            // Bypass conversion completely in case the sample rates are equal.
-            let output = &mut output[..input.len()];
-            output.copy_from_slice(input);
-            return Ok((input.len(), output.len()));
-        }
+        // NB: when input is empty, libsamplerate only flushes pending output
         let mut src = libsamplerate_sys::SRC_DATA {
-            data_in: input.as_ptr(),
+            data_in: if input.is_empty() {
+                std::ptr::null()
+            } else {
+                input.as_ptr()
+            },
             data_out: output.as_mut_ptr(),
-            input_frames: (input.len() / self.spec.channels) as _,
-            output_frames: (output.len() / self.spec.channels) as _,
+            input_frames: (input.len() / self.spec.channels) as i32,
+            output_frames: (output.len() / self.spec.channels) as i32,
             src_ratio: self.spec.ratio(),
             end_of_input: 0, // TODO: Use this.
             input_frames_used: 0,
@@ -81,9 +80,9 @@ impl AudioResampler {
         if error_int != 0 {
             Err(Error::ResamplingError(error_int))
         } else {
-            let processed_len = src.input_frames_used as usize * self.spec.channels;
+            let input_len = src.input_frames_used as usize * self.spec.channels;
             let output_len = src.output_frames_gen as usize * self.spec.channels;
-            Ok((processed_len, output_len))
+            Ok((input_len, output_len))
         }
     }
 }
