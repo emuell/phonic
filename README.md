@@ -3,21 +3,26 @@
 
 **afplay** is a cross-platform *audio playback library for Rust*, based on jpochyla's [psst-core](https://github.com/jpochyla/psst/tree/master/psst-core) audio playback implementation.
 
-It aims to be a suitable player for game engines, but can also be used as a general-purpose playback engine for other types of music applications.<br>
-It was originally developed and is used in the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app and related projects which are using the excellent [Tauri](https://tauri.app) app framework.
+It aims to be a suitable player for game engines, but can also be used as a general-purpose low-latency playback engine for other types of music applications.<br>
+It was originally developed and is used in the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app and related projects which are using the [Tauri](https://tauri.app) app framework.
 
 ### Features
 
-- Play, seek, stop, mix and monitor playback of preloaded or on-the-fly decoded (streamed) *audio files*.
+- Play, seek, stop, mix and monitor playback of preloaded or streamed (on-the-fly decoded) *audio files*.
 - Play, stop, mix and monitor playback of custom *synth tones* thanks to [dasp](https://github.com/RustAudio/dasp) (can be optionally enabled).
-- Audio output for Windows, macOS and Linux is handled via [cpal](https://github.com/RustAudio/cpal) or [cubeb](https://github.com/mozilla/cubeb).
-- Decodes and thus plays back *most common audio file formats*, thanks to [Symphonia](https://github.com/pdeljanov/Symphonia).
+- Tools to generate *waveform plots* for audio files or raw sample buffers.
+- Play audio on Windows, macOS and Linux via [cpal](https://github.com/RustAudio/cpal) or [cubeb](https://github.com/mozilla/cubeb).
+- Decode and thus play back all *common audio file formats*, thanks to [Symphonia](https://github.com/pdeljanov/Symphonia).
 - Files are *automatically resampled* and *channel mapped* to the audio output's signal specs, thanks to [libsamplerate](https://github.com/Prior99/libsamplerate-sys).
-- File and synth tone playback stop commands are applied via short volume fades to *avoid clicks* (de-clicking for seeking is a TODO)
+- Click free playback: when stopping sounds, a very short volume fade-out is applied to *avoid clicks* (de-clicking for seeking is a TODO).
 
 ### Examples
 
-See [example directory](./examples) for some more working examples. 
+See [example directory](./examples) for some more examples. 
+
+#### Audio Plaback
+
+Play, seek and stop audio files and synth sounds on the default audio output device.
 
 ```rust
 use afplay::{
@@ -108,6 +113,52 @@ player.stop_source(synth_id)?;
 // sounds before starting a new one:
 player.stop_all_sources()?;
 player.play_file("PATH_TO/boom.wav")?;
+```
+
+#### Audio Waveform Generation
+
+Write mixed-down (mono) waveform from an audio file as SVG file.
+
+```rust
+use svg::{node::element::{path::Data, Path}, Document};
+use afplay::generate_mono_waveform_from_file;
+
+// resolution/viewBox of the resulting SVG
+const WIDTH: usize = 1024;
+const HEIGHT: usize = 256;
+const STROKE_WIDTH: usize = 1;
+
+// generate mono waveform data from file
+let waveform_data = generate_mono_waveform_from_file("SOME_FILE.wav", WIDTH)?;
+
+// fit waveform points into our viewBox
+let num_points = waveform_data.len();
+let width = WIDTH as f32;
+let height = HEIGHT as f32;
+let scale_x = move |v| v as f32 * width / num_points as f32;
+let scale_y = move |v| (v + 1.0) * height / 2.0;
+
+// create path from waveform points
+let mut data = Data::new();
+data = data.move_to((scale_x(0), scale_y(waveform_data[0].min)));
+for (index, point) in waveform_data.iter().enumerate() {
+    let x = scale_x(index);
+    data = data
+        .line_to((x, scale_y(point.min)))
+        .line_to((x, scale_y(point.max)));
+}
+let path = Path::new()
+    .set("fill", "none")
+    .set("stroke", "black")
+    .set("stroke-width", STROKE_WIDTH)
+    .set("d", data);
+
+// create svg document and add the path
+let mut document = Document::new().set("viewBox", (0, 0, WIDTH, HEIGHT));
+document = document.add(path);
+
+// write svg document
+svg::save("SOME_WAVEFORM.svg", &document)?;
 ```
 
 ## License
