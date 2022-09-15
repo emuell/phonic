@@ -12,4 +12,4 @@ pub mod convert {
 pub use output::{AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
 pub use player::AudioFilePlayer;
 pub use source::*;
-pub use waveform::{generate_waveform, WaveformPoint};
+pub use waveform::*;

@@ -56,6 +56,23 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'waveform'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=waveform",
+        ],
+        "filter": {
+          "name": "waveform",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
     }
   ]
 }
