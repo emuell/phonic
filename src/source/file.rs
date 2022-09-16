@@ -8,6 +8,7 @@ use crate::{
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
     source::AudioSource,
     utils::db_to_linear,
+    Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -70,6 +71,23 @@ impl FilePlaybackOptions {
     pub fn repeat_forever(mut self) -> Self {
         self.repeat = usize::MAX;
         self
+    }
+
+    /// Validate all parameters. Returns Error::ParameterError on errors.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.volume < 0.0 || self.volume.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'volume' value is '{}'",
+                self.volume
+            )));
+        }
+        if self.speed < 0.0 || self.speed.is_nan() || self.speed.is_infinite() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'speed' value is '{}'",
+                self.speed
+            )));
+        }
+        Ok(())
     }
 }
 

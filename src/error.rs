@@ -13,6 +13,7 @@ pub enum Error {
     AudioOutputError(Box<dyn error::Error + Send>),
     ResamplingError(i32),
     IoError(io::Error),
+    ParameterError(String),
     SendError,
 }
 
@@ -29,6 +30,7 @@ impl fmt::Display for Error {
             }
             Self::AudioDecodingError(err) | Self::AudioOutputError(err) => err.fmt(f),
             Self::IoError(err) => err.fmt(f),
+            Self::ParameterError(str) => write!(f, "Invalid parameter: {str}"),
             Self::SendError => write!(f, "Failed to send into a channel"),
         }
     }

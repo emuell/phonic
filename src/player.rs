@@ -139,6 +139,11 @@ impl AudioFilePlayer {
         file_path: &str,
         options: FilePlaybackOptions,
     ) -> Result<AudioFilePlaybackId, Error> {
+        // validate options
+        if let Err(err) = options.validate() {
+            return Err(err);
+        }
+        // create a stremed or preloaded source, depending on the options and play it
         if options.stream {
             let streamed_source = StreamedFileSource::new(
                 file_path,
@@ -227,6 +232,11 @@ impl AudioFilePlayer {
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
+        // validate options
+        if let Err(err) = options.validate() {
+            return Err(err);
+        }
+        // create Dasp source and play it
         let source = DaspSynthSource::new(
             signal,
             signal_name,

@@ -4,7 +4,7 @@ pub mod dasp;
 use crossbeam_channel::Sender;
 use std::time::Duration;
 
-use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linear};
+use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linear, Error};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -29,6 +29,17 @@ impl SynthPlaybackOptions {
     pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
         self
+    }
+
+    /// Validate all parameters. Returns Error::ParameterError on errors.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.volume < 0.0 || self.volume.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'volume' value is '{}'",
+                self.volume
+            )));
+        }
+        Ok(())
     }
 }
 

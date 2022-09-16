@@ -29,7 +29,9 @@ pub fn linear_to_db(value: f32) -> f32 {
     lazy_static! {
         static ref LIN_TO_DB_FACTOR: f32 = 20.0f32 / 10.0f32.ln();
     }
-    if value == 1.0 {
+    if value < 0.0 || value.is_nan() {
+        return f32::NAN;
+    } else if value == 1.0 {
         return 0.0; // avoid rounding errors at exactly 0 dB
     } else if value > 1e-12f32 {
         return value.ln() * *LIN_TO_DB_FACTOR;
@@ -44,7 +46,9 @@ pub fn db_to_linear(value: f32) -> f32 {
     lazy_static! {
         static ref DB_TO_LIN_FACTOR: f32 = 10.0f32.ln() / 20.0f32;
     }
-    if value == 0.0f32 {
+    if value.is_nan() {
+        return f32::NAN;
+    } else if value == 0.0 {
         return 1.0f32; // avoid rounding errors at exactly 0 dB
     } else if value > MINUS_INF_IN_DB {
         return (value * *DB_TO_LIN_FACTOR).exp();
@@ -90,5 +94,7 @@ mod tests {
         assert_eq!(db_to_linear(0.0), 1.0);
         assert_eq_with_epsilon!(linear_to_db(db_to_linear(20.0)), 20.0, 0.0001);
         assert_eq_with_epsilon!(linear_to_db(db_to_linear(-20.0)), -20.0, 0.0001);
+        assert!(db_to_linear(f32::NAN).is_nan());
+        assert!(linear_to_db(-1.0).is_nan());
     }
 }
