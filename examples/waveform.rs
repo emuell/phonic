@@ -3,9 +3,9 @@ use svg::{
     Document,
 };
 
-use afplay::generate_mono_waveform_from_file;
+use afplay::waveform::mixed_down::waveform_from_file;
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // resolution of the resulting SVG
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 256;
@@ -19,11 +19,8 @@ fn main() -> Result<(), String> {
 
     for (file_name, extension) in asset_test_files {
         // generate mono waveform data from file
-        let channel_data = generate_mono_waveform_from_file(
-            format!("assets/{file_name}.{extension}").as_str(),
-            WIDTH,
-        )
-        .map_err(|err| err.to_string())?;
+        let channel_data =
+            waveform_from_file(format!("assets/{file_name}.{extension}").as_str(), WIDTH)?;
 
         // fit points into our viewBox
         let num_points = channel_data.len();
