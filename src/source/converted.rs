@@ -1,12 +1,11 @@
-use super::AudioSource;
-use crate::{
+use crate::source::{
     mapped::ChannelMappedSource, resampled::Quality as ResamplingQuality,
-    resampled::ResampledSource,
+    resampled::ResampledSource, AudioSource,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which adjusts the input source to a target channel layout and sample rate.
+/// A source which changes the input source's channel layout and sample rate.
 pub struct ConvertedSource {
     converted: Box<dyn AudioSource>,
 }

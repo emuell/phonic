@@ -4,11 +4,11 @@ pub mod streamed;
 use crossbeam_channel::Sender;
 use std::time::Duration;
 
-use super::{
-    playback::{PlaybackId, PlaybackStatusEvent},
-    AudioSource,
+use crate::{
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    source::AudioSource,
+    utils::db_to_linear,
 };
-use crate::utils::db_to_linear;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -49,16 +49,16 @@ impl FilePlaybackOptions {
         self
     }
 
-    pub fn with_volume(mut self, volume: f32) -> Self {
+    pub fn volume(mut self, volume: f32) -> Self {
         self.volume = volume;
         self
     }
-    pub fn with_volume_db(mut self, volume_db: f32) -> Self {
+    pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
         self
     }
 
-    pub fn with_speed(mut self, speed: f64) -> Self {
+    pub fn speed(mut self, speed: f64) -> Self {
         self.speed = speed;
         self
     }
@@ -87,12 +87,12 @@ pub enum FilePlaybackMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which decodes an audio file
+/// A source which decodes and plays back an audio file.
 pub trait FileSource: AudioSource + Sized {
     /// Channel to control file playback.
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
-    fn playback_id(&self) -> PlaybackId;
+    fn playback_id(&self) -> AudioFilePlaybackId;
 
     /// Total number of sample frames in the decoded file: may not be known before playback finished.
     fn total_frames(&self) -> Option<u64>;

@@ -2,7 +2,7 @@ use super::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Empty audio source. Does not produce any samples.
+/// A source which does not produce any samples.
 pub struct EmptySource;
 
 impl AudioSource for EmptySource {

@@ -2,6 +2,7 @@ use std::{error, fmt, io};
 
 // -------------------------------------------------------------------------------------------------
 
+/// `Error` provides an enumeration of all possible errors reported by afplay.
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {

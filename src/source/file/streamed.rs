@@ -17,7 +17,7 @@ use symphonia::core::{
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
-    source::playback::{PlaybackId, PlaybackStatusEvent},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
     source::AudioSource,
     utils::{
         actor::{Act, Actor, ActorHandle},
@@ -29,7 +29,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which streams & decodes an audio file asynchromiously in a worker thread
+/// A source which streams & decodes an audio file asynchromiously in a worker thread.
 pub struct StreamedFileSource {
     actor: ActorHandle<FilePlaybackMessage>,
     file_id: usize,
@@ -38,7 +38,7 @@ pub struct StreamedFileSource {
     stop_fader: VolumeFader,
     consumer: Consumer<f32>,
     worker_state: SharedFileWorkerState,
-    event_send: Option<Sender<PlaybackStatusEvent>>,
+    event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     time_base: TimeBase,
     report_precision: u64,
@@ -51,7 +51,7 @@ impl StreamedFileSource {
 
     pub fn new(
         file_path: &str,
-        event_send: Option<Sender<PlaybackStatusEvent>>,
+        event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
         options: FilePlaybackOptions,
     ) -> Result<Self, Error> {
         // create decoder
@@ -152,7 +152,7 @@ impl FileSource for StreamedFileSource {
         self.actor.sender()
     }
 
-    fn playback_id(&self) -> PlaybackId {
+    fn playback_id(&self) -> AudioFilePlaybackId {
         self.file_id
     }
 
@@ -206,7 +206,7 @@ impl AudioSource for StreamedFileSource {
             if self.should_report_pos(position) {
                 self.reported_pos = Some(position);
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
@@ -223,7 +223,7 @@ impl AudioSource for StreamedFileSource {
         if !is_playing || is_exhausted || fadeout_completed {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     path: self.file_path.clone(),
                     exhausted: is_exhausted,

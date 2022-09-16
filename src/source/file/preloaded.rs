@@ -7,7 +7,7 @@ use super::{streamed::StreamedFileSource, FilePlaybackMessage, FilePlaybackOptio
 use crate::{
     error::Error,
     source::{
-        file::{PlaybackId, PlaybackStatusEvent},
+        file::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
         AudioSource,
     },
     utils::{
@@ -22,13 +22,13 @@ use crate::{
 /// A buffered, clonable file source, which decodes the entire file into a buffer before its
 /// played back.
 pub struct PreloadedFileSource {
-    file_id: PlaybackId,
+    file_id: AudioFilePlaybackId,
     file_path: String,
     volume: f32,
     repeat: usize,
     playback_message_send: Sender<FilePlaybackMessage>,
     playback_message_receive: Receiver<FilePlaybackMessage>,
-    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     buffer: Vec<f32>,
     buffer_pos: u64,
     channel_count: usize,
@@ -42,7 +42,7 @@ pub struct PreloadedFileSource {
 impl PreloadedFileSource {
     pub fn new(
         file_path: &str,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
         options: FilePlaybackOptions,
     ) -> Result<Self, Error> {
         // create decoder and get signal specs
@@ -143,7 +143,7 @@ impl FileSource for PreloadedFileSource {
         self.playback_message_send.clone()
     }
 
-    fn playback_id(&self) -> PlaybackId {
+    fn playback_id(&self) -> AudioFilePlaybackId {
         self.file_id
     }
 
@@ -228,7 +228,7 @@ impl AudioSource for PreloadedFileSource {
             if self.should_report_pos(self.buffer_pos) {
                 self.reported_pos = Some(self.buffer_pos);
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(self.buffer_pos),
@@ -243,7 +243,7 @@ impl AudioSource for PreloadedFileSource {
         let fadeout_completed = self.stop_fader.state() == FaderState::Finished;
         if end_of_file || fadeout_completed {
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     path: self.file_path.clone(),
                     exhausted: self.buffer_pos >= self.buffer.len() as u64,

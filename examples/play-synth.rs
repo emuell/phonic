@@ -1,22 +1,21 @@
 use dasp::{signal, Frame, Signal};
 
 use afplay::{
-    playback::PlaybackStatusEvent, synth::SynthPlaybackOptions, AudioFilePlayer, AudioOutput,
-    AudioSink, DefaultAudioOutput,
+    AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
+    SynthPlaybackOptions,
 };
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Error> {
     // Open default device
-    let audio_output = DefaultAudioOutput::open().map_err(|err| err.to_string())?;
-    let audio_sink = audio_output.sink();
-    let sample_rate = audio_sink.sample_rate();
+    let audio_output = DefaultAudioOutput::open()?;
 
     // create channel for playback status events
     let (status_sender, status_receiver) = crossbeam_channel::unbounded();
     // create a source player
-    let mut player = AudioFilePlayer::new(audio_sink, Some(status_sender));
+    let mut player = AudioFilePlayer::new(audio_output.sink(), Some(status_sender));
 
     // Creates a signal of a detuned sine.
+    let sample_rate = player.output_sample_rate();
     let generate_note = |pitch: f64, amplitude: f64, duration: u32| {
         let fundamental = signal::rate(sample_rate as f64).const_hz(pitch);
         let harmonic_l1 = signal::rate(sample_rate as f64).const_hz(pitch * 2.01);
@@ -64,23 +63,19 @@ fn main() -> Result<(), String> {
     );
     // create audio source for the chord and sine and memorize the id for the playback status
     let mut playing_synth_ids = vec![
-        player
-            .play_dasp_synth(chord, "my_chord")
-            .map_err(|err| err.to_string())?,
-        player
-            .play_dasp_synth_with_options(
-                sine,
-                "sine",
-                SynthPlaybackOptions::default().with_volume_db(-3.0),
-            )
-            .map_err(|err| err.to_string())?,
+        player.play_dasp_synth(chord, "my_chord")?,
+        player.play_dasp_synth_with_options(
+            sine,
+            "sine",
+            SynthPlaybackOptions::default().volume_db(-3.0),
+        )?,
     ];
 
     // handle events from the file sources
     let event_thread = std::thread::spawn(move || {
         while let Ok(event) = status_receiver.recv() {
             match event {
-                PlaybackStatusEvent::Stopped {
+                AudioFilePlaybackStatusEvent::Stopped {
                     id,
                     path,
                     exhausted,
@@ -96,7 +91,7 @@ fn main() -> Result<(), String> {
                         break;
                     }
                 }
-                PlaybackStatusEvent::Position {
+                AudioFilePlaybackStatusEvent::Position {
                     id: _,
                     path: _,
                     position: _,

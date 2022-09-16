@@ -34,7 +34,7 @@ debug = 1
 cpal-output = ["cpal"]
 cubeb-output = ["cubeb", "windows"]
 dasp-synth = ["dasp"]
-default = ["cpal-output"]
+default = ["cpal-output", "dasp-synth"]
 
 [[example]]
 name = "play-file"

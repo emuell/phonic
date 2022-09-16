@@ -8,11 +8,12 @@ use std::{
 };
 
 use afplay::{
-    convert::{pitch_from_note, speed_from_note},
-    file::{preloaded::PreloadedFileSource, FilePlaybackOptions},
-    playback::PlaybackId,
-    synth::SynthPlaybackOptions,
-    AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
+    source::{
+        file::{preloaded::PreloadedFileSource, FilePlaybackOptions},
+        synth::SynthPlaybackOptions,
+    },
+    utils::{pitch_from_note, speed_from_note},
+    AudioFilePlaybackId, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -20,10 +21,9 @@ use afplay::{
 fn main() -> Result<(), Error> {
     // open default audio output
     let audio_output = DefaultAudioOutput::open()?;
-    let audio_sink = audio_output.sink();
 
     // create player and move audio device
-    let player = Arc::new(Mutex::new(AudioFilePlayer::new(audio_sink, None)));
+    let player = Arc::new(Mutex::new(AudioFilePlayer::new(audio_output.sink(), None)));
 
     // create condvar to block the main thread
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
@@ -40,7 +40,7 @@ fn main() -> Result<(), Error> {
         FilePlaybackOptions::default()
             .streamed()
             .repeat(usize::MAX)
-            .with_volume_db(-6.0),
+            .volume_db(-6.0),
     )?;
 
     // print header
@@ -50,7 +50,7 @@ fn main() -> Result<(), Error> {
     println!("  Arrow 'left/right' to seek through the loop sample");
     println!("  To play a dasp signal synth, hit key '1'. For a sample based synth hit key '2'.");
     println!("  To quit press 'Esc' or 'Control/Cmd-C'.");
-    println!("");
+    println!();
 
     // run key event handlers to play, stop and modify sounds interactively
     let device_state = DeviceState::new();
@@ -132,17 +132,15 @@ fn main() -> Result<(), Error> {
         let player = Arc::clone(&player);
         let playing_synth_ids = Arc::clone(&playing_synth_ids);
 
-        move |key: &Keycode| match key {
-            keycode => {
-                if key_to_note(keycode).is_some() {
-                    let mut player = player.lock().unwrap();
-                    let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
-                    if let Some(playback_id) = playing_synth_ids.get(keycode) {
-                        handle_note_off(&mut player, *playback_id);
-                        playing_synth_ids.remove(keycode);
-                    }
+        move |key: &Keycode| {
+            if key_to_note(key).is_some() {
+                let mut player = player.lock().unwrap();
+                let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
+                if let Some(playback_id) = playing_synth_ids.get(key) {
+                    handle_note_off(&mut player, *playback_id);
+                    playing_synth_ids.remove(key);
                 }
-            }
+            };
         }
     });
 
@@ -184,14 +182,18 @@ enum PlayMode {
     Synth,
 }
 
-fn handle_note_on(player: &mut AudioFilePlayer, note: u32, playmode: PlayMode) -> PlaybackId {
+fn handle_note_on(
+    player: &mut AudioFilePlayer,
+    note: u32,
+    playmode: PlayMode,
+) -> AudioFilePlaybackId {
     // create, then play a synth or sample source and return the playback_id
     if playmode == PlayMode::Synth {
         player
             .play_dasp_synth_with_options(
                 create_synth_source(player.output_sample_rate() as f64, pitch_from_note(note)),
                 format!("Synth Note #{}", note).as_str(),
-                SynthPlaybackOptions::default().with_volume_db(-6.0),
+                SynthPlaybackOptions::default().volume_db(-6.0),
             )
             .expect("failed to play synth note")
     } else {
@@ -201,7 +203,7 @@ fn handle_note_on(player: &mut AudioFilePlayer, note: u32, playmode: PlayMode) -
     }
 }
 
-fn handle_note_off(player: &mut AudioFilePlayer, playback_id: PlaybackId) {
+fn handle_note_off(player: &mut AudioFilePlayer, playback_id: AudioFilePlaybackId) {
     // stop playing source with the given playback_id
     player
         .stop_source_with_fadeout(playback_id, Duration::from_millis(200))
@@ -242,7 +244,7 @@ fn create_sample_source() -> PreloadedFileSource {
         static ref SYNTH_SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::new(
             "assets/pad-ambient.wav",
             None,
-            FilePlaybackOptions::default().with_volume_db(-3.0),
+            FilePlaybackOptions::default().volume_db(-3.0),
         )
         .expect("failed to load synth sample file");
     }

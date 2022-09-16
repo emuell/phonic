@@ -2,10 +2,8 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
-    source::{
-        playback::{PlaybackId, PlaybackStatusEvent},
-        AudioSource,
-    },
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    source::AudioSource,
     utils::{
         fader::{FaderState, VolumeFader},
         unique_usize_id,
@@ -14,7 +12,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A synth source which runs a dasp Signal until it is exhausted
+/// A synth source which runs a dasp Signal until it is exhausted.
 pub struct DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64>,
@@ -25,8 +23,8 @@ where
     stop_fader: VolumeFader,
     send: Sender<SynthPlaybackMessage>,
     recv: Receiver<SynthPlaybackMessage>,
-    event_send: Option<Sender<PlaybackStatusEvent>>,
-    playback_id: PlaybackId,
+    event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    playback_id: AudioFilePlaybackId,
     playback_name: String,
     playback_finished: bool,
 }
@@ -40,7 +38,7 @@ where
         signal_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,
-        event_send: Option<Sender<PlaybackStatusEvent>>,
+        event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     ) -> Self {
         let (send, recv) = unbounded::<SynthPlaybackMessage>();
         let channel_count = 1;
@@ -68,7 +66,7 @@ where
         self.send.clone()
     }
 
-    fn playback_id(&self) -> PlaybackId {
+    fn playback_id(&self) -> AudioFilePlaybackId {
         self.playback_id
     }
 }
@@ -119,7 +117,7 @@ where
         if stop_playing || is_exhausted || fadeout_completed {
             self.playback_finished = true;
             if let Some(event_send) = &self.event_send {
-                if let Err(err) = event_send.send(PlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.playback_id,
                     path: self.playback_name.clone(),
                     exhausted: self.playback_finished,

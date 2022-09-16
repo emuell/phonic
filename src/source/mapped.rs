@@ -2,7 +2,7 @@ use super::AudioSource;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which changes the channel layout
+/// A source which changes the channel layout of some other source.
 pub struct ChannelMappedSource {
     source: Box<dyn AudioSource>,
     input_channels: usize,

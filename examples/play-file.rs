@@ -1,16 +1,15 @@
 use afplay::{
-    convert::speed_from_note, file::FilePlaybackOptions, playback::PlaybackStatusEvent,
-    AudioFilePlayer, AudioOutput, DefaultAudioOutput,
+    utils::speed_from_note, AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput,
+    DefaultAudioOutput, Error, FilePlaybackOptions,
 };
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Error> {
     // Open default device
-    let audio_output = DefaultAudioOutput::open().map_err(|err| err.to_string())?;
-    let audio_sink = audio_output.sink();
+    let audio_output = DefaultAudioOutput::open()?;
 
     // create channel for playback status events
     let (status_sender, status_receiver) = crossbeam_channel::unbounded();
-    let mut player = AudioFilePlayer::new(audio_sink, Some(status_sender));
+    let mut player = AudioFilePlayer::new(audio_output.sink(), Some(status_sender));
 
     // pause playing until we've added all sources
     player.stop();
@@ -19,8 +18,7 @@ fn main() -> Result<(), String> {
     let mut playing_file_ids = vec![
         player
             // files are by default not streamed but are preloaded and player buffered.
-            .play_file("assets/altijd synth bit.wav")
-            .map_err(|err| err.to_string())?,
+            .play_file("assets/altijd synth bit.wav")?,
         player
             // this file is going to be streamed on the fly with a lowered volume.
             // we're also lowering the volume and do loop the file 2 times
@@ -28,11 +26,10 @@ fn main() -> Result<(), String> {
                 "assets/BSQ_M14.wav",
                 FilePlaybackOptions::default()
                     .streamed()
-                    .with_volume_db(-3.0)
-                    .with_speed(speed_from_note(64))
+                    .volume_db(-3.0)
+                    .speed(speed_from_note(64))
                     .repeat(3),
-            )
-            .map_err(|err| err.to_string())?,
+            )?,
     ];
 
     // start playing
@@ -42,7 +39,7 @@ fn main() -> Result<(), String> {
     let event_thread = std::thread::spawn(move || {
         while let Ok(event) = status_receiver.recv() {
             match event {
-                PlaybackStatusEvent::Position { id, path, position } => {
+                AudioFilePlaybackStatusEvent::Position { id, path, position } => {
                     println!(
                         "Playback pos of file #{} '{}': {}",
                         id,
@@ -50,7 +47,7 @@ fn main() -> Result<(), String> {
                         position.as_secs_f32()
                     );
                 }
-                PlaybackStatusEvent::Stopped {
+                AudioFilePlaybackStatusEvent::Stopped {
                     id,
                     path,
                     exhausted,

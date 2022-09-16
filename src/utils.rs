@@ -1,10 +1,10 @@
 #![allow(dead_code, unused_macros)]
 
-pub mod actor;
-pub mod buffer;
-pub mod decoder;
-pub mod fader;
-pub mod resampler;
+pub(crate) mod actor;
+pub(crate) mod buffer;
+pub(crate) mod decoder;
+pub(crate) mod fader;
+pub(crate) mod resampler;
 
 use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,7 +17,7 @@ const MINUS_INF_IN_DB: f32 = -200.0f32;
 // -------------------------------------------------------------------------------------------------
 
 /// Generates a unique usize number, by simply counting atomically upwards from 1.
-pub fn unique_usize_id() -> usize {
+pub(crate) fn unique_usize_id() -> usize {
     static FILE_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
     FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }

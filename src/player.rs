@@ -6,18 +6,16 @@ use std::{
 };
 
 use crate::{
-    converted::ConvertedSource,
     error::Error,
-    file::FilePlaybackOptions,
     output::{AudioSink, DefaultAudioSink},
-    resampled::Quality as ResamplingQuality,
     source::{
+        converted::ConvertedSource,
         file::{
             preloaded::PreloadedFileSource, streamed::StreamedFileSource, FilePlaybackMessage,
-            FileSource,
+            FilePlaybackOptions, FileSource,
         },
         mixed::{MixedSource, MixedSourceMsg},
-        playback::{PlaybackId, PlaybackStatusEvent},
+        resampled::Quality as ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
     },
 };
@@ -30,31 +28,68 @@ use crate::source::synth::{dasp::DaspSynthSource, SynthPlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
 
+/// A unique ID for a newly created File or Synth Sources.
+pub type AudioFilePlaybackId = usize;
+
+// -------------------------------------------------------------------------------------------------
+
+/// Events send back from File or Synth sources via the player to the user.
+pub enum AudioFilePlaybackStatusEvent {
+    Position {
+        /// Unique id to resolve played back sources.
+        id: AudioFilePlaybackId,
+        /// The file path for file based sources, else a name to somewhat identify the source.
+        path: String,
+        /// Source's actual playback position in wallclock-time.
+        position: Duration,
+    },
+    Stopped {
+        /// Unique id to resolve played back sources
+        id: AudioFilePlaybackId,
+        /// the file path for file based sources, else a name to somewhat identify the source
+        path: String,
+        /// true when the source finished playing (e.g. reaching EOF), false when manually stopped
+        exhausted: bool,
+    },
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Playback controller, which drives an [`AudioSink`] and runs a [`MixedSource`] which
+/// can play an unlimited number of [`FileSource`] or [`SynthSource`] at the same time.
+///
+/// Playback status of all sources can be tracked via an optional event channel.
+/// New sources can be added any time, and can be stopped and seeked (seeking works for file
+/// based sources only).
+///
+/// NB: For playback of [`SynthSource`]s, the `dasp-synth` feature needs to be enabled.
+pub struct AudioFilePlayer {
+    sink: DefaultAudioSink,
+    playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
+    playback_status_sender: Sender<AudioFilePlaybackStatusEvent>,
+    mixer_event_sender: Sender<MixedSourceMsg>,
+}
+
 enum PlaybackMessageSender {
     File(Sender<FilePlaybackMessage>),
     Synth(Sender<SynthPlaybackMessage>),
 }
 
-pub struct AudioFilePlayer {
-    sink: DefaultAudioSink,
-    playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMessageSender>>>,
-    playback_status_sender: Sender<PlaybackStatusEvent>,
-    mixer_event_sender: Sender<MixedSourceMsg>,
-}
-
-/// public interface
 impl AudioFilePlayer {
     const DEFAULT_STOP_FADEOUT_SECS: f32 = 0.05;
     const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::Linear;
 
+    /// Create a new AudioFilePlayer for the given DefaultAudioSink.
+    /// Param `playback_status_sender` is an optional channel which can be used to receive
+    /// playback status events for the currently playing sources.
     pub fn new(
         sink: DefaultAudioSink,
-        playback_status_sender_arg: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
     ) -> Self {
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(Mutex::new(HashMap::new()));
-        let playback_status_sender = Self::handle_playback_status_messages(
-            playback_status_sender_arg,
+        let playback_status_sender_proxy = Self::handle_playback_status_messages(
+            playback_status_sender,
             Arc::clone(&playing_sources),
         );
         // Create a mixer source, add it to the audio sink and start running
@@ -65,7 +100,7 @@ impl AudioFilePlayer {
         Self {
             sink,
             playing_sources,
-            playback_status_sender,
+            playback_status_sender: playback_status_sender_proxy,
             mixer_event_sender,
         }
     }
@@ -85,14 +120,14 @@ impl AudioFilePlayer {
     }
 
     /// Stop audio playback. This will only pause and thus not drop any playing sources. Use the
-    /// [`start`] function to start it again. Use function [`stop_all_sources`] to drop all sources.
+    /// `start` function to start it again. Use function `stop_all_playing_sources` to drop all sources.
     pub fn stop(&self) {
         self.sink.pause()
     }
 
-    /// Play a new file with default playback options. See [`play_file_with_options`] for more info
+    /// Play a new file with default playback options. See `play_file_with_options` for more info
     /// on which options can be applied.
-    pub fn play_file(&mut self, file_path: &str) -> Result<PlaybackId, Error> {
+    pub fn play_file(&mut self, file_path: &str) -> Result<AudioFilePlaybackId, Error> {
         self.play_file_with_options(file_path, FilePlaybackOptions::default())
     }
     /// Play a new file with the given file path and options. See [`FilePlaybackOptions`] for more info
@@ -103,7 +138,7 @@ impl AudioFilePlayer {
         &mut self,
         file_path: &str,
         options: FilePlaybackOptions,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<AudioFilePlaybackId, Error> {
         if options.stream {
             let streamed_source = StreamedFileSource::new(
                 file_path,
@@ -126,7 +161,7 @@ impl AudioFilePlayer {
         &mut self,
         file_source: Source,
         playback_speed: Option<f64>,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
         let playback_message_sender: Sender<FilePlaybackMessage> =
@@ -155,14 +190,14 @@ impl AudioFilePlayer {
         Ok(playback_id)
     }
 
-    /// Play a mono f64 dasp signal with default playback options. See [`play_dasp_synth_with_options`]
+    /// Play a mono f64 dasp signal with default playback options. See `play_dasp_synth_with_options`
     /// for more info.
     #[cfg(feature = "dasp")]
     pub fn play_dasp_synth<SignalType>(
         &mut self,
         signal: SignalType,
         signal_name: &str,
-    ) -> Result<PlaybackId, Error>
+    ) -> Result<AudioFilePlaybackId, Error>
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
@@ -188,7 +223,7 @@ impl AudioFilePlayer {
         signal: SignalType,
         signal_name: &str,
         options: SynthPlaybackOptions,
-    ) -> Result<PlaybackId, Error>
+    ) -> Result<AudioFilePlaybackId, Error>
     where
         SignalType: Signal<Frame = f64> + Send + 'static,
     {
@@ -203,7 +238,7 @@ impl AudioFilePlayer {
     }
 
     #[allow(dead_code)]
-    fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<PlaybackId, Error> {
+    fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = source.playback_id();
         let mut playing_sources = self.playing_sources.lock().unwrap();
@@ -233,7 +268,7 @@ impl AudioFilePlayer {
     /// won't do anyththing for synths.
     pub fn seek_source(
         &mut self,
-        playback_id: PlaybackId,
+        playback_id: AudioFilePlaybackId,
         position: Duration,
     ) -> Result<(), Error> {
         let playing_sources = self.playing_sources.lock().unwrap();
@@ -253,7 +288,7 @@ impl AudioFilePlayer {
     }
 
     /// Stop a playing file or synth source with default fade-out duration.
-    pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
+    pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
         self.stop_source_with_fadeout(
             playback_id,
             Duration::from_secs_f32(Self::DEFAULT_STOP_FADEOUT_SECS),
@@ -262,7 +297,7 @@ impl AudioFilePlayer {
     /// Stop a playing file or synth source with the given fade-out duration.
     pub fn stop_source_with_fadeout(
         &mut self,
-        playback_id: PlaybackId,
+        playback_id: AudioFilePlaybackId,
         fadeout: Duration,
     ) -> Result<(), Error> {
         let mut playing_sources = self.playing_sources.lock().unwrap();
@@ -295,9 +330,9 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
-    /// Stop all playing sources.
-    pub fn stop_all_sources(&mut self) -> Result<(), Error> {
-        let playing_source_ids: Vec<PlaybackId>;
+    /// Stop all playing sources with the default fade-out duration.
+    pub fn stop_all_playing_sources(&mut self) -> Result<(), Error> {
+        let playing_source_ids: Vec<AudioFilePlaybackId>;
         {
             let playing_sources = self.playing_sources.lock().unwrap();
             playing_source_ids = playing_sources.keys().copied().collect();
@@ -312,16 +347,16 @@ impl AudioFilePlayer {
 /// details
 impl AudioFilePlayer {
     fn handle_playback_status_messages(
-        playback_sender_arg: Option<Sender<PlaybackStatusEvent>>,
-        playing_sources: Arc<Mutex<HashMap<PlaybackId, PlaybackMessageSender>>>,
-    ) -> Sender<PlaybackStatusEvent> {
-        let (send_proxy, recv_proxy) = unbounded::<PlaybackStatusEvent>();
+        playback_sender_arg: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
+    ) -> Sender<AudioFilePlaybackStatusEvent> {
+        let (send_proxy, recv_proxy) = unbounded::<AudioFilePlaybackStatusEvent>();
 
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())
             .spawn(move || {
                 while let Ok(msg) = recv_proxy.recv() {
-                    if let PlaybackStatusEvent::Stopped {
+                    if let AudioFilePlaybackStatusEvent::Stopped {
                         id,
                         path: _,
                         exhausted: _,

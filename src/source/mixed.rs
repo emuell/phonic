@@ -1,6 +1,8 @@
-use crate::{converted::ConvertedSource, utils::resampler::ResamplingQuality};
+use crate::{
+    source::{converted::ConvertedSource, AudioSource},
+    utils::resampler::ResamplingQuality,
+};
 
-use super::AudioSource;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 // -------------------------------------------------------------------------------------------------

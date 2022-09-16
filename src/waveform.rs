@@ -1,3 +1,55 @@
+//! Helper functions to generate audio Waveform Generation
+//!
+//! ## Examples
+//!
+//! Write mixed-down (mono) waveform from an audio file as SVG file.
+//!
+//! ```rust
+//! use svg::{node::element::{path::Data, Path}, Document};
+//! use afplay::waveform::mixed_down::waveform_from_file;
+//!
+//! # fn main() { || -> Result<(), Box<dyn std::error::Error>> { // only check if it compiles
+//! #
+//! // resolution/viewBox of the resulting SVG
+//! const WIDTH: usize = 1024;
+//! const HEIGHT: usize = 256;
+//! const STROKE_WIDTH: usize = 1;
+//!
+//! // generate mono waveform data from file
+//! let waveform_data = waveform_from_file("SOME_FILE.wav", WIDTH)?;
+//!
+//! // fit waveform points into our viewBox
+//! let num_points = waveform_data.len();
+//! let width = WIDTH as f32;
+//! let height = HEIGHT as f32;
+//! let scale_x = move |v| v as f32 * width / num_points as f32;
+//! let scale_y = move |v| (v + 1.0) * height / 2.0;
+//!
+//! // create path from waveform points
+//! let mut data = Data::new();
+//! data = data.move_to((scale_x(0), scale_y(waveform_data[0].min)));
+//! for (index, point) in waveform_data.iter().enumerate() {
+//!     let x = scale_x(index);
+//!     data = data
+//!         .line_to((x, scale_y(point.min)))
+//!         .line_to((x, scale_y(point.max)));
+//! }
+//! let path = Path::new()
+//!     .set("fill", "none")
+//!     .set("stroke", "black")
+//!     .set("stroke-width", STROKE_WIDTH)
+//!     .set("d", data);
+//!
+//! // create svg document and add the path
+//! let mut document = Document::new().set("viewBox", (0, 0, WIDTH, HEIGHT));
+//! document = document.add(path);
+//!
+//! // write svg document
+//! svg::save("SOME_WAVEFORM.svg", &document)?;
+//! #
+//! # Ok(()) }; }
+//! ```
+
 use std::time::Duration;
 
 // -------------------------------------------------------------------------------------------------
