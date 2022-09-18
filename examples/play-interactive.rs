@@ -36,7 +36,7 @@ fn main() -> Result<(), Error> {
 
     // start playing the background loop and memorize playback_id
     let loop_playback_id = player.lock().unwrap().play_file_with_options(
-        "assets/BSQ_M14.wav",
+        "assets/YuaiLoop.wav",
         FilePlaybackOptions::default()
             .streamed()
             .repeat(usize::MAX)

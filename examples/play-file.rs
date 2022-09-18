@@ -23,12 +23,12 @@ fn main() -> Result<(), Error> {
             // this file is going to be streamed on the fly with a lowered volume.
             // we're also lowering the volume and do loop the file 2 times
             .play_file_with_options(
-                "assets/BSQ_M14.wav",
+                "assets/YuaiLoop.wav",
                 FilePlaybackOptions::default()
                     .streamed()
                     .volume_db(-3.0)
-                    .speed(speed_from_note(64))
-                    .repeat(3),
+                    .speed(speed_from_note(58))
+                    .repeat(1),
             )?,
     ];
 
