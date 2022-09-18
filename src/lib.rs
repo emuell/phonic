@@ -1,9 +1,9 @@
-//! **afplay** is a cross-platform *audio playback library for Rust*, based on the
+//! **afplay** is an *audio playback library for Rust*, based on the
 //! [psst-core](https://github.com/jpochyla/psst/tree/master/psst-core) audio playback
 //! implementation.
 //!
-//! It aims to be a suitable player for game engines, but can also be used as a
-//! general-purpose low-latency playback engine for music applications.
+//! It aims to be a suitable player for game engines, but can also be used as a general-purpose
+//! low-latency music and sound playback engine for other desktop applications.
 //!
 //! It was originally developed and is used in the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer)
 //! app and related projects which are using the [Tauri](https://tauri.app) app framework.
@@ -22,7 +22,11 @@
 //!   thanks to [libsamplerate](https://github.com/Prior99/libsamplerate-sys).
 //! - Click free playback: when stopping sounds, a very short volume fade-out is applied to
 //!   **avoid clicks** (de-clicking for seeking is a TODO).
-//! - Generate **waveform plots** from audio file paths or raw sample buffers.
+//!
+//! ## See Also
+//!
+//! - [afwaveplot](https://github.com/emuell/afwaveplot):
+//!   to generate **waveform plots** from audio file paths or raw sample buffers.
 //!
 //! ## Examples
 //!
@@ -221,7 +225,6 @@ mod player;
 // public
 pub mod source;
 pub mod utils;
-pub mod waveform;
 
 // re-exports
 pub use error::Error;

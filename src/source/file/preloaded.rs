@@ -104,7 +104,7 @@ impl PreloadedFileSource {
     }
 
     /// Access to the preloaded file's buffer
-    pub(crate) fn buffer(&self) -> &[f32] {
+    pub fn buffer(&self) -> &[f32] {
         &self.buffer
     }
 
