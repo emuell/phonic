@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
@@ -23,23 +25,27 @@ impl CpalOutput {
             .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?;
 
         if let Ok(name) = device.name() {
-            log::info!("using audio device: {:?}", name);
+            log::info!("using audio device: {}", name);
         }
 
         // Get the default device config, so we know what sample format and sample rate
         // the device supports.
         let supported = Self::preferred_output_config(&device)?;
+        // Shared playback position counter
+        let playback_pos = Arc::new(AtomicU64::new(0));
 
         let (callback_send, callback_recv) = bounded(16);
 
         let handle = Stream::spawn_with_default_cap("audio_output", {
             let config = supported.config();
-            // TODO: Support additional sample formats.
-            move |this| Stream::open(device, config, callback_recv, this).unwrap()
+            let playback_pos = Arc::clone(&playback_pos);
+            move |this| Stream::open(device, config, playback_pos, callback_recv, this).unwrap()
         });
         let sink = CpalSink {
             channel_count: supported.channels(),
             sample_rate: supported.sample_rate(),
+            volume: 1.0,
+            playback_pos,
             stream_send: handle.sender(),
             callback_send,
         };
@@ -85,6 +91,8 @@ impl AudioOutput for CpalOutput {
 pub struct CpalSink {
     channel_count: cpal::ChannelCount,
     sample_rate: cpal::SampleRate,
+    volume: f32,
+    playback_pos: Arc<AtomicU64>,
     callback_send: Sender<CallbackMsg>,
     stream_send: Sender<StreamMsg>,
 }
@@ -112,11 +120,19 @@ impl AudioSink for CpalSink {
         self.sample_rate.0
     }
 
-    fn set_volume(&self, volume: f32) {
+    fn sample_position(&self) -> u64 {
+        self.playback_pos.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn volume(&self) -> f32 {
+        self.volume
+    }
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
         self.send_to_callback(CallbackMsg::SetVolume(volume));
     }
 
-    fn play(&self, source: impl AudioSource) {
+    fn play(&mut self, source: impl AudioSource) {
         // ensure source has our sample rate and channel layout
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
@@ -124,21 +140,21 @@ impl AudioSink for CpalSink {
         self.send_to_callback(CallbackMsg::PlaySource(Box::new(source)));
     }
 
-    fn pause(&self) {
+    fn pause(&mut self) {
         self.send_to_stream(StreamMsg::Pause);
         self.send_to_callback(CallbackMsg::Pause);
     }
 
-    fn resume(&self) {
+    fn resume(&mut self) {
         self.send_to_stream(StreamMsg::Resume);
         self.send_to_callback(CallbackMsg::Resume);
     }
 
-    fn stop(&self) {
-        self.pause();
+    fn stop(&mut self) {
+        self.send_to_callback(CallbackMsg::PlaySource(Box::new(EmptySource)));
     }
 
-    fn close(&self) {
+    fn close(&mut self) {
         self.send_to_stream(StreamMsg::Close);
     }
 }
@@ -154,14 +170,16 @@ impl Stream {
     fn open(
         device: cpal::Device,
         config: cpal::StreamConfig,
+        playback_pos: Arc<AtomicU64>,
         callback_recv: Receiver<CallbackMsg>,
-        stream_send: Sender<StreamMsg>,
+        _stream_send: Sender<StreamMsg>,
     ) -> Result<Self, Error> {
         let mut callback = StreamCallback {
+            _stream_send,
             callback_recv,
-            stream_send,
             source: Box::new(EmptySource),
-            volume: 1.0, // We start with the full volume.
+            volume: 1.0,
+            playback_pos,
             state: CallbackState::Paused,
         };
 
@@ -233,10 +251,10 @@ enum CallbackState {
 }
 
 struct StreamCallback {
-    #[allow(unused)]
-    stream_send: Sender<StreamMsg>,
+    _stream_send: Sender<StreamMsg>,
     callback_recv: Receiver<CallbackMsg>,
     source: Box<dyn AudioSource>,
+    playback_pos: Arc<AtomicU64>,
     state: CallbackState,
     volume: f32,
 }
@@ -269,6 +287,11 @@ impl StreamCallback {
             // Apply the global volume level.
             output[..written].iter_mut().for_each(|s| *s *= self.volume);
 
+            // Advance playback pos
+            self.playback_pos
+                .fetch_add(output.len() as u64, std::sync::atomic::Ordering::Relaxed);
+
+            // return modified samples
             written
         } else {
             0

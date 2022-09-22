@@ -1,5 +1,9 @@
 use crossbeam_channel::{bounded, Receiver, Sender};
-use std::{env, ffi::CString};
+use std::{
+    env,
+    ffi::CString,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use crate::{
     error::Error,
@@ -11,8 +15,7 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 pub struct CubebOutput {
-    #[allow(unused)]
-    handle: ActorHandle<StreamMsg>,
+    _handle: ActorHandle<StreamMsg>,
     sink: CubebSink,
 }
 
@@ -20,15 +23,23 @@ impl CubebOutput {
     pub fn open() -> Result<Self, Error> {
         let (callback_send, callback_recv) = bounded(16);
 
+        let playback_pos = Arc::new(AtomicU64::new(0));
+
         let handle = Stream::spawn_with_default_cap("audio_output", {
-            move |_| Stream::open(callback_recv).unwrap()
+            let playback_pos = playback_pos.clone();
+            move |_| Stream::open(playback_pos, callback_recv).unwrap()
         });
         let sink = CubebSink {
+            volume: 1.0,
+            playback_pos,
             callback_send,
             stream_send: handle.sender(),
         };
 
-        Ok(Self { handle, sink })
+        Ok(Self {
+            _handle: handle,
+            sink,
+        })
     }
 }
 
@@ -55,7 +66,10 @@ struct Stream {
 }
 
 impl Stream {
-    fn open(callback_recv: Receiver<CallbackMsg>) -> Result<Self, Error> {
+    fn open(
+        playback_pos: Arc<AtomicU64>,
+        callback_recv: Receiver<CallbackMsg>,
+    ) -> Result<Self, Error> {
         // Call CoInitialize() before any other calls to the API.
         #[cfg(target_os = "windows")]
         unsafe {
@@ -73,6 +87,7 @@ impl Stream {
         let mut callback = StreamCallback {
             callback_recv,
             source: Box::new(EmptySource),
+            playback_pos,
             state: CallbackState::Paused,
             buffer: vec![0.0; 1024 * 1024],
         };
@@ -152,6 +167,8 @@ impl Actor for Stream {
 
 #[derive(Clone)]
 pub struct CubebSink {
+    volume: f32,
+    playback_pos: Arc<AtomicU64>,
     callback_send: Sender<CallbackMsg>,
     stream_send: Sender<StreamMsg>,
 }
@@ -165,11 +182,19 @@ impl AudioSink for CubebSink {
         SAMPLE_RATE
     }
 
-    fn set_volume(&self, volume: f32) {
+    fn sample_position(&self) -> u64 {
+        self.playback_pos.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn volume(&self) -> f32 {
+        self.volume
+    }
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
         self.stream_send.send(StreamMsg::SetVolume(volume)).unwrap();
     }
 
-    fn play(&self, source: impl AudioSource) {
+    fn play(&mut self, source: impl AudioSource) {
         // ensure source has our sample rate and channel layout
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
@@ -179,21 +204,23 @@ impl AudioSink for CubebSink {
             .unwrap()
     }
 
-    fn pause(&self) {
+    fn pause(&mut self) {
         self.callback_send.send(CallbackMsg::Pause).unwrap();
         self.stream_send.send(StreamMsg::Pause).unwrap();
     }
 
-    fn resume(&self) {
+    fn resume(&mut self) {
         self.callback_send.send(CallbackMsg::Resume).unwrap();
         self.stream_send.send(StreamMsg::Resume).unwrap();
     }
 
-    fn stop(&self) {
-        self.pause();
+    fn stop(&mut self) {
+        self.callback_send
+            .send(CallbackMsg::PlaySource(Box::new(EmptySource)))
+            .unwrap();
     }
 
-    fn close(&self) {
+    fn close(&mut self) {
         self.stop();
     }
 }
@@ -215,6 +242,7 @@ struct StreamCallback {
     callback_recv: Receiver<CallbackMsg>,
     source: Box<dyn AudioSource>,
     state: CallbackState,
+    playback_pos: Arc<AtomicU64>,
     buffer: Vec<f32>,
 }
 
@@ -260,6 +288,12 @@ impl StreamCallback {
             s.l = 0.0;
             s.r = 0.0;
         });
+
+        // Move playback pos
+        self.playback_pos.fetch_add(
+            output.len() as u64 * 2, // Stereo!
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 }
 
