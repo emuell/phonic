@@ -10,12 +10,16 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 struct PlayingSource {
     is_active: bool,
     source: Box<dyn AudioSource>,
+    sample_time: u64,
 }
 
 // -------------------------------------------------------------------------------------------------
 
 pub enum MixedSourceMsg {
-    AddSource { source: Box<dyn AudioSource> },
+    AddSource {
+        source: Box<dyn AudioSource>,
+        sample_time: u64,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -23,6 +27,7 @@ pub enum MixedSourceMsg {
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<PlayingSource>,
+    playback_pos: u64,
     event_send: Sender<MixedSourceMsg>,
     event_recv: Receiver<MixedSourceMsg>,
     channel_count: usize,
@@ -31,12 +36,15 @@ pub struct MixedSource {
 }
 
 impl MixedSource {
-    /// Create a new mixer source with the given signal specs
-    pub fn new(channel_count: usize, sample_rate: u32) -> Self {
+    /// Create a new mixer source with the given signal specs.
+    /// Param `sample_time` is the intial sample frame time that we start to run with.
+    /// This usually will be the audio outputs playback pos.
+    pub fn new(channel_count: usize, sample_rate: u32, sample_time: u64) -> Self {
         let (event_send, event_recv) = unbounded::<MixedSourceMsg>();
         const BUFFER_SIZE: usize = 8 * 1024;
         Self {
             playing_sources: Vec::new(),
+            playback_pos: sample_time,
             event_recv,
             event_send,
             channel_count,
@@ -47,16 +55,27 @@ impl MixedSource {
 
     /// Add a source to the mix
     pub fn add(&mut self, source: impl AudioSource, quality: ResamplingQuality) {
+        let sample_time = 0;
+        self.add_at_sample_time(source, sample_time, quality);
+    }
+
+    /// Add a source to the mix scheduling it to play at the given absolute sample time.
+    pub fn add_at_sample_time(
+        &mut self,
+        source: impl AudioSource,
+        sample_time: u64,
+        quality: ResamplingQuality,
+    ) {
         let converted = Box::new(ConvertedSource::new(
             source,
             self.channel_count,
             self.sample_rate,
             quality,
         ));
-        if let Err(err) = self
-            .event_send
-            .send(MixedSourceMsg::AddSource { source: converted })
-        {
+        if let Err(err) = self.event_send.send(MixedSourceMsg::AddSource {
+            source: converted,
+            sample_time,
+        }) {
             log::error!("Failed to add mixer source: {}", { err });
         }
     }
@@ -71,9 +90,13 @@ impl MixedSource {
 impl AudioSource for MixedSource {
     fn write(&mut self, output: &mut [f32]) -> usize {
         // process events
+        let mut got_new_sources = false;
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
-                MixedSourceMsg::AddSource { source } => {
+                MixedSourceMsg::AddSource {
+                    source,
+                    sample_time,
+                } => {
                     debug_assert_eq!(
                         source.channel_count(),
                         self.channel_count,
@@ -84,13 +107,21 @@ impl AudioSource for MixedSource {
                         self.sample_rate,
                         "adjust source's sample rate before adding it"
                     );
+                    got_new_sources = true;
                     self.playing_sources.push(PlayingSource {
                         is_active: true,
                         source,
+                        sample_time,
                     });
                 }
             }
         }
+        // keep sources sorted by sample time: this makes batch processing easier
+        if got_new_sources {
+            self.playing_sources
+                .sort_by(|a, b| a.sample_time.cmp(&b.sample_time));
+        }
+
         // return empty handed when we have no sources
         if self.playing_sources.is_empty() {
             return 0;
@@ -100,10 +131,26 @@ impl AudioSource for MixedSource {
             *o = 0_f32;
         }
         // run and add all playing sources
+        let output_frame_count = output.len() / self.channel_count;
         let mut max_written = 0usize;
-        for playing_source in self.playing_sources.iter_mut() {
+        'all_sources: for playing_source in self.playing_sources.iter_mut() {
             let source = &mut playing_source.source;
-            let mut total_written = 0;
+            let mut total_written: usize = 0;
+            // check source's sample start time
+            if playing_source.sample_time > self.playback_pos {
+                let frames_until_source_starts =
+                    (playing_source.sample_time - self.playback_pos) as usize * self.channel_count;
+                if frames_until_source_starts > 0 {
+                    if frames_until_source_starts >= output_frame_count {
+                        // playing_sources are sorted by sample time: all following sources will run
+                        // after this source, and thus also can also be skipped...
+                        break 'all_sources;
+                    }
+                    // offset to the sample start
+                    total_written += frames_until_source_starts;
+                }
+            }
+            // run and mix down the source
             'source: while total_written < output.len() {
                 // run source on temp_out until we've filled up the whole final output
                 let remaining = output.len() - total_written;
@@ -126,7 +173,9 @@ impl AudioSource for MixedSource {
         }
         // drain inactive sources
         self.playing_sources.retain(|s| s.is_active);
-        // return modified output len (we've cleared output entirely)
+        // move our playback sample counter
+        self.playback_pos += output_frame_count as u64;
+        // return modified output len: we've cleared the entire output
         output.len()
     }
 

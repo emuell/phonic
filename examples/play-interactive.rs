@@ -198,7 +198,7 @@ fn handle_note_on(
             .expect("failed to play synth note")
     } else {
         player
-            .play_file_source(create_sample_source(), Some(speed_from_note(note)))
+            .play_file_source(create_sample_source(), speed_from_note(note), None)
             .expect("failed to play sample")
     }
 }

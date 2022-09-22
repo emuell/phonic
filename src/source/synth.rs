@@ -13,11 +13,17 @@ use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linea
 pub struct SynthPlaybackOptions {
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
     pub volume: f32,
+    /// By default None: when set, the source should start playing at the given
+    /// sample frame time in the audio output stream.
+    pub start_time: Option<u64>,
 }
 
 impl Default for SynthPlaybackOptions {
     fn default() -> Self {
-        Self { volume: 1.0f32 }
+        Self {
+            volume: 1.0f32,
+            start_time: None,
+        }
     }
 }
 
@@ -28,6 +34,11 @@ impl SynthPlaybackOptions {
     }
     pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn start_at_time(mut self, sample_time: u64) -> Self {
+        self.start_time = Some(sample_time);
         self
     }
 

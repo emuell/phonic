@@ -27,6 +27,9 @@ pub struct FilePlaybackOptions {
     /// By default 0: when > 0 the number of times the file should be looped.
     /// Set to usize::MAX to repeat forever.
     pub repeat: usize,
+    /// By default None: when set, the source should start playing at the given
+    /// sample frame time in the audio output stream.
+    pub start_time: Option<u64>,
 }
 
 impl Default for FilePlaybackOptions {
@@ -36,6 +39,7 @@ impl Default for FilePlaybackOptions {
             volume: 1.0,
             speed: 1.0,
             repeat: 0,
+            start_time: None,
         }
     }
 }
@@ -70,6 +74,11 @@ impl FilePlaybackOptions {
     }
     pub fn repeat_forever(mut self) -> Self {
         self.repeat = usize::MAX;
+        self
+    }
+
+    pub fn start_at_time(mut self, sample_time: u64) -> Self {
+        self.start_time = Some(sample_time);
         self
     }
 

@@ -93,8 +93,13 @@ impl AudioFilePlayer {
             Arc::clone(&playing_sources),
         );
         // Create a mixer source, add it to the audio sink and start running
-        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
+        let mixer_source = MixedSource::new(
+            sink.channel_count(),
+            sink.sample_rate(),
+            sink.sample_position(),
+        );
         let mixer_event_sender = mixer_source.event_sender();
+        let mut sink = sink;
         sink.play(mixer_source);
         sink.resume();
         Self {
@@ -113,16 +118,24 @@ impl AudioFilePlayer {
     pub fn output_channel_count(&self) -> usize {
         self.sink.channel_count()
     }
+    /// Our actual playhead pos in samples (NOT sample frames)
+    pub fn output_sample_position(&self) -> u64 {
+        self.sink.sample_position()
+    }
+    /// Our actual playhead pos in sample frames
+    pub fn output_sample_frame_position(&self) -> u64 {
+        self.output_sample_position() / self.output_channel_count() as u64
+    }
 
     /// Start audio playback.
-    pub fn start(&self) {
-        self.sink.resume()
+    pub fn start(&mut self) {
+        self.sink.resume();
     }
 
     /// Stop audio playback. This will only pause and thus not drop any playing sources. Use the
     /// `start` function to start it again. Use function `stop_all_playing_sources` to drop all sources.
-    pub fn stop(&self) {
-        self.sink.pause()
+    pub fn stop(&mut self) {
+        self.sink.pause();
     }
 
     /// Play a new file with default playback options. See `play_file_with_options` for more info
@@ -150,14 +163,14 @@ impl AudioFilePlayer {
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            self.play_file_source(streamed_source, Some(options.speed))
+            self.play_file_source(streamed_source, options.speed, options.start_time)
         } else {
             let preloaded_source = PreloadedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            self.play_file_source(preloaded_source, Some(options.speed))
+            self.play_file_source(preloaded_source, options.speed, options.start_time)
         }
     }
 
@@ -165,7 +178,8 @@ impl AudioFilePlayer {
     pub fn play_file_source<Source: FileSource>(
         &mut self,
         file_source: Source,
-        playback_speed: Option<f64>,
+        speed: f64,
+        start_time: Option<u64>,
     ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
@@ -181,12 +195,13 @@ impl AudioFilePlayer {
             file_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
-            playback_speed.unwrap_or(1.0),
+            speed,
             Self::DEFAULT_RESAMPLING_QUALITY,
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             source: Box::new(converted_source),
+            sample_time: start_time.unwrap_or(0),
         }) {
             log::error!("failed to send mixer event: {}", err);
             return Err(Error::SendError);
@@ -244,11 +259,15 @@ impl AudioFilePlayer {
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
         );
-        self.play_synth(source)
+        self.play_synth(source, options.start_time)
     }
 
     #[allow(dead_code)]
-    fn play_synth<S: SynthSource>(&mut self, source: S) -> Result<AudioFilePlaybackId, Error> {
+    fn play_synth<S: SynthSource>(
+        &mut self,
+        source: S,
+        start_time: Option<u64>,
+    ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = source.playback_id();
         let mut playing_sources = self.playing_sources.lock().unwrap();
@@ -266,6 +285,7 @@ impl AudioFilePlayer {
         // play the source
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             source: Box::new(converted),
+            sample_time: start_time.unwrap_or(0),
         }) {
             log::error!("failed to send mixer event: {}", err);
             return Err(Error::SendError);
