@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use symphonia::core::audio::SampleBuffer;
@@ -21,6 +21,10 @@ use crate::{
 
 /// A buffered, clonable file source, which decodes the entire file into a buffer before its
 /// played back.
+///
+/// Buffers of preloaded file sources are shared (wrapped in an Arc), so cloning a source is
+/// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
+/// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
     file_id: AudioFilePlaybackId,
     file_path: String,
@@ -29,7 +33,7 @@ pub struct PreloadedFileSource {
     playback_message_send: Sender<FilePlaybackMessage>,
     playback_message_receive: Receiver<FilePlaybackMessage>,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    buffer: Vec<f32>,
+    buffer: Arc<Vec<f32>>,
     buffer_pos: u64,
     channel_count: usize,
     sample_rate: u32,
@@ -92,7 +96,7 @@ impl PreloadedFileSource {
             playback_message_receive,
             playback_message_send,
             playback_status_send,
-            buffer,
+            buffer: Arc::new(buffer),
             buffer_pos: 0_u64,
             channel_count,
             sample_rate,
@@ -101,6 +105,15 @@ impl PreloadedFileSource {
             stop_fader: VolumeFader::new(channel_count, sample_rate),
             playback_finished: false,
         })
+    }
+
+    /// Access to the playback volume option
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+    /// Set a new  playback volume option
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume
     }
 
     /// Access to the preloaded file's buffer
@@ -133,7 +146,7 @@ impl Clone for PreloadedFileSource {
             playback_message_send,
             playback_message_receive,
             playback_status_send: self.playback_status_send.clone(),
-            buffer: self.buffer.clone(),
+            buffer: Arc::clone(&self.buffer),
             ..*self
         }
     }
