@@ -115,7 +115,7 @@ pub enum FilePlaybackMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which decodes and plays back an audio file.
-pub trait FileSource: AudioSource + Sized {
+pub trait FileSource: AudioSource {
     /// Channel to control file playback.
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.

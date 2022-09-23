@@ -65,7 +65,7 @@ pub enum SynthPlaybackMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which creates samples from a synthesized signal.
-pub trait SynthSource: AudioSource + Sized {
+pub trait SynthSource: AudioSource {
     /// Channel sender to control this sources's playback
     fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage>;
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
