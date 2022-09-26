@@ -59,17 +59,17 @@ pub fn db_to_linear(value: f32) -> f32 {
 // -------------------------------------------------------------------------------------------------
 
 /// Calculate playback speed from a MIDI note, using middle C (note number 60) as base note.
-pub fn speed_from_note(note: u32) -> f64 {
+pub fn speed_from_note(midi_note: u8) -> f64 {
     // Middle Note C6 = MIDI note 60
-    pitch_from_note(note) / pitch_from_note(60)
+    pitch_from_note(midi_note) / pitch_from_note(60)
 }
 
 // -------------------------------------------------------------------------------------------------
 
 /// Calculate Hz from a MIDI note with equal tuning based on A4 = a' = 440 Hz.
-pub fn pitch_from_note(note: u32) -> f64 {
+pub fn pitch_from_note(midi_note: u8) -> f64 {
     // A4 = MIDI note 69
-    440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
+    440.0 * 2.0_f64.powf((midi_note as f64 - 69.0) / 12.0)
 }
 
 // -------------------------------------------------------------------------------------------------

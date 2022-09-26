@@ -115,7 +115,7 @@ fn main() -> Result<(), Error> {
                 if let Some(relative_note) = key_to_note(keycode) {
                     let playmode = *current_playmode.lock().unwrap();
                     let octave = *current_octave.lock().unwrap();
-                    let final_note = relative_note + 12 * octave;
+                    let final_note = (relative_note + 12 * octave) as u8;
 
                     let mut player = player.lock().unwrap();
                     let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
@@ -184,7 +184,7 @@ enum PlayMode {
 
 fn handle_note_on(
     player: &mut AudioFilePlayer,
-    note: u32,
+    note: u8,
     playmode: PlayMode,
 ) -> AudioFilePlaybackId {
     // create, then play a synth or sample source and return the playback_id
