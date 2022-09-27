@@ -20,6 +20,8 @@ pub enum MixedSourceMsg {
         source: Box<dyn AudioSource>,
         sample_time: u64,
     },
+    RemoveAllSources,
+    RemoveAllPendingSources,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -114,6 +116,16 @@ impl AudioSource for MixedSource {
                         sample_time,
                     });
                 }
+                MixedSourceMsg::RemoveAllPendingSources => {
+                    // remove all sources which are not yet playing
+                    let playback_pos = self.playback_pos;
+                    self.playing_sources
+                        .retain(|source| source.sample_time <= playback_pos);
+                }
+                MixedSourceMsg::RemoveAllSources => {
+                    // remove all sources
+                    self.playing_sources.clear();
+                }
             }
         }
         // keep sources sorted by sample time: this makes batch processing easier
@@ -123,7 +135,10 @@ impl AudioSource for MixedSource {
         }
 
         // return empty handed when we have no sources
+        let output_frame_count = output.len() / self.channel_count;
         if self.playing_sources.is_empty() {
+            // but move our playback sample counter
+            self.playback_pos += output_frame_count as u64;
             return 0;
         }
         // clear output as we're only adding below
@@ -131,7 +146,6 @@ impl AudioSource for MixedSource {
             *o = 0_f32;
         }
         // run and add all playing sources
-        let output_frame_count = output.len() / self.channel_count;
         let mut max_written = 0usize;
         'all_sources: for playing_source in self.playing_sources.iter_mut() {
             let source = &mut playing_source.source;

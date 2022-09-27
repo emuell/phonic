@@ -362,6 +362,7 @@ impl AudioFilePlayer {
 
     /// Stop all playing sources with the default fade-out duration.
     pub fn stop_all_playing_sources(&mut self) -> Result<(), Error> {
+        // stop everything which is playing now
         let playing_source_ids: Vec<AudioFilePlaybackId>;
         {
             let playing_sources = self.playing_sources.lock().unwrap();
@@ -369,6 +370,14 @@ impl AudioFilePlayer {
         }
         for source_id in playing_source_ids {
             self.stop_source(source_id)?;
+        }
+        // remove all upcoming, scheduled sources in the mixer too
+        if let Err(err) = self
+            .mixer_event_sender
+            .send(MixedSourceMsg::RemoveAllPendingSources)
+        {
+            log::error!("failed to send mixer event: {}", err);
+            return Err(Error::SendError);
         }
         Ok(())
     }
