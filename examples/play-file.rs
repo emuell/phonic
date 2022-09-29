@@ -18,11 +18,14 @@ fn main() -> Result<(), Error> {
     let mut playing_file_ids = vec![
         player
             // files are by default not streamed but are preloaded and player buffered.
-            .play_file("assets/altijd synth bit.wav")?,
+            .play_file(
+                "assets/altijd synth bit.wav",
+                FilePlaybackOptions::default(),
+            )?,
         player
             // this file is going to be streamed on the fly with a lowered volume.
             // we're also lowering the volume and do loop the file 2 times
-            .play_file_with_options(
+            .play_file(
                 "assets/YuaiLoop.wav",
                 FilePlaybackOptions::default()
                     .streamed()

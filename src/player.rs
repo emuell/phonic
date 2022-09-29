@@ -138,16 +138,11 @@ impl AudioFilePlayer {
         self.sink.pause();
     }
 
-    /// Play a new file with default playback options. See `play_file_with_options` for more info
-    /// on which options can be applied.
-    pub fn play_file(&mut self, file_path: &str) -> Result<AudioFilePlaybackId, Error> {
-        self.play_file_with_options(file_path, FilePlaybackOptions::default())
-    }
     /// Play a new file with the given file path and options. See [`FilePlaybackOptions`] for more info
     /// on which options can be applied.
     ///
     /// Newly played sources are always added to the final mix and won't stop other playing sources.
-    pub fn play_file_with_options(
+    pub fn play_file(
         &mut self,
         file_path: &str,
         options: FilePlaybackOptions,
@@ -210,19 +205,6 @@ impl AudioFilePlayer {
         Ok(playback_id)
     }
 
-    /// Play a mono f64 dasp signal with default playback options. See `play_dasp_synth_with_options`
-    /// for more info.
-    #[cfg(feature = "dasp")]
-    pub fn play_dasp_synth<SignalType>(
-        &mut self,
-        signal: SignalType,
-        signal_name: &str,
-    ) -> Result<AudioFilePlaybackId, Error>
-    where
-        SignalType: Signal<Frame = f64> + Send + 'static,
-    {
-        self.play_dasp_synth_with_options(signal, signal_name, SynthPlaybackOptions::default())
-    }
     /// Play a mono dasp signal with the given options. See [`SynthPlaybackOptions`] for more info
     /// about available options.
     ///
@@ -238,7 +220,7 @@ impl AudioFilePlayer {
     /// )`
     /// which plays a sine wave at 440 hz for 2 seconds.
     #[cfg(feature = "dasp")]
-    pub fn play_dasp_synth_with_options<SignalType>(
+    pub fn play_dasp_synth<SignalType>(
         &mut self,
         signal: SignalType,
         signal_name: &str,

@@ -50,9 +50,11 @@
 //! let mut player = AudioFilePlayer::new(audio_output.sink(), None);
 //!
 //! // Play back a file with the default playback options.
-//! player.play_file("PATH_TO/some_file.wav")?;
+//! player.play_file(
+//!     "PATH_TO/some_file.wav",
+//!     FilePlaybackOptions::default())?;
 //! // Play back another file on top with custom playback options.
-//! player.play_file_with_options(
+//! player.play_file(
 //!     "PATH_TO/some_long_file.mp3",
 //!     FilePlaybackOptions::default()
 //!         .streamed() // decodes the file on-the-fly
@@ -75,7 +77,8 @@
 //! ```rust
 //! use afplay::{
 //!     AudioFilePlayer, AudioOutput, AudioSink, DefaultAudioOutput,
-//!     AudioFilePlaybackStatusEvent, FilePlaybackOptions, Error
+//!     AudioFilePlaybackStatusEvent, FilePlaybackOptions, SynthPlaybackOptions,
+//!     Error
 //! };
 //!
 //! #[cfg(feature = "dasp")]
@@ -97,13 +100,15 @@
 //! // from a buffer.
 //! // Files played through the player are automatically resampled and channel-mapped to match the
 //! // audio output's signal specs, so there's nothing more to do to get it played:
-//! let small_file_id = player.play_file("PATH_TO/some_small_file.wav")?;
+//! let small_file_id = player.play_file(
+//!     "PATH_TO/some_small_file.wav",
+//!     FilePlaybackOptions::default())?;
 //! // The next file is going to be decoded and streamed on the fly, which is especially handy for
 //! // long files such as music, as it can start playing right away and won't need to allocate
 //! // memory for the entire file.
 //! // We're also repeating the file playback 2 times, lowering the volume and are pitching it
 //! // down. As the player mixes down everything, we'll hear both files at the same time now:
-//! let long_file_id = player.play_file_with_options(
+//! let long_file_id = player.play_file(
 //!     "PATH_TO/some_long_file.mp3",
 //!     FilePlaybackOptions::default()
 //!         .streamed()
@@ -126,7 +131,10 @@
 //!         .take(sample_rate as usize * 2),
 //! );
 //! #[cfg(feature = "dasp")]
-//! let synth_id = player.play_dasp_synth(dasp_signal, "my_synth_sound")?;
+//! let synth_id = player.play_dasp_synth(
+//!     dasp_signal,
+//!     "my_synth_sound",
+//!     SynthPlaybackOptions::default())?;
 //!
 //! // You can optionally track playback status events from the player:
 //! std::thread::spawn(move || {
@@ -166,7 +174,7 @@
 //! // If you only want one file to play at the same time, simply stop all playing
 //! // sounds before starting a new one:
 //! player.stop_all_playing_sources()?;
-//! player.play_file("PATH_TO/boom.wav")?;
+//! player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 //!
 //! # Ok(()) }; }
 //! ```

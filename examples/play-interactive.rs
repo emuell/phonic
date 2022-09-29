@@ -35,7 +35,7 @@ fn main() -> Result<(), Error> {
     let playing_synth_ids = Arc::new(Mutex::new(HashMap::<Keycode, usize>::new()));
 
     // start playing the background loop and memorize playback_id
-    let loop_playback_id = player.lock().unwrap().play_file_with_options(
+    let loop_playback_id = player.lock().unwrap().play_file(
         "assets/YuaiLoop.wav",
         FilePlaybackOptions::default()
             .streamed()
@@ -190,7 +190,7 @@ fn handle_note_on(
     // create, then play a synth or sample source and return the playback_id
     if playmode == PlayMode::Synth {
         player
-            .play_dasp_synth_with_options(
+            .play_dasp_synth(
                 create_synth_source(player.output_sample_rate() as f64, pitch_from_note(note)),
                 format!("Synth Note #{}", note).as_str(),
                 SynthPlaybackOptions::default().volume_db(-6.0),

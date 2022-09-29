@@ -63,8 +63,8 @@ fn main() -> Result<(), Error> {
     );
     // create audio source for the chord and sine and memorize the id for the playback status
     let mut playing_synth_ids = vec![
-        player.play_dasp_synth(chord, "my_chord")?,
-        player.play_dasp_synth_with_options(
+        player.play_dasp_synth(chord, "my_chord", SynthPlaybackOptions::default())?,
+        player.play_dasp_synth(
             sine,
             "sine",
             SynthPlaybackOptions::default().volume_db(-3.0),
