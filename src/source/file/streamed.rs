@@ -18,7 +18,7 @@ use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
-    source::AudioSource,
+    source::{AudioSource, AudioSourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
         decoder::AudioDecoder,
@@ -165,7 +165,7 @@ impl FileSource for StreamedFileSource {
 }
 
 impl AudioSource for StreamedFileSource {
-    fn write(&mut self, output: &mut [f32]) -> usize {
+    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // return empty handed when playback finished
         if self.playback_finished {
             return 0;

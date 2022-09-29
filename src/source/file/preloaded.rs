@@ -11,7 +11,7 @@ use crate::{
     error::Error,
     source::{
         file::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
-        AudioSource,
+        AudioSource, AudioSourceTime,
     },
     utils::{
         decoder::AudioDecoder,
@@ -172,7 +172,7 @@ impl FileSource for PreloadedFileSource {
 }
 
 impl AudioSource for PreloadedFileSource {
-    fn write(&mut self, output: &mut [f32]) -> usize {
+    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // consume playback messages
         while let Ok(msg) = self.playback_message_receive.try_recv() {
             match msg {

@@ -2,13 +2,16 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use std::{
     env,
     ffi::CString,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use crate::{
     error::Error,
     output::{AudioOutput, AudioSink},
-    source::{empty::EmptySource, AudioSource},
+    source::{empty::EmptySource, AudioSource, AudioSourceTime},
     utils::actor::{Act, Actor, ActorHandle},
 };
 
@@ -183,7 +186,7 @@ impl AudioSink for CubebSink {
     }
 
     fn sample_position(&self) -> u64 {
-        self.playback_pos.load(std::sync::atomic::Ordering::Relaxed)
+        self.playback_pos.load(Ordering::Relaxed)
     }
 
     fn volume(&self) -> f32 {
@@ -268,7 +271,13 @@ impl StreamCallback {
             // output buffer.
             let n_output_frames = output.len();
             let n_output_samples = n_output_frames * STREAM_CHANNELS;
-            let n_samples = self.source.write(&mut self.buffer[..n_output_samples]);
+            let time = AudioSourceTime {
+                pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
+                    / self.source.channel_count() as u64,
+            };
+            let n_samples = self
+                .source
+                .write(&mut self.buffer[..n_output_samples], &time);
             let mut n_frames = 0;
             for (i, o) in self.buffer[..n_samples]
                 .chunks(STREAM_CHANNELS)
@@ -292,7 +301,7 @@ impl StreamCallback {
         // Move playback pos
         self.playback_pos.fetch_add(
             output.len() as u64 * 2, // Stereo!
-            std::sync::atomic::Ordering::Relaxed,
+            Ordering::Relaxed,
         );
     }
 }

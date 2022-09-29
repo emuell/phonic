@@ -93,11 +93,7 @@ impl AudioFilePlayer {
             Arc::clone(&playing_sources),
         );
         // Create a mixer source, add it to the audio sink and start running
-        let mixer_source = MixedSource::new(
-            sink.channel_count(),
-            sink.sample_rate(),
-            sink.sample_position(),
-        );
+        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
         let mixer_event_sender = mixer_source.event_sender();
         let mut sink = sink;
         sink.play(mixer_source);

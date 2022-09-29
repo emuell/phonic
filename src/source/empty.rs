@@ -1,4 +1,4 @@
-use super::AudioSource;
+use super::{AudioSource, AudioSourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -6,7 +6,7 @@ use super::AudioSource;
 pub struct EmptySource;
 
 impl AudioSource for EmptySource {
-    fn write(&mut self, _output: &mut [f32]) -> usize {
+    fn write(&mut self, _output: &mut [f32], _time: &AudioSourceTime) -> usize {
         0
     }
 

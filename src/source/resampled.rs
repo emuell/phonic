@@ -1,4 +1,4 @@
-use super::AudioSource;
+use super::{AudioSource, AudioSourceTime};
 use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec};
 
 // -------------------------------------------------------------------------------------------------
@@ -64,13 +64,17 @@ impl ResampledSource {
 }
 
 impl AudioSource for ResampledSource {
-    fn write(&mut self, output: &mut [f32]) -> usize {
-        let mut total = 0;
-        while total < output.len() {
+    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+        let mut total_written = 0;
+        while total_written < output.len() {
             if self.out.is_empty() {
                 // when there's no input, try fetch some from our source
                 if self.inp.is_empty() {
-                    let input_read = self.source.write(&mut self.inp.buf);
+                    let source_time = AudioSourceTime {
+                        pos_in_frames: time.pos_in_frames
+                            + (total_written / self.source.channel_count()) as u64,
+                    };
+                    let input_read = self.source.write(&mut self.inp.buf, &source_time);
                     self.inp.start = 0;
                     self.inp.end = input_read;
                     self.inp.buf[input_read..].iter_mut().for_each(|s| *s = 0.0);
@@ -89,13 +93,13 @@ impl AudioSource for ResampledSource {
             }
             // write resampler temp output to output
             let source = self.out.get();
-            let target = &mut output[total..];
+            let target = &mut output[total_written..];
             let to_write = self.out.len().min(target.len());
             target[..to_write].copy_from_slice(&source[..to_write]);
-            total += to_write;
+            total_written += to_write;
             self.out.start += to_write;
         }
-        total
+        total_written
     }
 
     fn channel_count(&self) -> usize {

@@ -3,7 +3,7 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
-    source::AudioSource,
+    source::{AudioSource, AudioSourceTime},
     utils::{
         fader::{FaderState, VolumeFader},
         unique_usize_id,
@@ -75,7 +75,7 @@ impl<SignalType> AudioSource for DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64> + Send + 'static,
 {
-    fn write(&mut self, output: &mut [f32]) -> usize {
+    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
         if let Ok(msg) = self.recv.try_recv() {

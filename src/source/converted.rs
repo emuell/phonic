@@ -1,6 +1,6 @@
-use crate::source::{
+use super::{
     mapped::ChannelMappedSource, resampled::Quality as ResamplingQuality,
-    resampled::ResampledSource, AudioSource,
+    resampled::ResampledSource, AudioSource, AudioSourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -60,8 +60,8 @@ impl ConvertedSource {
 }
 
 impl AudioSource for ConvertedSource {
-    fn write(&mut self, output: &mut [f32]) -> usize {
-        self.converted.write(output)
+    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+        self.converted.write(output, time)
     }
 
     fn channel_count(&self) -> usize {

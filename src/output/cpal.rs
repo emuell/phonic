@@ -1,4 +1,7 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -6,7 +9,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use crate::{
     error::Error,
     output::{AudioOutput, AudioSink},
-    source::{empty::EmptySource, AudioSource},
+    source::{empty::EmptySource, AudioSource, AudioSourceTime},
     utils::actor::{Act, Actor, ActorHandle},
 };
 
@@ -121,7 +124,7 @@ impl AudioSink for CpalSink {
     }
 
     fn sample_position(&self) -> u64 {
-        self.playback_pos.load(std::sync::atomic::Ordering::Relaxed)
+        self.playback_pos.load(Ordering::Relaxed)
     }
 
     fn volume(&self) -> f32 {
@@ -280,16 +283,19 @@ impl StreamCallback {
         }
 
         let written = if matches!(self.state, CallbackState::Playing) {
-            // Write out as many samples as possible from the audio source to the
-            // output buffer.
-            let written = self.source.write(output);
+            // Write out as many samples as possible from the audio source to the output buffer.
+            let time = AudioSourceTime {
+                pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
+                    / self.source.channel_count() as u64,
+            };
+            let written = self.source.write(output, &time);
 
             // Apply the global volume level.
             output[..written].iter_mut().for_each(|s| *s *= self.volume);
 
             // Advance playback pos
             self.playback_pos
-                .fetch_add(output.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                .fetch_add(output.len() as u64, Ordering::Relaxed);
 
             // return modified samples
             written
