@@ -56,6 +56,23 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'play-metronome'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-metronome",
+        ],
+        "filter": {
+          "name": "play-metronome",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
     }
   ]
 }

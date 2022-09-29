@@ -2,8 +2,8 @@
 //! [psst-core](https://github.com/jpochyla/psst/tree/master/psst-core) audio playback
 //! implementation.
 //!
-//! It aims to be a suitable player for game engines, but can also be used as a general-purpose
-//! low-latency music and sound playback engine for other desktop applications.
+//! It aims to be a suitable audio player backend for game engines, but can also serve
+//! as a general-purpose low-latency music and sound playback engine for desktop music apps.
 //!
 //! It was originally developed and is used in the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer)
 //! app and related projects which are using the [Tauri](https://tauri.app) app framework.
@@ -21,12 +21,15 @@
 //! - Files are automatically **resampled and channel mapped** to the audio output's signal specs,
 //!   thanks to [libsamplerate](https://github.com/Prior99/libsamplerate-sys).
 //! - Click free playback: when stopping sounds, a very short volume fade-out is applied to
-//!   **avoid clicks** (de-clicking for seeking is a TODO).
+//!   **avoid clicks**.
+//! - Sample precise playback scheduling, e.g. to play samples in a **sequencer**.
 //!
-//! ## See Also
+//! ### See Also
 //!
 //! - [afwaveplot](https://github.com/emuell/afwaveplot):
-//!   to generate **waveform plots** from audio file paths or raw sample buffers.
+//!  to generate **waveform plots** from audio file paths or raw sample buffers.
+//! - [afseq](https://github.com/emuell/afseq):
+//!   experimental **algorithmic composing** framework, which uses afplay as sample player.
 //!
 //! ## Examples
 //!
@@ -176,6 +179,50 @@
 //! player.stop_all_playing_sources()?;
 //! player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 //!
+//! # Ok(()) }; }
+//!```
+//!
+//! ### Playback Sequencing
+//!
+//! Play a sample file sequence in time with e.g. musical beats.
+//!
+//! ```rust
+//! use afplay::{
+//!    source::file::preloaded::PreloadedFileSource, utils::speed_from_note, AudioFilePlayer,
+//!    AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
+//! };
+//!
+//! # fn main() { || -> Result<(), Error> { // only check if it compiles
+//! #
+//! // create a player
+//! let mut player = AudioFilePlayer::new(DefaultAudioOutput::open()?.sink(), None);
+//! // preload a sample file
+//! let preloaded_sample_source = PreloadedFileSource::new(
+//!     "path/to_some_file.wav",
+//!     None, // we don't need a channel for playback events
+//!     FilePlaybackOptions::default(),
+//! )?;
+//!
+//! // calculate at which rate the sample file should be emitted
+//! let beats_per_min = 120.0;
+//! let samples_per_sec = player.output_sample_rate();
+//! let samples_per_beat = || -> f64 { samples_per_sec as f64 * 60.0 / beats_per_min as f64 };
+//!
+//! // schedule playback of the sample file every beat for 8 beats
+//! let playback_start = player.output_sample_frame_position();
+//! for beat_counter in 0..8 {
+//!     // when is the next beat playback due?
+//!     let next_beats_sample_time =
+//!         (playback_start as f64 + beat_counter as f64 * samples_per_beat()) as u64;
+//!     // play a clone of the preloaded sample at the next beat's sample time.
+//!     // cloning is very cheap as the sample buffer is shared...
+//!     player.play_file_source(
+//!         preloaded_sample_source.clone(),
+//!         speed_from_note(60), // middle-c
+//!         Some(next_beats_sample_time),
+//!     )?;
+//! }
+//! #
 //! # Ok(()) }; }
 //! ```
 //!
