@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossbeam_channel::Sender;
@@ -41,14 +41,12 @@ pub struct StreamedFileSource {
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     time_base: TimeBase,
-    report_precision: u64,
-    reported_pos: Option<u64>,
+    playback_pos_report_instant: Instant,
+    playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
 }
 
 impl StreamedFileSource {
-    pub(crate) const REPORT_PRECISION: Duration = Duration::from_millis(500);
-
     pub fn new(
         file_path: &str,
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
@@ -60,10 +58,6 @@ impl StreamedFileSource {
         // the play-head position.
         let signal_spec = decoder.signal_spec();
         let time_base = decoder.codec_params().time_base.unwrap();
-        let report_precision = (signal_spec.rate as f64
-            * signal_spec.channels.count() as f64
-            * Self::REPORT_PRECISION.as_secs_f64()) as u64;
-        let reported_pos = None;
 
         // Create a ring-buffer for the decoded samples. Worker thread is producing,
         // we are consuming in the `AudioSource` impl.
@@ -110,9 +104,9 @@ impl StreamedFileSource {
             signal_spec,
             time_base,
             worker_state,
+            playback_pos_report_instant: Instant::now(),
+            playback_pos_emit_rate: options.playback_pos_emit_rate,
             playback_finished,
-            report_precision,
-            reported_pos,
         })
     }
 
@@ -132,11 +126,11 @@ impl StreamedFileSource {
             + position
     }
 
-    fn should_report_pos(&self, pos: u64) -> bool {
-        if let Some(reported) = self.reported_pos {
-            reported > pos || pos - reported >= self.report_precision
+    fn should_report_pos(&self) -> bool {
+        if let Some(report_duration) = self.playback_pos_emit_rate {
+            self.playback_pos_report_instant.elapsed() >= report_duration
         } else {
-            true
+            false
         }
     }
 
@@ -203,8 +197,8 @@ impl AudioSource for StreamedFileSource {
 
         // send position change events
         if let Some(event_send) = &self.event_send {
-            if self.should_report_pos(position) {
-                self.reported_pos = Some(position);
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,

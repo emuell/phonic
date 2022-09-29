@@ -1,9 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use symphonia::core::audio::SampleBuffer;
 
-use super::{streamed::StreamedFileSource, FilePlaybackMessage, FilePlaybackOptions, FileSource};
+use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::{
@@ -37,9 +40,9 @@ pub struct PreloadedFileSource {
     buffer_pos: u64,
     channel_count: usize,
     sample_rate: u32,
-    report_precision: u64,
-    reported_pos: Option<u64>,
     stop_fader: VolumeFader,
+    playback_pos_report_instant: Instant,
+    playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
 }
 
@@ -83,11 +86,6 @@ impl PreloadedFileSource {
             )));
         }
 
-        let report_precision = (sample_rate as f64
-            * channel_count as f64
-            * StreamedFileSource::REPORT_PRECISION.as_secs_f64())
-            as u64;
-
         Ok(Self {
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
@@ -100,9 +98,9 @@ impl PreloadedFileSource {
             buffer_pos: 0_u64,
             channel_count,
             sample_rate,
-            report_precision,
-            reported_pos: None,
             stop_fader: VolumeFader::new(channel_count, sample_rate),
+            playback_pos_report_instant: Instant::now(),
+            playback_pos_emit_rate: options.playback_pos_emit_rate,
             playback_finished: false,
         })
     }
@@ -121,11 +119,11 @@ impl PreloadedFileSource {
         &self.buffer
     }
 
-    fn should_report_pos(&self, pos: u64) -> bool {
-        if let Some(reported) = self.reported_pos {
-            reported > pos || pos - reported >= self.report_precision
+    fn should_report_pos(&self) -> bool {
+        if let Some(report_duration) = self.playback_pos_emit_rate {
+            self.playback_pos_report_instant.elapsed() >= report_duration
         } else {
-            true
+            false
         }
     }
 
@@ -229,7 +227,6 @@ impl AudioSource for PreloadedFileSource {
                         self.repeat -= 1;
                     }
                     self.buffer_pos = 0;
-                    self.reported_pos = None; // force reporting a new pos
                 } else {
                     break;
                 }
@@ -238,8 +235,8 @@ impl AudioSource for PreloadedFileSource {
 
         // send Position change Event
         if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos(self.buffer_pos) {
-                self.reported_pos = Some(self.buffer_pos);
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,

@@ -30,6 +30,10 @@ pub struct FilePlaybackOptions {
     /// By default None: when set, the source should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
+    /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
+    /// in the player. By default one second to avoid unnecessary overhead.
+    /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    pub playback_pos_emit_rate: Option<Duration>,
 }
 
 impl Default for FilePlaybackOptions {
@@ -40,6 +44,7 @@ impl Default for FilePlaybackOptions {
             speed: 1.0,
             repeat: 0,
             start_time: None,
+            playback_pos_emit_rate: Some(Duration::from_secs(1)),
         }
     }
 }
@@ -79,6 +84,11 @@ impl FilePlaybackOptions {
 
     pub fn start_at_time(mut self, sample_time: u64) -> Self {
         self.start_time = Some(sample_time);
+        self
+    }
+
+    pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
+        self.playback_pos_emit_rate = Some(duration);
         self
     }
 
