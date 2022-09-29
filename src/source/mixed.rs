@@ -43,9 +43,12 @@ impl MixedSource {
     /// This usually will be the audio outputs playback pos.
     pub fn new(channel_count: usize, sample_rate: u32, sample_time: u64) -> Self {
         let (event_send, event_recv) = unbounded::<MixedSourceMsg>();
+        // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
+        // avoid allocs in real-time threads
+        const PLAYING_EVENTS_CAPACITY: usize = 1024;
         Self {
-            playing_sources: Vec::new(),
+            playing_sources: Vec::with_capacity(PLAYING_EVENTS_CAPACITY),
             playback_pos: sample_time,
             event_recv,
             event_send,
