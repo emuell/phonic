@@ -8,12 +8,12 @@ use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linea
 
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a FileSource
+/// Options to control playback of a SynthSource.
 #[derive(Clone, Copy)]
 pub struct SynthPlaybackOptions {
-    /// By default 1.0f32. Customize to lower or raise the volume of the file.
+    /// By default 1.0f32. Customize to lower or raise the volume of the synth tone.
     pub volume: f32,
-    /// By default None: when set, the source should start playing at the given
+    /// By default None: when set, the synth tone should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
 

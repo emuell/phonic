@@ -13,7 +13,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a FileSource
+/// Options to control playback of a FileSource.
 #[derive(Clone, Copy)]
 pub struct FilePlaybackOptions {
     /// By default false: when true, the file will be decoded and streamed on the fly.
