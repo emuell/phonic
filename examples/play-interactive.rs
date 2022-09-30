@@ -193,7 +193,9 @@ fn handle_note_on(
             .play_dasp_synth(
                 create_synth_source(player.output_sample_rate() as f64, pitch_from_note(note)),
                 format!("Synth Note #{}", note).as_str(),
-                SynthPlaybackOptions::default().volume_db(-6.0),
+                SynthPlaybackOptions::default()
+                    .volume_db(-6.0)
+                    .fade_out(Duration::from_secs(1)),
             )
             .expect("failed to play synth note")
     } else {
@@ -205,9 +207,7 @@ fn handle_note_on(
 
 fn handle_note_off(player: &mut AudioFilePlayer, playback_id: AudioFilePlaybackId) {
     // stop playing source with the given playback_id
-    player
-        .stop_source_with_fadeout(playback_id, Duration::from_millis(200))
-        .unwrap_or_default();
+    player.stop_source(playback_id).unwrap_or_default();
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -244,7 +244,9 @@ fn create_sample_source() -> PreloadedFileSource {
         static ref SYNTH_SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::new(
             "assets/pad-ambient.wav",
             None,
-            FilePlaybackOptions::default().volume_db(-3.0),
+            FilePlaybackOptions::default()
+                .volume_db(-3.0)
+                .fade_out(Duration::from_secs(1)),
         )
         .expect("failed to load synth sample file");
     }

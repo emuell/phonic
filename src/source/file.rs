@@ -20,16 +20,28 @@ pub struct FilePlaybackOptions {
     /// This should be enabled for very long files only, especiall when a lot of files are
     /// going to be played at once.
     pub stream: bool,
+
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
     pub volume: f32,
+
     /// By default 1.0f64. Customize to pitch the playback speed up or down.
     pub speed: f64,
+
     /// By default 0: when > 0 the number of times the file should be looped.
     /// Set to usize::MAX to repeat forever.
     pub repeat: usize,
+
     /// By default None: when set, the source should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
+
+    /// By default None: when set, the source's volume will fade in with the given
+    /// amount when starting to play.
+    pub fade_in_duration: Option<Duration>,
+    /// By default 5ms: volume fade out duration, applied when the the source gets
+    /// stopped before it finished playing.
+    pub fade_out_duration: Option<Duration>,
+
     /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
@@ -44,6 +56,8 @@ impl Default for FilePlaybackOptions {
             speed: 1.0,
             repeat: 0,
             start_time: None,
+            fade_in_duration: None,
+            fade_out_duration: Some(Duration::from_millis(50)),
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
         }
     }
@@ -65,6 +79,15 @@ impl FilePlaybackOptions {
     }
     pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn fade_in(mut self, duration: Duration) -> Self {
+        self.fade_in_duration = Some(duration);
+        self
+    }
+    pub fn fade_out(mut self, duration: Duration) -> Self {
+        self.fade_out_duration = Some(duration);
         self
     }
 
@@ -118,8 +141,8 @@ pub enum FilePlaybackMessage {
     Seek(Duration),
     /// Start reading streamed sources (internally used only)
     Read,
-    /// Stop the source with the given fade-out duration
-    Stop(Duration),
+    /// Stop the source
+    Stop,
 }
 
 // -------------------------------------------------------------------------------------------------

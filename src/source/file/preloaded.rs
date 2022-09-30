@@ -32,6 +32,8 @@ pub struct PreloadedFileSource {
     file_id: AudioFilePlaybackId,
     file_path: String,
     volume: f32,
+    volume_fader: VolumeFader,
+    fade_out_duration: Option<Duration>,
     repeat: usize,
     playback_message_send: Sender<FilePlaybackMessage>,
     playback_message_receive: Receiver<FilePlaybackMessage>,
@@ -40,7 +42,6 @@ pub struct PreloadedFileSource {
     buffer_pos: u64,
     channel_count: usize,
     sample_rate: u32,
-    stop_fader: VolumeFader,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -86,10 +87,19 @@ impl PreloadedFileSource {
             )));
         }
 
+        let mut volume_fader = VolumeFader::new(channel_count, sample_rate);
+        if let Some(duration) = options.fade_in_duration {
+            if !duration.is_zero() {
+                volume_fader.start_fade_in(duration);
+            }
+        }
+
         Ok(Self {
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
             volume: options.volume,
+            volume_fader,
+            fade_out_duration: options.fade_out_duration,
             repeat: options.repeat,
             playback_message_receive,
             playback_message_send,
@@ -98,7 +108,6 @@ impl PreloadedFileSource {
             buffer_pos: 0_u64,
             channel_count,
             sample_rate,
-            stop_fader: VolumeFader::new(channel_count, sample_rate),
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate: options.playback_pos_emit_rate,
             playback_finished: false,
@@ -183,11 +192,15 @@ impl AudioSource for PreloadedFileSource {
                     self.buffer_pos = (buffer_pos as u64).clamp(0, self.buffer.len() as u64);
                 }
                 FilePlaybackMessage::Read => (),
-                FilePlaybackMessage::Stop(fadeout) => {
-                    if fadeout.is_zero() {
-                        self.playback_finished = true;
+                FilePlaybackMessage::Stop => {
+                    if let Some(duration) = self.fade_out_duration {
+                        if !duration.is_zero() {
+                            self.volume_fader.start_fade_out(duration);
+                        } else {
+                            self.playback_finished = true;
+                        }
                     } else {
-                        self.stop_fader.start(fadeout);
+                        self.playback_finished = true;
                     }
                 }
             }
@@ -201,7 +214,7 @@ impl AudioSource for PreloadedFileSource {
         // write from buffer at current position and apply volume, fadeout and repeats
         let mut total_written = 0_usize;
         while total_written < output.len() {
-            // write from buffer into output
+            // write from buffer into output and apply volume
             let pos = self.buffer_pos as usize;
             let remaining = self.buffer.len() - pos;
             let remaining_buffer = &self.buffer[pos..pos + remaining];
@@ -210,10 +223,10 @@ impl AudioSource for PreloadedFileSource {
                 *o = *i * self.volume;
             }
 
-            // apply stop fader
+            // apply volume fading
             let written = remaining.min(remaining_target.len());
             let written_target = &mut output[total_written..total_written + written];
-            self.stop_fader.process(written_target);
+            self.volume_fader.process(written_target);
 
             // maintain buffer pos
             self.buffer_pos += written as u64;
@@ -250,8 +263,9 @@ impl AudioSource for PreloadedFileSource {
 
         // check if we've finished playing and send Stopped events
         let end_of_file = self.buffer_pos >= self.buffer.len() as u64;
-        let fadeout_completed = self.stop_fader.state() == FaderState::Finished;
-        if end_of_file || fadeout_completed {
+        let fade_out_completed = self.volume_fader.state() == FaderState::Finished
+            && self.volume_fader.target_volume() == 0.0;
+        if end_of_file || fade_out_completed {
             if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,

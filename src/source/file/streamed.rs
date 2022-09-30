@@ -35,7 +35,8 @@ pub struct StreamedFileSource {
     file_id: usize,
     file_path: String,
     volume: f32,
-    stop_fader: VolumeFader,
+    volume_fader: VolumeFader,
+    fade_out_duration: Option<Duration>,
     consumer: Consumer<f32>,
     worker_state: SharedFileWorkerState,
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
@@ -77,10 +78,16 @@ impl StreamedFileSource {
             end_of_file: Arc::new(AtomicBool::new(false)),
             // False, when worked received a stop event
             is_playing: Arc::new(AtomicBool::new(true)),
-            // True when the worker received a fadeout stop
+            // True when we should apply a fading out instead of stopping.
+            fade_out_on_stop: Arc::new(AtomicBool::new(
+                if let Some(duration) = options.fade_out_duration {
+                    !duration.is_zero()
+                } else {
+                    false
+                },
+            )),
+            // True when the worker received a fadeout stop request
             is_fading_out: Arc::new(AtomicBool::new(false)),
-            // When fading out, the requested fade_out duration in ms
-            fade_out_duration_ms: Arc::new(AtomicU64::new(0)),
         };
 
         let playback_finished = false;
@@ -93,12 +100,20 @@ impl StreamedFileSource {
         });
         actor.send(FilePlaybackMessage::Read)?;
 
+        let mut volume_fader = VolumeFader::new(signal_spec.channels.count(), signal_spec.rate);
+        if let Some(duration) = options.fade_in_duration {
+            if !duration.is_zero() {
+                volume_fader.start_fade_in(duration);
+            }
+        }
+
         Ok(Self {
             actor,
             file_id: unique_usize_id(),
             file_path: file_path.to_string(),
             volume: options.volume,
-            stop_fader: VolumeFader::new(signal_spec.channels.count(), signal_spec.rate),
+            volume_fader,
+            fade_out_duration: options.fade_out_duration,
             consumer,
             event_send,
             signal_spec,
@@ -175,25 +190,21 @@ impl AudioSource for StreamedFileSource {
         let position = self.written_samples(written as u64);
 
         // apply volume parameter
-        if (1.0f32 - self.volume).abs() > 0.0001 {
+        if (1.0 - self.volume).abs() > 0.0001 {
             for o in output[0..written].as_mut() {
                 *o *= self.volume;
             }
         }
 
-        // apply fade-out stop
-        let is_stopping = self.worker_state.is_fading_out.load(Ordering::Relaxed);
-        if is_stopping {
-            if self.stop_fader.state() == FaderState::Stopped {
-                let duration = Duration::from_millis(
-                    self.worker_state
-                        .fade_out_duration_ms
-                        .load(Ordering::Relaxed),
-                );
-                self.stop_fader.start(duration);
-            }
-            self.stop_fader.process(&mut output[0..written]);
+        // start fade-out when this got signaled in our worker state
+        let is_fading_out = self.worker_state.is_fading_out.load(Ordering::Relaxed);
+        if is_fading_out && self.volume_fader.target_volume() != 0.0 {
+            self.volume_fader
+                .start_fade_out(self.fade_out_duration.unwrap_or(Duration::ZERO));
         }
+
+        // apply fade-in or fade-out
+        self.volume_fader.process(&mut output[0..written]);
 
         // send position change events
         if let Some(event_send) = &self.event_send {
@@ -213,7 +224,7 @@ impl AudioSource for StreamedFileSource {
         // check if playback finished and send Stopped events
         let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);
         let is_exhausted = written == 0 && self.worker_state.end_of_file.load(Ordering::Relaxed);
-        let fadeout_completed = is_stopping && self.stop_fader.state() == FaderState::Finished;
+        let fadeout_completed = is_fading_out && self.volume_fader.state() == FaderState::Finished;
         if !is_playing || is_exhausted || fadeout_completed {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.event_send {
@@ -251,7 +262,8 @@ impl AudioSource for StreamedFileSource {
 impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
-        let _ = self.actor.send(FilePlaybackMessage::Stop(Duration::ZERO));
+        self.fade_out_duration = None;
+        let _ = self.actor.send(FilePlaybackMessage::Stop);
     }
 }
 
@@ -267,10 +279,10 @@ struct SharedFileWorkerState {
     is_playing: Arc<AtomicBool>,
     /// Did the worker thread played until the end of the file?
     end_of_file: Arc<AtomicBool>,
+    /// True when we need to fade-out instad of abruptly stopping.
+    fade_out_on_stop: Arc<AtomicBool>,
     /// True when a stop fadeout was requested.
     is_fading_out: Arc<AtomicBool>,
-    /// Stop fadeout duration in ms
-    fade_out_duration_ms: Arc<AtomicU64>,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -354,28 +366,28 @@ impl Actor for StreamedFileWorker {
         match msg {
             FilePlaybackMessage::Seek(time) => self.on_seek(time),
             FilePlaybackMessage::Read => self.on_read(),
-            FilePlaybackMessage::Stop(fadeout) => self.on_stop(fadeout),
+            FilePlaybackMessage::Stop => self.on_stop(),
         }
     }
 }
 
 impl StreamedFileWorker {
-    fn on_stop(&mut self, fadeout: Duration) -> Result<Act<Self>, Error> {
-        if fadeout.is_zero() {
-            // immediately stop reading
-            self.is_reading = false;
-            self.shared_state.is_playing.store(false, Ordering::Relaxed);
-            Ok(Act::Shutdown)
-        } else {
+    fn on_stop(&mut self) -> Result<Act<Self>, Error> {
+        if self.shared_state.fade_out_on_stop.load(Ordering::Relaxed) {
             // duration and fade out state will be picked up by our parent source
-            self.shared_state
-                .fade_out_duration_ms
-                .store(fadeout.as_millis() as u64, Ordering::Relaxed);
             self.shared_state
                 .is_fading_out
                 .store(true, Ordering::Relaxed);
             // keep running until fade-out completed
+            if !self.is_reading {
+                self.this.send(FilePlaybackMessage::Read)?;
+            }
             Ok(Act::Continue)
+        } else {
+            // immediately stop reading
+            self.is_reading = false;
+            self.shared_state.is_playing.store(false, Ordering::Relaxed);
+            Ok(Act::Shutdown)
         }
     }
 

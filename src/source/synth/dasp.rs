@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
@@ -20,7 +22,8 @@ where
     signal: dasp::signal::UntilExhausted<SignalType>,
     sample_rate: u32,
     volume: f32,
-    stop_fader: VolumeFader,
+    volume_fader: VolumeFader,
+    fade_out_duration: Option<Duration>,
     send: Sender<SynthPlaybackMessage>,
     recv: Receiver<SynthPlaybackMessage>,
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
@@ -36,6 +39,8 @@ impl<SignalType> DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64>,
 {
+    const CHANNEL_COUNT: usize = 1;
+
     pub fn new(
         signal: SignalType,
         signal_name: &str,
@@ -43,14 +48,17 @@ where
         sample_rate: u32,
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     ) -> Self {
+        let mut volume_fader = VolumeFader::new(Self::CHANNEL_COUNT, sample_rate);
+        if let Some(duration) = options.fade_in_duration {
+            volume_fader.start_fade_in(duration);
+        }
         let (send, recv) = unbounded::<SynthPlaybackMessage>();
-        let channel_count = 1;
-        let is_exhausted = false;
         Self {
             signal: signal.until_exhausted(),
             sample_rate,
             volume: options.volume,
-            stop_fader: VolumeFader::new(channel_count, sample_rate),
+            volume_fader,
+            fade_out_duration: options.fade_out_duration,
             send,
             recv,
             event_send,
@@ -100,11 +108,15 @@ where
         let mut stop_playing = false;
         if let Ok(msg) = self.recv.try_recv() {
             match msg {
-                SynthPlaybackMessage::Stop(fadeout) => {
-                    if fadeout.is_zero() {
-                        stop_playing = true;
+                SynthPlaybackMessage::Stop => {
+                    if let Some(duration) = self.fade_out_duration {
+                        if !duration.is_zero() {
+                            self.volume_fader.start_fade_out(duration);
+                        } else {
+                            stop_playing = true;
+                        }
                     } else {
-                        self.stop_fader.start(fadeout);
+                        stop_playing = true;
                     }
                 }
             }
@@ -129,7 +141,7 @@ where
             }
         }
         // apply volume fader
-        self.stop_fader.process(&mut output[0..written]);
+        self.volume_fader.process(&mut output[0..written]);
 
         // update playback pos
         self.playback_pos += written as u64;
@@ -151,8 +163,9 @@ where
 
         // check if the signal is exhausted and send Stopped event
         let is_exhausted = written == 0;
-        let fadeout_completed = self.stop_fader.state() == FaderState::Finished;
-        if stop_playing || is_exhausted || fadeout_completed {
+        let fade_out_finished = self.volume_fader.state() == FaderState::Finished
+            && self.volume_fader.target_volume() == 0.0;
+        if stop_playing || is_exhausted || fade_out_finished {
             self.playback_finished = true;
             if let Some(event_send) = &self.event_send {
                 if let Err(err) = event_send.send(AudioFilePlaybackStatusEvent::Stopped {
@@ -169,7 +182,7 @@ where
     }
 
     fn channel_count(&self) -> usize {
-        1
+        Self::CHANNEL_COUNT
     }
 
     fn sample_rate(&self) -> u32 {

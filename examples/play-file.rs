@@ -1,3 +1,11 @@
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
 use afplay::{
     utils::speed_from_note, AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput,
     DefaultAudioOutput, Error, FilePlaybackOptions,
@@ -31,46 +39,64 @@ fn main() -> Result<(), Error> {
                     .streamed()
                     .volume_db(-3.0)
                     .speed(speed_from_note(58))
-                    .repeat(1),
+                    .repeat(2)
+                    .fade_out(Duration::from_secs(4)),
             )?,
     ];
+
+    let mut loop_playback_id = Some(playing_file_ids[1]);
+    let is_running = Arc::new(AtomicBool::new(true));
 
     // start playing
     player.start();
 
     // handle events from the file sources
-    let event_thread = std::thread::spawn(move || {
-        while let Ok(event) = status_receiver.recv() {
-            match event {
-                AudioFilePlaybackStatusEvent::Position { id, path, position } => {
-                    println!(
-                        "Playback pos of file #{} '{}': {}",
+    let event_thread = std::thread::spawn({
+        let is_running = is_running.clone();
+        move || {
+            while let Ok(event) = status_receiver.recv() {
+                match event {
+                    AudioFilePlaybackStatusEvent::Position { id, path, position } => {
+                        println!(
+                            "Playback pos of file #{} '{}': {}",
+                            id,
+                            path,
+                            position.as_secs_f32()
+                        );
+                    }
+                    AudioFilePlaybackStatusEvent::Stopped {
                         id,
                         path,
-                        position.as_secs_f32()
-                    );
-                }
-                AudioFilePlaybackStatusEvent::Stopped {
-                    id,
-                    path,
-                    exhausted,
-                } => {
-                    if exhausted {
-                        println!("Playback of #{} '{}' finished playback", id, path);
-                    } else {
-                        println!("Playback of #{} '{}' was stopped", id, path);
-                    }
-                    playing_file_ids.retain(|v| *v != id);
-                    if playing_file_ids.is_empty() {
-                        // stop thread when all synths finished
-                        break;
+                        exhausted,
+                    } => {
+                        if exhausted {
+                            println!("Playback of #{} '{}' finished playback", id, path);
+                        } else {
+                            println!("Playback of #{} '{}' was stopped", id, path);
+                        }
+                        playing_file_ids.retain(|v| *v != id);
+                        if playing_file_ids.is_empty() {
+                            // stop thread when all files finished
+                            is_running.store(false, Ordering::Relaxed);
+                            break;
+                        }
                     }
                 }
             }
         }
     });
 
-    // wait until playback of all files finished
+    // stop (fade-out) the loop after 3 secs
+    let play_time = Instant::now();
+    while is_running.load(Ordering::Relaxed) {
+        if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(3) {
+            player.stop_source(loop_playback_id.unwrap())?;
+            loop_playback_id = None;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    // wait until playback thread finished
     event_thread.join().unwrap();
 
     Ok(())

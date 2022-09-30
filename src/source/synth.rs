@@ -16,6 +16,18 @@ pub struct SynthPlaybackOptions {
     /// By default None: when set, the source should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
+
+    /// By default None: when set, the source's volume will fade in with the given
+    /// amount when starting to play.
+    pub fade_in_duration: Option<Duration>,
+    /// By default 5ms: volume fade-out duration, applied when the the source gets
+    /// stopped before it finished playing.
+    pub fade_out_duration: Option<Duration>,
+
+    /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
+    /// in the player. By default one second to avoid unnecessary overhead.
+    /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    pub playback_pos_emit_rate: Option<Duration>,
 }
 
 impl Default for SynthPlaybackOptions {
@@ -23,6 +35,9 @@ impl Default for SynthPlaybackOptions {
         Self {
             volume: 1.0f32,
             start_time: None,
+            fade_in_duration: None,
+            fade_out_duration: Some(Duration::from_millis(50)),
+            playback_pos_emit_rate: Some(Duration::from_secs(1)),
         }
     }
 }
@@ -37,8 +52,22 @@ impl SynthPlaybackOptions {
         self
     }
 
+    pub fn fade_in(mut self, duration: Duration) -> Self {
+        self.fade_in_duration = Some(duration);
+        self
+    }
+    pub fn fade_out(mut self, duration: Duration) -> Self {
+        self.fade_out_duration = Some(duration);
+        self
+    }
+
     pub fn start_at_time(mut self, sample_time: u64) -> Self {
         self.start_time = Some(sample_time);
+        self
+    }
+
+    pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
+        self.playback_pos_emit_rate = Some(duration);
         self
     }
 
@@ -59,7 +88,7 @@ impl SynthPlaybackOptions {
 /// Events to control playback of a synth source
 pub enum SynthPlaybackMessage {
     /// Stop the synth source
-    Stop(Duration),
+    Stop,
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -1,3 +1,11 @@
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
 use dasp::{signal, Frame, Signal};
 
 use afplay::{
@@ -59,7 +67,7 @@ fn main() -> Result<(), Error> {
         dasp::signal::rate(sample_rate as f64)
             .const_hz(440.0)
             .sine()
-            .take(sample_rate as usize * 2),
+            .take(sample_rate as usize * 8),
     );
     // create audio source for the chord and sine and memorize the id for the playback status
     let mut playing_synth_ids = vec![
@@ -67,40 +75,63 @@ fn main() -> Result<(), Error> {
         player.play_dasp_synth(
             sine,
             "sine",
-            SynthPlaybackOptions::default().volume_db(-3.0),
+            SynthPlaybackOptions::default()
+                .volume_db(-3.0)
+                .fade_in(Duration::from_secs(2))
+                .fade_out(Duration::from_secs(2)),
         )?,
     ];
 
+    let mut sine_synth_id = Some(playing_synth_ids[1]);
+    let is_running = Arc::new(AtomicBool::new(true));
+
     // handle events from the file sources
-    let event_thread = std::thread::spawn(move || {
-        while let Ok(event) = status_receiver.recv() {
-            match event {
-                AudioFilePlaybackStatusEvent::Stopped {
-                    id,
-                    path,
-                    exhausted,
-                } => {
-                    if exhausted {
-                        println!("Playback of synth #{} '{}' finished playback", id, path);
-                    } else {
-                        println!("Playback of synth #{} '{}' stopped", id, path);
+    let event_thread = std::thread::spawn({
+        let is_running = is_running.clone();
+        move || {
+            while let Ok(event) = status_receiver.recv() {
+                match event {
+                    AudioFilePlaybackStatusEvent::Position { id, path, position } => {
+                        println!(
+                            "Playback pos of synth #{} '{}': {}",
+                            id,
+                            path,
+                            position.as_secs_f32()
+                        );
                     }
-                    playing_synth_ids.retain(|v| *v != id);
-                    if playing_synth_ids.is_empty() {
-                        // stop this example when all synths finished
-                        break;
+                    AudioFilePlaybackStatusEvent::Stopped {
+                        id,
+                        path,
+                        exhausted,
+                    } => {
+                        if exhausted {
+                            println!("Playback of synth #{} '{}' finished playback", id, path);
+                        } else {
+                            println!("Playback of synth #{} '{}' stopped", id, path);
+                        }
+                        playing_synth_ids.retain(|v| *v != id);
+                        if playing_synth_ids.is_empty() {
+                            // stop this example when all synths finished
+                            is_running.store(false, Ordering::Relaxed);
+                            break;
+                        }
                     }
                 }
-                AudioFilePlaybackStatusEvent::Position {
-                    id: _,
-                    path: _,
-                    position: _,
-                } => (),
             }
         }
     });
 
-    // wait until playback finished
+    // stop (fade-out) the sine after 2 secs
+    let play_time = Instant::now();
+    while is_running.load(Ordering::Relaxed) {
+        if sine_synth_id.is_some() && play_time.elapsed() > Duration::from_secs(2) {
+            player.stop_source(sine_synth_id.unwrap())?;
+            sine_synth_id = None;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    // wait until playback thread finished
     event_thread.join().unwrap();
 
     Ok(())

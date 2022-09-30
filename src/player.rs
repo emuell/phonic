@@ -76,7 +76,6 @@ enum PlaybackMessageSender {
 }
 
 impl AudioFilePlayer {
-    const DEFAULT_STOP_FADEOUT_SECS: f32 = 0.05;
     const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::Linear;
 
     /// Create a new AudioFilePlayer for the given DefaultAudioSink.
@@ -295,24 +294,14 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
-    /// Stop a playing file or synth source with default fade-out duration.
+    /// Stop a playing file or synth source. NB: This will fade-out the source when a
+    /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
-        self.stop_source_with_fadeout(
-            playback_id,
-            Duration::from_secs_f32(Self::DEFAULT_STOP_FADEOUT_SECS),
-        )
-    }
-    /// Stop a playing file or synth source with the given fade-out duration.
-    pub fn stop_source_with_fadeout(
-        &mut self,
-        playback_id: AudioFilePlaybackId,
-        fadeout: Duration,
-    ) -> Result<(), Error> {
         let mut playing_sources = self.playing_sources.lock().unwrap();
         if let Some(msg_sender) = playing_sources.get(&playback_id) {
             match msg_sender {
                 PlaybackMessageSender::File(file_sender) => {
-                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop(fadeout)) {
+                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
                         log::warn!(
                             "failed to send stop command to file source: {}",
                             err.to_string()
@@ -320,7 +309,7 @@ impl AudioFilePlayer {
                     }
                 }
                 PlaybackMessageSender::Synth(synth_sender) => {
-                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop(fadeout)) {
+                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop) {
                         log::warn!(
                             "failed to send stop command to synth source: {}",
                             err.to_string()
