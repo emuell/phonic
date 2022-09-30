@@ -26,6 +26,9 @@ where
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_id: AudioFilePlaybackId,
     playback_name: String,
+    playback_pos: u64,
+    playback_pos_report_instant: Instant,
+    playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
 }
 
@@ -53,8 +56,25 @@ where
             event_send,
             playback_id: unique_usize_id(),
             playback_name: signal_name.to_string(),
-            playback_finished: is_exhausted,
+            playback_pos: 0,
+            playback_pos_report_instant: Instant::now(),
+            playback_pos_emit_rate: options.playback_pos_emit_rate,
+            playback_finished: false,
         }
+    }
+
+    fn should_report_pos(&self) -> bool {
+        if let Some(report_duration) = self.playback_pos_emit_rate {
+            self.playback_pos_report_instant.elapsed() >= report_duration
+        } else {
+            false
+        }
+    }
+
+    fn samples_to_duration(&self, samples: u64) -> Duration {
+        let frames = samples / Self::CHANNEL_COUNT as u64;
+        let seconds = frames as f64 / self.sample_rate as f64;
+        Duration::from_millis((seconds * 1000.0) as u64)
     }
 }
 
@@ -103,13 +123,31 @@ where
         }
 
         // apply volume when <> 1
-        if (1.0f32 - self.volume).abs() > 0.0001 {
+        if (1.0 - self.volume).abs() > 0.0001 {
             for o in output[0..written].as_mut() {
                 *o *= self.volume;
             }
         }
         // apply volume fader
         self.stop_fader.process(&mut output[0..written]);
+
+        // update playback pos
+        self.playback_pos += written as u64;
+
+        // send Position change Event
+        if let Some(event_send) = &self.event_send {
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
+                    id: self.playback_id,
+                    path: self.playback_name.clone(),
+                    position: self.samples_to_duration(self.playback_pos),
+                }) {
+                    log::warn!("Failed to send playback event: {}", err)
+                }
+            }
+        }
 
         // check if the signal is exhausted and send Stopped event
         let is_exhausted = written == 0;
