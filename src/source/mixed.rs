@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use crate::{
-    player::PlaybackMessageSender,
+    player::{AudioSourceDropEvent, PlaybackMessageSender},
     source::{converted::ConvertedSource, AudioSource, AudioSourceTime},
     utils::resampler::ResamplingQuality,
     AudioFilePlaybackId,
@@ -10,12 +12,11 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 /// Mixer internal struct to keep track of currently playing sources.
-
 struct MixedPlayingSource {
     is_active: bool,
     playback_id: AudioFilePlaybackId,
     playback_message_sender: PlaybackMessageSender,
-    source: Box<dyn AudioSource>,
+    source: Arc<dyn AudioSource>,
     start_time: u64,
     stop_time: Option<u64>,
 }
@@ -27,7 +28,7 @@ pub enum MixedSourceMsg {
     AddSource {
         playback_id: AudioFilePlaybackId,
         playback_message_sender: PlaybackMessageSender,
-        source: Box<dyn AudioSource>,
+        source: Arc<dyn AudioSource>,
         sample_time: u64,
     },
     StopSource {
@@ -45,6 +46,7 @@ pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
     event_send: Sender<MixedSourceMsg>,
     event_recv: Receiver<MixedSourceMsg>,
+    drop_send: Sender<AudioSourceDropEvent>,
     channel_count: usize,
     sample_rate: u32,
     temp_out: Vec<f32>,
@@ -54,7 +56,11 @@ impl MixedSource {
     /// Create a new mixer source with the given signal specs.
     /// Param `sample_time` is the intial sample frame time that we start to run with.
     /// This usually will be the audio outputs playback pos.
-    pub fn new(channel_count: usize, sample_rate: u32) -> Self {
+    pub fn new(
+        channel_count: usize,
+        sample_rate: u32,
+        drop_send: Sender<AudioSourceDropEvent>,
+    ) -> Self {
         let (event_send, event_recv) = unbounded::<MixedSourceMsg>();
         // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
@@ -64,6 +70,7 @@ impl MixedSource {
             playing_sources: Vec::with_capacity(PLAYING_EVENTS_CAPACITY),
             event_recv,
             event_send,
+            drop_send,
             channel_count,
             sample_rate,
             temp_out: vec![0.0; BUFFER_SIZE],
@@ -101,7 +108,7 @@ impl MixedSource {
         if let Err(err) = self.event_send.send(MixedSourceMsg::AddSource {
             playback_id,
             playback_message_sender,
-            source: Box::new(converted),
+            source: Arc::new(converted),
             sample_time,
         }) {
             log::error!("Failed to add mixer source: {}", { err });
@@ -112,6 +119,37 @@ impl MixedSource {
     /// NB: When adding new sources, ensure they match the mixers sample rate and channel layout
     pub(crate) fn event_sender(&self) -> crossbeam_channel::Sender<MixedSourceMsg> {
         self.event_send.clone()
+    }
+
+    /// remove all entries from self.playing_sources which match the given filter function.
+    fn remove_matching_sources<F>(&mut self, match_fn: F)
+    where
+        F: Fn(&MixedPlayingSource) -> bool,
+    {
+        let drop_send = self.drop_send.clone();
+        self.playing_sources.retain(move |p| {
+            if match_fn(p) {
+                // drop it in the player's main thread if it has no other refs
+                if let Err(err) = drop_send.try_send(AudioSourceDropEvent::new(p.source.clone())) {
+                    log::warn!("failed to send drop source event: {}", err)
+                }
+                false // remove
+            } else {
+                true // keep
+            }
+        });
+    }
+
+    /// remove all entries from self.playing_sources.
+    fn remove_all_sources(&mut self) {
+        let drop_send = self.drop_send.clone();
+        for p in self.playing_sources.iter() {
+            // drop it in the player's main thread if it has no other refs
+            if let Err(err) = drop_send.try_send(AudioSourceDropEvent::new(p.source.clone())) {
+                log::warn!("failed to send drop source event: {}", err)
+            }
+        }
+        self.playing_sources.clear();
     }
 }
 
@@ -160,12 +198,10 @@ impl AudioSource for MixedSource {
                 }
                 MixedSourceMsg::RemoveAllPendingSources => {
                     // remove all sources which are not yet playing
-                    self.playing_sources
-                        .retain(|source| source.start_time <= time.pos_in_frames);
+                    self.remove_matching_sources(|source| source.start_time > time.pos_in_frames);
                 }
                 MixedSourceMsg::RemoveAllSources => {
-                    // remove all sources
-                    self.playing_sources.clear();
+                    self.remove_all_sources();
                 }
             }
         }
@@ -204,6 +240,7 @@ impl AudioSource for MixedSource {
                 }
             }
             // run and mix down the source
+            let source = Arc::get_mut(source).unwrap();
             'source: while total_written < output.len() {
                 let source_time = AudioSourceTime {
                     pos_in_frames: time.pos_in_frames + (total_written / self.channel_count) as u64,
@@ -217,13 +254,12 @@ impl AudioSource for MixedSource {
                     }
                 }
                 if samples_until_stop == 0 {
-                    // when samples_until_stop is zero, we've reached the stop commands's destination time
                     if let Err(err) = playing_source.playback_message_sender.try_send_stop() {
                         log::warn!("failed to send stop event: {}", err)
                     }
                     samples_until_stop = u64::MAX;
                 }
-                // run source on temp_out until we've filled up the whole final output or should handle a stop
+                // run source on temp_out until we've filled up the whole final output
                 let remaining = (output.len() - total_written).min(samples_until_stop as usize);
                 let to_write = remaining.min(self.temp_out.len());
                 let written = source.write(&mut self.temp_out[..to_write], &source_time);
@@ -242,8 +278,8 @@ impl AudioSource for MixedSource {
             }
             max_written = max_written.max(total_written);
         }
-        // drain inactive sources
-        self.playing_sources.retain(|s| s.is_active);
+        // drop all sources which finished playing in this iteration
+        self.remove_matching_sources(|s| !s.is_active);
         // return modified output len: we've cleared the entire output
         output.len()
     }

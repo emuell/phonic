@@ -18,6 +18,7 @@ use crate::{
         resampled::Quality as ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
     },
+    AudioSource,
 };
 
 #[cfg(feature = "dasp")]
@@ -51,6 +52,22 @@ pub enum AudioFilePlaybackStatusEvent {
         /// true when the source finished playing (e.g. reaching EOF), false when manually stopped
         exhausted: bool,
     },
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Event send back from Mixer to the Player drop exhausted sources, avoiding that this happens
+/// in the Mixer's real-time thread.
+#[derive(Clone)]
+pub struct AudioSourceDropEvent {
+    #[allow(dead_code)]
+    source: Arc<dyn AudioSource>,
+}
+
+impl AudioSourceDropEvent {
+    pub fn new(source: Arc<dyn AudioSource>) -> Self {
+        Self { source }
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -100,12 +117,10 @@ impl AudioFilePlayer {
     ) -> Self {
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(Mutex::new(HashMap::new()));
-        let playback_status_sender_proxy = Self::handle_playback_status_messages(
-            playback_status_sender,
-            Arc::clone(&playing_sources),
-        );
+        let (playback_status_sender_proxy, drain_send) =
+            Self::handle_events(playback_status_sender, Arc::clone(&playing_sources));
         // Create a mixer source, add it to the audio sink and start running
-        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
+        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate(), drain_send);
         let mixer_event_sender = mixer_source.event_sender();
         let mut sink = sink;
         sink.play(mixer_source);
@@ -202,7 +217,7 @@ impl AudioFilePlayer {
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             playback_id,
             playback_message_sender,
-            source: Box::new(converted_source),
+            source: Arc::new(converted_source),
             sample_time: start_time.unwrap_or(0),
         }) {
             log::error!("failed to send mixer event: {}", err);
@@ -274,7 +289,7 @@ impl AudioFilePlayer {
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
             playback_id,
             playback_message_sender,
-            source: Box::new(converted),
+            source: Arc::new(converted),
             sample_time: start_time.unwrap_or(0),
         }) {
             log::error!("failed to send mixer event: {}", err);
@@ -377,33 +392,44 @@ impl AudioFilePlayer {
 
 /// details
 impl AudioFilePlayer {
-    fn handle_playback_status_messages(
-        playback_sender_arg: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    fn handle_events(
+        playback_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
         playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
-    ) -> Sender<AudioFilePlaybackStatusEvent> {
-        let (send_proxy, recv_proxy) = unbounded::<AudioFilePlaybackStatusEvent>();
+    ) -> (
+        Sender<AudioFilePlaybackStatusEvent>,
+        Sender<AudioSourceDropEvent>,
+    ) {
+        let (drop_send, drop_recv) = unbounded::<AudioSourceDropEvent>();
+        let (playback_send_proxy, playback_recv_proxy) =
+            unbounded::<AudioFilePlaybackStatusEvent>();
 
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())
-            .spawn(move || {
-                while let Ok(msg) = recv_proxy.recv() {
-                    if let AudioFilePlaybackStatusEvent::Stopped {
-                        id,
-                        path: _,
-                        exhausted: _,
-                    } = msg
-                    {
-                        playing_sources.lock().unwrap().remove(&id);
+            .spawn(move || loop {
+                crossbeam_channel::select! {
+                    recv(drop_recv) -> _msg => {
+                        // nothing to do apart from receiving the message...
                     }
-                    if let Some(sender) = &playback_sender_arg {
-                        if let Err(err) = sender.send(msg) {
-                            log::warn!("failed to send file status message: {}", err);
+                    recv(playback_recv_proxy) -> msg => {
+                        if let Ok(event) = msg {
+                           if let AudioFilePlaybackStatusEvent::Stopped {
+                            id,
+                            path: _,
+                            exhausted: _,
+                            } = event {
+                                playing_sources.lock().unwrap().remove(&id);
+                            }
+                            if let Some(sender) = &playback_sender {
+                                if let Err(err) = sender.send(event) {
+                                    log::warn!("failed to send file status message: {}", err);
+                                }
+                            }
                         }
                     }
                 }
             })
             .expect("failed to spawn audio message thread");
 
-        send_proxy
+        (playback_send_proxy, drop_send)
     }
 }
