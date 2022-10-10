@@ -5,7 +5,7 @@ edition = "2018"
 description = "A cross-platform audio playback library"
 authors = ["Eduard Müller <mail@emuell.net>"]
 exclude = ["assets", "examples"]
-categories = ["audio", "playback", "games", "sounds"]
+categories = ["audio", "synth", "music", "gamedev"]
 
 [dependencies]
 log = { version = "^0.4", features = ["max_level_debug", "release_max_level_info"] }
