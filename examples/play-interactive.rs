@@ -40,7 +40,7 @@ fn main() -> Result<(), Error> {
         FilePlaybackOptions::default()
             .streamed()
             .repeat(usize::MAX)
-            .volume_db(-6.0),
+            .volume_db(-3.0),
     )?;
 
     // print header
@@ -54,6 +54,15 @@ fn main() -> Result<(), Error> {
 
     // run key event handlers to play, stop and modify sounds interactively
     let device_state = DeviceState::new();
+
+    ctrlc::set_handler({
+        let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
+        move || {
+            println!("Shutting down...");
+            wait_mutex_cond.1.notify_all();
+        }
+    })
+    .map_err(|_err| Error::SendError)?;
 
     // key down handler
     let _key_down_guard = device_state.on_key_down({
@@ -194,7 +203,7 @@ fn handle_note_on(
                 create_synth_source(player.output_sample_rate() as f64, pitch_from_note(note)),
                 format!("Synth Note #{}", note).as_str(),
                 SynthPlaybackOptions::default()
-                    .volume_db(-6.0)
+                    .volume_db(-12.0)
                     .fade_out(Duration::from_secs(1)),
             )
             .expect("failed to play synth note")
@@ -245,7 +254,7 @@ fn create_sample_source() -> PreloadedFileSource {
             "assets/pad-ambient.wav",
             None,
             FilePlaybackOptions::default()
-                .volume_db(-3.0)
+                .volume_db(-12.0)
                 .fade_out(Duration::from_secs(1)),
         )
         .expect("failed to load synth sample file");

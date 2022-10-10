@@ -25,6 +25,7 @@ windows = { version = "0.39.0", features = ["Win32_System_Com"], optional = true
 
 [dev-dependencies]
 device_query = { version = "1.1.1" }
+ctrlc = { version = "3.2.3" }
 
 [profile.release]
 debug = 1
