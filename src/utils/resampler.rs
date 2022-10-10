@@ -94,3 +94,4 @@ impl Drop for AudioResampler {
 }
 
 unsafe impl Send for AudioResampler {}
+unsafe impl Sync for AudioResampler {}

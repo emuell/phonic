@@ -234,7 +234,7 @@ impl AudioFilePlayer {
         options: SynthPlaybackOptions,
     ) -> Result<AudioFilePlaybackId, Error>
     where
-        SignalType: Signal<Frame = f64> + Send + 'static,
+        SignalType: Signal<Frame = f64> + Send + Sync + 'static,
     {
         // validate options
         if let Err(err) = options.validate() {

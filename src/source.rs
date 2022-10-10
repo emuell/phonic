@@ -17,14 +17,15 @@ pub struct AudioSourceTime {
 
 // -------------------------------------------------------------------------------------------------
 
-/// AudioSource types produce audio samples in `f32` format and are `Send`able across threads.
+/// AudioSource types produce audio samples in `f32` format and can be `Send` and `Sync`ed
+/// across threads.
 ///
 /// The output buffer is a raw interleaved buffer, which is going to be written by the source
 /// in the specified `channel_count` and `sample_rate` specs. Specs may not change during runtime,
 /// so following sources don't have to adapt to new specs.
 ///
 /// `write` is called in the realtime audio thread, so it must not block!
-pub trait AudioSource: Send + 'static {
+pub trait AudioSource: Send + Sync + 'static {
     /// Write at most of `output.len()` samples into the interleaved `output`
     /// The given [`AudioSourceTime`] parameter specifies which absolute time this buffer in the
     /// final output stream refers to. It can be used to schedule and apply real-time events.

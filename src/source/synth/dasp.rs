@@ -88,7 +88,7 @@ where
 
 impl<SignalType> SynthSource for DaspSynthSource<SignalType>
 where
-    SignalType: dasp::Signal<Frame = f64> + Send + 'static,
+    SignalType: dasp::Signal<Frame = f64> + Send + Sync + 'static,
 {
     fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
         self.send.clone()
@@ -101,7 +101,7 @@ where
 
 impl<SignalType> AudioSource for DaspSynthSource<SignalType>
 where
-    SignalType: dasp::Signal<Frame = f64> + Send + 'static,
+    SignalType: dasp::Signal<Frame = f64> + Send + Sync + 'static,
 {
     fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // receive playback events
