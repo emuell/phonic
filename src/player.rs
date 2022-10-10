@@ -55,6 +55,24 @@ pub enum AudioFilePlaybackStatusEvent {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Wraps File and Synth Playback messages together into one object, allowing to easily stop them.
+#[derive(Clone)]
+pub enum PlaybackMessageSender {
+    File(Sender<FilePlaybackMessage>),
+    Synth(Sender<SynthPlaybackMessage>),
+}
+
+impl PlaybackMessageSender {
+    pub fn try_send_stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(match self {
+            PlaybackMessageSender::File(sender) => sender.try_send(FilePlaybackMessage::Stop)?,
+            PlaybackMessageSender::Synth(sender) => sender.try_send(SynthPlaybackMessage::Stop)?,
+        })
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Playback controller, which drives an [`AudioSink`] and runs a [`MixedSource`] which
 /// can play an unlimited number of [`FileSource`] or [`SynthSource`] at the same time.
 ///
@@ -68,11 +86,6 @@ pub struct AudioFilePlayer {
     playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
     playback_status_sender: Sender<AudioFilePlaybackStatusEvent>,
     mixer_event_sender: Sender<MixedSourceMsg>,
-}
-
-enum PlaybackMessageSender {
-    File(Sender<FilePlaybackMessage>),
-    Synth(Sender<SynthPlaybackMessage>),
 }
 
 impl AudioFilePlayer {
@@ -128,7 +141,7 @@ impl AudioFilePlayer {
     }
 
     /// Stop audio playback. This will only pause and thus not drop any playing sources. Use the
-    /// `start` function to start it again. Use function `stop_all_playing_sources` to drop all sources.
+    /// `start` function to start it again. Use function `stop_all_sources` to drop all sources.
     pub fn stop(&mut self) {
         self.sink.pause();
     }
@@ -173,13 +186,10 @@ impl AudioFilePlayer {
     ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
-        let playback_message_sender: Sender<FilePlaybackMessage> =
-            file_source.playback_message_sender();
+        let playback_message_sender =
+            PlaybackMessageSender::File(file_source.playback_message_sender());
         let mut playing_sources = self.playing_sources.lock().unwrap();
-        playing_sources.insert(
-            playback_id,
-            PlaybackMessageSender::File(playback_message_sender),
-        );
+        playing_sources.insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout and apply optional pitch
         let converted_source = ConvertedSource::new_with_speed(
             file_source,
@@ -190,6 +200,8 @@ impl AudioFilePlayer {
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
+            playback_id,
+            playback_message_sender,
             source: Box::new(converted_source),
             sample_time: start_time.unwrap_or(0),
         }) {
@@ -247,11 +259,10 @@ impl AudioFilePlayer {
     ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = source.playback_id();
+        let playback_message_sender =
+            PlaybackMessageSender::Synth(source.playback_message_sender());
         let mut playing_sources = self.playing_sources.lock().unwrap();
-        playing_sources.insert(
-            playback_id,
-            PlaybackMessageSender::Synth(source.playback_message_sender()),
-        );
+        playing_sources.insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout
         let converted = ConvertedSource::new(
             source,
@@ -261,6 +272,8 @@ impl AudioFilePlayer {
         );
         // play the source
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
+            playback_id,
+            playback_message_sender,
             source: Box::new(converted),
             sample_time: start_time.unwrap_or(0),
         }) {
@@ -294,28 +307,16 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
-    /// Stop a playing file or synth source. NB: This will fade-out the source when a
+    /// Immediately stop a playing file or synth source. NB: This will fade-out the source when a
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
         let mut playing_sources = self.playing_sources.lock().unwrap();
         if let Some(msg_sender) = playing_sources.get(&playback_id) {
-            match msg_sender {
-                PlaybackMessageSender::File(file_sender) => {
-                    if let Err(err) = file_sender.send(FilePlaybackMessage::Stop) {
-                        log::warn!(
-                            "failed to send stop command to file source: {}",
-                            err.to_string()
-                        );
-                    }
-                }
-                PlaybackMessageSender::Synth(synth_sender) => {
-                    if let Err(err) = synth_sender.send(SynthPlaybackMessage::Stop) {
-                        log::warn!(
-                            "failed to send stop command to synth source: {}",
-                            err.to_string()
-                        );
-                    }
-                }
+            if let Err(err) = msg_sender.try_send_stop() {
+                log::warn!(
+                    "failed to send stop command to file source: {}",
+                    err.to_string()
+                );
             }
             // we shortly will receive an Exhaused event which removes the source, but neverthless
             // remove it now, to force all following attempts to stop this source to fail
@@ -327,8 +328,32 @@ impl AudioFilePlayer {
         Err(Error::MediaFileNotFound)
     }
 
-    /// Stop all playing sources with the default fade-out duration.
-    pub fn stop_all_playing_sources(&mut self) -> Result<(), Error> {
+    /// Stop a playing file or synth source at a given sample time in future.
+    pub fn stop_source_at_sample_time(
+        &mut self,
+        playback_id: AudioFilePlaybackId,
+        stop_time: u64,
+    ) -> Result<(), Error> {
+        // check if the given playback id is still know (playing)
+        let playing_sources = self.playing_sources.lock().unwrap();
+        if playing_sources.contains_key(&playback_id) {
+            // pass stop request to mixer
+            if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::StopSource {
+                playback_id,
+                sample_time: stop_time,
+            }) {
+                log::error!("failed to send mixer event: {}", err);
+                return Err(Error::SendError);
+            }
+            // NB: do not remove from playing_sources, as the event may apply in a long time in future.
+            Ok(())
+        } else {
+            Err(Error::MediaFileNotFound)
+        }
+    }
+
+    /// Immediately stop all playing and possibly scheduled sources.
+    pub fn stop_all_sources(&mut self) -> Result<(), Error> {
         // stop everything which is playing now
         let playing_source_ids: Vec<AudioFilePlaybackId>;
         {

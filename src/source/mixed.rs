@@ -1,23 +1,37 @@
+use crossbeam_channel::{unbounded, Receiver, Sender};
+
 use crate::{
+    player::PlaybackMessageSender,
     source::{converted::ConvertedSource, AudioSource, AudioSourceTime},
     utils::resampler::ResamplingQuality,
+    AudioFilePlaybackId,
 };
-
-use crossbeam_channel::{unbounded, Receiver, Sender};
 
 // -------------------------------------------------------------------------------------------------
 
-struct PlayingSource {
+/// Mixer internal struct to keep track of currently playing sources.
+
+struct MixedPlayingSource {
     is_active: bool,
+    playback_id: AudioFilePlaybackId,
+    playback_message_sender: PlaybackMessageSender,
     source: Box<dyn AudioSource>,
-    sample_time: u64,
+    start_time: u64,
+    stop_time: Option<u64>,
 }
 
 // -------------------------------------------------------------------------------------------------
 
+/// Messages send from player to mixer to start or stop playing sources.
 pub enum MixedSourceMsg {
     AddSource {
+        playback_id: AudioFilePlaybackId,
+        playback_message_sender: PlaybackMessageSender,
         source: Box<dyn AudioSource>,
+        sample_time: u64,
+    },
+    StopSource {
+        playback_id: AudioFilePlaybackId,
         sample_time: u64,
     },
     RemoveAllSources,
@@ -28,7 +42,7 @@ pub enum MixedSourceMsg {
 
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
-    playing_sources: Vec<PlayingSource>,
+    playing_sources: Vec<MixedPlayingSource>,
     event_send: Sender<MixedSourceMsg>,
     event_recv: Receiver<MixedSourceMsg>,
     channel_count: usize,
@@ -57,26 +71,37 @@ impl MixedSource {
     }
 
     /// Add a source to the mix
-    pub fn add(&mut self, source: impl AudioSource, quality: ResamplingQuality) {
+    pub fn add(
+        &mut self,
+        playback_id: AudioFilePlaybackId,
+        playback_message_sender: PlaybackMessageSender,
+        source: impl AudioSource,
+        quality: ResamplingQuality,
+    ) {
         let sample_time = 0;
-        self.add_at_sample_time(source, sample_time, quality);
+        self.add_at_sample_time(
+            playback_id,
+            playback_message_sender,
+            source,
+            sample_time,
+            quality,
+        );
     }
 
     /// Add a source to the mix scheduling it to play at the given absolute sample time.
     pub fn add_at_sample_time(
         &mut self,
+        playback_id: AudioFilePlaybackId,
+        playback_message_sender: PlaybackMessageSender,
         source: impl AudioSource,
         sample_time: u64,
         quality: ResamplingQuality,
     ) {
-        let converted = Box::new(ConvertedSource::new(
-            source,
-            self.channel_count,
-            self.sample_rate,
-            quality,
-        ));
+        let converted = ConvertedSource::new(source, self.channel_count, self.sample_rate, quality);
         if let Err(err) = self.event_send.send(MixedSourceMsg::AddSource {
-            source: converted,
+            playback_id,
+            playback_message_sender,
+            source: Box::new(converted),
             sample_time,
         }) {
             log::error!("Failed to add mixer source: {}", { err });
@@ -97,6 +122,8 @@ impl AudioSource for MixedSource {
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
                 MixedSourceMsg::AddSource {
+                    playback_id,
+                    playback_message_sender,
                     source,
                     sample_time,
                 } => {
@@ -111,16 +138,30 @@ impl AudioSource for MixedSource {
                         "adjust source's sample rate before adding it"
                     );
                     got_new_sources = true;
-                    self.playing_sources.push(PlayingSource {
+                    self.playing_sources.push(MixedPlayingSource {
                         is_active: true,
+                        playback_id,
+                        playback_message_sender,
                         source,
-                        sample_time,
+                        start_time: sample_time,
+                        stop_time: None,
                     });
+                }
+                MixedSourceMsg::StopSource {
+                    playback_id,
+                    sample_time,
+                } => {
+                    for source in self.playing_sources.iter_mut() {
+                        if source.playback_id == playback_id {
+                            source.stop_time = Some(sample_time);
+                            break;
+                        }
+                    }
                 }
                 MixedSourceMsg::RemoveAllPendingSources => {
                     // remove all sources which are not yet playing
                     self.playing_sources
-                        .retain(|source| source.sample_time <= time.pos_in_frames);
+                        .retain(|source| source.start_time <= time.pos_in_frames);
                 }
                 MixedSourceMsg::RemoveAllSources => {
                     // remove all sources
@@ -131,7 +172,7 @@ impl AudioSource for MixedSource {
         // keep sources sorted by sample time: this makes batch processing easier
         if got_new_sources {
             self.playing_sources
-                .sort_by(|a, b| a.sample_time.cmp(&b.sample_time));
+                .sort_by(|a, b| a.start_time.cmp(&b.start_time));
         }
 
         // return empty handed when we have no sources
@@ -139,7 +180,7 @@ impl AudioSource for MixedSource {
         if self.playing_sources.is_empty() {
             return 0;
         }
-        // clear output as we're only adding below
+        // clear entire output first, as we're only adding below
         for o in output.iter_mut() {
             *o = 0_f32;
         }
@@ -149,9 +190,9 @@ impl AudioSource for MixedSource {
             let source = &mut playing_source.source;
             let mut total_written: usize = 0;
             // check source's sample start time
-            if playing_source.sample_time > time.pos_in_frames {
+            if playing_source.start_time > time.pos_in_frames {
                 let samples_until_source_starts =
-                    (playing_source.sample_time - time.pos_in_frames) as usize * self.channel_count;
+                    (playing_source.start_time - time.pos_in_frames) as usize * self.channel_count;
                 if samples_until_source_starts > 0 {
                     if samples_until_source_starts >= output_frame_count {
                         // playing_sources are sorted by sample time: all following sources will run
@@ -164,11 +205,26 @@ impl AudioSource for MixedSource {
             }
             // run and mix down the source
             'source: while total_written < output.len() {
-                // run source on temp_out until we've filled up the whole final output
                 let source_time = AudioSourceTime {
                     pos_in_frames: time.pos_in_frames + (total_written / self.channel_count) as u64,
                 };
-                let remaining = output.len() - total_written;
+                // check if there's a pending stop command for the source
+                let mut samples_until_stop = u64::MAX;
+                if let Some(stop_time) = playing_source.stop_time {
+                    if stop_time >= source_time.pos_in_frames {
+                        samples_until_stop =
+                            (stop_time - source_time.pos_in_frames) * self.channel_count as u64;
+                    }
+                }
+                if samples_until_stop == 0 {
+                    // when samples_until_stop is zero, we've reached the stop commands's destination time
+                    if let Err(err) = playing_source.playback_message_sender.try_send_stop() {
+                        log::warn!("failed to send stop event: {}", err)
+                    }
+                    samples_until_stop = u64::MAX;
+                }
+                // run source on temp_out until we've filled up the whole final output or should handle a stop
+                let remaining = (output.len() - total_written).min(samples_until_stop as usize);
                 let to_write = remaining.min(self.temp_out.len());
                 let written = source.write(&mut self.temp_out[..to_write], &source_time);
                 if source.is_exhausted() {
