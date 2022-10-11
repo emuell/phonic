@@ -106,8 +106,6 @@ pub struct AudioFilePlayer {
 }
 
 impl AudioFilePlayer {
-    const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::Fast;
-
     /// Create a new AudioFilePlayer for the given DefaultAudioSink.
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
@@ -181,14 +179,24 @@ impl AudioFilePlayer {
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            self.play_file_source(streamed_source, options.speed, options.start_time)
+            self.play_file_source(
+                streamed_source,
+                options.speed,
+                options.start_time,
+                options.resampling_quality,
+            )
         } else {
             let preloaded_source = PreloadedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
             )?;
-            self.play_file_source(preloaded_source, options.speed, options.start_time)
+            self.play_file_source(
+                preloaded_source,
+                options.speed,
+                options.start_time,
+                options.resampling_quality,
+            )
         }
     }
 
@@ -198,6 +206,7 @@ impl AudioFilePlayer {
         file_source: Source,
         speed: f64,
         start_time: Option<u64>,
+        resampling_quality: ResamplingQuality,
     ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
@@ -211,7 +220,7 @@ impl AudioFilePlayer {
             self.sink.channel_count(),
             self.sink.sample_rate(),
             speed,
-            Self::DEFAULT_RESAMPLING_QUALITY,
+            resampling_quality,
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
@@ -283,7 +292,7 @@ impl AudioFilePlayer {
             source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
-            Self::DEFAULT_RESAMPLING_QUALITY,
+            ResamplingQuality::Default, // usually unused
         );
         // play the source
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {

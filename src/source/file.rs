@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::{
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
-    source::AudioSource,
+    source::{resampled::ResamplingQuality, AudioSource},
     utils::db_to_linear,
     Error,
 };
@@ -25,6 +25,7 @@ pub struct FilePlaybackOptions {
     pub volume: f32,
 
     /// By default 1.0f64. Customize to pitch the playback speed up or down.
+    /// See also `resampling_quality` property.
     pub speed: f64,
 
     /// By default 0: when > 0 the number of times the file should be looped.
@@ -42,6 +43,12 @@ pub struct FilePlaybackOptions {
     /// stopped before it finished playing.
     pub fade_out_duration: Option<Duration>,
 
+    /// By default ResamplingQuality::Default: Quality mode of a applied resampler,
+    /// either when the source is getting played back on a stream with a sample rate
+    /// which does not match the file's sample rate or when pitching the playback up
+    /// or down.
+    pub resampling_quality: ResamplingQuality,
+
     /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
@@ -58,6 +65,7 @@ impl Default for FilePlaybackOptions {
             start_time: None,
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
+            resampling_quality: ResamplingQuality::Default,
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
         }
     }
@@ -112,6 +120,11 @@ impl FilePlaybackOptions {
 
     pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
         self.playback_pos_emit_rate = Some(duration);
+        self
+    }
+
+    pub fn resampling_quality(mut self, quality: ResamplingQuality) -> Self {
+        self.resampling_quality = quality;
         self
     }
 

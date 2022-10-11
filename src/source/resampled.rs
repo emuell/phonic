@@ -7,10 +7,11 @@ use crate::utils::resampler::{
 // -------------------------------------------------------------------------------------------------
 
 /// The resampler that ResampledSource should use for resampling.
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum ResamplingQuality {
     /// simple and fast, non bandlimited cubic interpolation. Your daily workhorse for e.g. real-time
     /// sampler playback or when CPU resources are are a problem. Downsampling may cause aliasing.
-    Fast,
+    Default,
     /// HQ resampling performed via bandlimited `rubato` resampler. When only playing back a few
     /// audio files at once or aliasing is a problem, use this mode for best results.
     HighQuality,
@@ -60,7 +61,7 @@ impl ResampledSource {
                 RubatoResampler::new(specs)
                     .expect("Failed to create new rubato resampler instance"),
             ),
-            ResamplingQuality::Fast => Box::new(
+            ResamplingQuality::Default => Box::new(
                 CubicResampler::new(specs).expect("Failed to create new cubic resampler instance"),
             ),
         };

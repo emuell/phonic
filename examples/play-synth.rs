@@ -9,8 +9,8 @@ use std::{
 use dasp::{signal, Frame, Signal};
 
 use afplay::{
-    AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
-    SynthPlaybackOptions,
+    source::resampled::ResamplingQuality, AudioFilePlaybackStatusEvent, AudioFilePlayer,
+    AudioOutput, DefaultAudioOutput, Error, SynthPlaybackOptions,
 };
 
 fn main() -> Result<(), Error> {

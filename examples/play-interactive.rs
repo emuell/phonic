@@ -10,6 +10,7 @@ use std::{
 use afplay::{
     source::{
         file::{preloaded::PreloadedFileSource, FilePlaybackOptions},
+        resampled::ResamplingQuality,
         synth::SynthPlaybackOptions,
     },
     utils::{pitch_from_note, speed_from_note},
@@ -40,7 +41,9 @@ fn main() -> Result<(), Error> {
         FilePlaybackOptions::default()
             .streamed()
             .repeat(usize::MAX)
-            .volume_db(-3.0),
+            .volume_db(-3.0)
+            .speed(0.9)
+            .resampling_quality(ResamplingQuality::HighQuality),
     )?;
 
     // print header
@@ -49,6 +52,10 @@ fn main() -> Result<(), Error> {
     println!("  Arrow 'up/down' keys change the current octave.");
     println!("  Arrow 'left/right' to seek through the loop sample");
     println!("  To play a dasp signal synth, hit key '1'. For a sample based synth hit key '2'.");
+    println!();
+    println!("  NB: this example uses a HighQuality resampler for the loop. ");
+    println!("  In debug builds this may be very slow and may thus cause crackles...");
+    println!();
     println!("  To quit press 'Esc' or 'Control/Cmd-C'.");
     println!();
 
@@ -209,7 +216,12 @@ fn handle_note_on(
             .expect("failed to play synth note")
     } else {
         player
-            .play_file_source(create_sample_source(), speed_from_note(note), None)
+            .play_file_source(
+                create_sample_source(),
+                speed_from_note(note),
+                None,
+                ResamplingQuality::Default,
+            )
             .expect("failed to play sample")
     }
 }
