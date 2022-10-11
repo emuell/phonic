@@ -11,7 +11,7 @@ pub enum Error {
     MediaFileSeekError,
     AudioDecodingError(Box<dyn error::Error + Send>),
     AudioOutputError(Box<dyn error::Error + Send>),
-    ResamplingError(i32),
+    ResamplingError(Box<dyn error::Error + Send>),
     IoError(io::Error),
     ParameterError(String),
     SendError,
@@ -25,10 +25,9 @@ impl fmt::Display for Error {
             Self::MediaFileNotFound => write!(f, "Audio file not found"),
             Self::MediaFileProbeError => write!(f, "Audio file failed to probe"),
             Self::MediaFileSeekError => write!(f, "Audio file failed to seek"),
-            Self::ResamplingError(code) => {
-                write!(f, "Resampling failed with error code {}", code)
-            }
-            Self::AudioDecodingError(err) | Self::AudioOutputError(err) => err.fmt(f),
+            Self::AudioDecodingError(err)
+            | Self::AudioOutputError(err)
+            | Self::ResamplingError(err) => err.fmt(f),
             Self::IoError(err) => err.fmt(f),
             Self::ParameterError(str) => write!(f, "Invalid parameter: {str}"),
             Self::SendError => write!(f, "Failed to send into a channel"),

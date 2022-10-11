@@ -15,7 +15,7 @@ use crate::{
             FilePlaybackOptions, FileSource,
         },
         mixed::{MixedSource, MixedSourceMsg},
-        resampled::Quality as ResamplingQuality,
+        resampled::ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
     },
     AudioSource,
@@ -106,7 +106,7 @@ pub struct AudioFilePlayer {
 }
 
 impl AudioFilePlayer {
-    const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::Linear;
+    const DEFAULT_RESAMPLING_QUALITY: ResamplingQuality = ResamplingQuality::Fast;
 
     /// Create a new AudioFilePlayer for the given DefaultAudioSink.
     /// Param `playback_status_sender` is an optional channel which can be used to receive

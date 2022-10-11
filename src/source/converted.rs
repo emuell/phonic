@@ -1,6 +1,7 @@
 use super::{
-    mapped::ChannelMappedSource, resampled::Quality as ResamplingQuality,
-    resampled::ResampledSource, AudioSource, AudioSourceTime,
+    mapped::ChannelMappedSource,
+    resampled::{ResampledSource, ResamplingQuality},
+    AudioSource, AudioSourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------

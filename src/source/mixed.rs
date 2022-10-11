@@ -4,8 +4,9 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use crate::{
     player::{AudioSourceDropEvent, PlaybackMessageSender},
-    source::{converted::ConvertedSource, AudioSource, AudioSourceTime},
-    utils::resampler::ResamplingQuality,
+    source::{
+        converted::ConvertedSource, resampled::ResamplingQuality, AudioSource, AudioSourceTime,
+    },
     AudioFilePlaybackId,
 };
 

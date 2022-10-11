@@ -1,10 +1,20 @@
 use super::{AudioSource, AudioSourceTime};
-use crate::utils::resampler::{AudioResampler, ResamplingQuality, ResamplingSpec};
+
+use crate::utils::resampler::{
+    cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
+};
 
 // -------------------------------------------------------------------------------------------------
 
-/// Interpolation mode of the resampler.
-pub type Quality = ResamplingQuality;
+/// The resampler that ResampledSource should use for resampling.
+pub enum ResamplingQuality {
+    /// simple and fast, non bandlimited cubic interpolation. Your daily workhorse for e.g. real-time
+    /// sampler playback or when CPU resources are are a problem. Downsampling may cause aliasing.
+    Fast,
+    /// HQ resampling performed via bandlimited `rubato` resampler. When only playing back a few
+    /// audio files at once or aliasing is a problem, use this mode for best results.
+    HighQuality,
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -13,14 +23,18 @@ pub type Quality = ResamplingQuality;
 pub struct ResampledSource {
     source: Box<dyn AudioSource>,
     output_sample_rate: u32,
-    resampler: AudioResampler,
-    inp: ResampleBuffer,
-    out: ResampleBuffer,
+    resampler: Box<dyn AudioResampler>,
+    input_buffer: ResampleBuffer,
+    output_buffer: ResampleBuffer,
 }
 
 impl ResampledSource {
     /// Create a new resampled sources with the given sample rate adjustment.
-    pub fn new<InputSource>(source: InputSource, output_sample_rate: u32, quality: Quality) -> Self
+    pub fn new<InputSource>(
+        source: InputSource,
+        output_sample_rate: u32,
+        quality: ResamplingQuality,
+    ) -> Self
     where
         InputSource: AudioSource,
     {
@@ -31,31 +45,38 @@ impl ResampledSource {
         source: InputSource,
         output_sample_rate: u32,
         speed: f64,
-        quality: Quality,
+        quality: ResamplingQuality,
     ) -> Self
     where
         InputSource: AudioSource,
     {
-        const BUFFER_SIZE: usize = 1024;
-
-        let spec = ResamplingSpec {
-            channels: source.channel_count(),
-            input_rate: source.sample_rate(),
-            output_rate: (output_sample_rate as f64 / speed) as u32,
+        let specs = ResamplingSpecs::new(
+            source.sample_rate(),
+            (output_sample_rate as f64 / speed) as u32,
+            source.channel_count(),
+        );
+        let resampler: Box<dyn AudioResampler> = match quality {
+            ResamplingQuality::HighQuality => Box::new(
+                RubatoResampler::new(specs)
+                    .expect("Failed to create new rubato resampler instance"),
+            ),
+            ResamplingQuality::Fast => Box::new(
+                CubicResampler::new(specs).expect("Failed to create new cubic resampler instance"),
+            ),
         };
-        let inp_buf = vec![0.0; BUFFER_SIZE];
-        let out_buf = vec![0.0; spec.output_size(BUFFER_SIZE)];
+        let input_buffer = vec![0.0; resampler.input_buffer_len()];
+        let output_buffer = vec![0.0; resampler.output_buffer_len()];
         Self {
-            resampler: AudioResampler::new(quality, spec).unwrap(),
             source: Box::new(source),
+            resampler,
             output_sample_rate,
-            inp: ResampleBuffer {
-                buf: inp_buf,
+            input_buffer: ResampleBuffer {
+                buffer: input_buffer,
                 start: 0,
                 end: 0,
             },
-            out: ResampleBuffer {
-                buf: out_buf,
+            output_buffer: ResampleBuffer {
+                buffer: output_buffer,
                 start: 0,
                 end: 0,
             },
@@ -67,37 +88,44 @@ impl AudioSource for ResampledSource {
     fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
         let mut total_written = 0;
         while total_written < output.len() {
-            if self.out.is_empty() {
+            if self.output_buffer.is_empty() {
                 // when there's no input, try fetch some from our source
-                if self.inp.is_empty() {
+                if self.input_buffer.is_empty() {
                     let source_time = AudioSourceTime {
                         pos_in_frames: time.pos_in_frames
                             + (total_written / self.source.channel_count()) as u64,
                     };
-                    let input_read = self.source.write(&mut self.inp.buf, &source_time);
-                    self.inp.start = 0;
-                    self.inp.end = input_read;
-                    self.inp.buf[input_read..].iter_mut().for_each(|s| *s = 0.0);
+                    let input_read = self
+                        .source
+                        .write(&mut self.input_buffer.buffer, &source_time);
+                    self.input_buffer.buffer[input_read..]
+                        .iter_mut()
+                        .for_each(|s| *s = 0.0);
+                    self.input_buffer.start = 0;
+                    self.input_buffer.end = self.input_buffer.buffer.len();
                 }
                 // run resampler to generate some output
-                let input = &self.inp.buf[self.inp.start..self.inp.end];
-                let output = &mut self.out.buf;
-                let (inp_consumed, out_written) = self.resampler.process(input, output).unwrap();
-                self.inp.start += inp_consumed;
-                self.out.start = 0;
-                self.out.end = out_written;
-                if out_written == 0 {
+                let (input_consumed, output_written) = self
+                    .resampler
+                    .process(
+                        &self.input_buffer.buffer[self.input_buffer.start..],
+                        &mut self.output_buffer.buffer,
+                    )
+                    .expect("Resampling failed");
+                self.input_buffer.start += input_consumed;
+                self.output_buffer.start = 0;
+                self.output_buffer.end = output_written;
+                if output_written == 0 {
                     // resampler produced no more output: we're done
                     break;
                 }
             }
-            // write resampler temp output to output
-            let source = self.out.get();
+            let source = self.output_buffer.get();
             let target = &mut output[total_written..];
-            let to_write = self.out.len().min(target.len());
+            let to_write = self.output_buffer.len().min(target.len());
             target[..to_write].copy_from_slice(&source[..to_write]);
             total_written += to_write;
-            self.out.start += to_write;
+            self.output_buffer.start += to_write;
         }
         total_written
     }
@@ -111,21 +139,21 @@ impl AudioSource for ResampledSource {
     }
 
     fn is_exhausted(&self) -> bool {
-        self.source.is_exhausted() && self.inp.is_empty() && self.out.is_empty()
+        self.source.is_exhausted() && self.input_buffer.is_empty()
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
 struct ResampleBuffer {
-    buf: Vec<f32>,
+    buffer: Vec<f32>,
     start: usize,
     end: usize,
 }
 
 impl ResampleBuffer {
     fn get(&self) -> &[f32] {
-        &self.buf[self.start..self.end]
+        &self.buffer[self.start..self.end]
     }
 
     fn len(&self) -> usize {
