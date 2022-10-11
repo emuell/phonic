@@ -81,10 +81,11 @@ pub enum PlaybackMessageSender {
 
 impl PlaybackMessageSender {
     pub fn try_send_stop(&self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(match self {
+        match self {
             PlaybackMessageSender::File(sender) => sender.try_send(FilePlaybackMessage::Stop)?,
             PlaybackMessageSender::Synth(sender) => sender.try_send(SynthPlaybackMessage::Stop)?,
-        })
+        };
+        Ok(())
     }
 }
 
