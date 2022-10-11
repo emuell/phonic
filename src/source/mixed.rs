@@ -239,8 +239,11 @@ impl AudioSource for MixedSource {
                     total_written += samples_until_source_starts;
                 }
             }
+            // We should be the only owner of the source. If not, we'll need to wrap source into a RefCell.
+            let source = Arc::get_mut(source).expect(
+                "Failed to access a source as mutable in the mixer. Is someone else holding a ref?",
+            );
             // run and mix down the source
-            let source = Arc::get_mut(source).unwrap();
             'source: while total_written < output.len() {
                 let source_time = AudioSourceTime {
                     pos_in_frames: time.pos_in_frames + (total_written / self.channel_count) as u64,
