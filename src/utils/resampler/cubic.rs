@@ -113,7 +113,7 @@ impl CubicInterpolator {
 
     #[inline]
     fn interpolate(&self, fraction: f32) -> f32 {
-        debug_assert!((0.0..1.0).contains(&fraction));
+        debug_assert!((0.0..=1.0).contains(&fraction));
 
         // Given a previous frame, a current frame, the two next frames, and a fraction from
         // 0.0 to 1.0 between the current frame and next frame, get an approximated frame.
