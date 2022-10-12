@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use afplay::{
-    source::file::preloaded::PreloadedFileSource, utils::speed_from_note, AudioFilePlayer,
-    AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
+    source::{file::preloaded::PreloadedFileSource, resampled::ResamplingQuality},
+    utils::speed_from_note,
+    AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
 };
 
 fn main() -> Result<(), Error> {
@@ -42,8 +43,12 @@ fn main() -> Result<(), Error> {
             bass_sample.clone() // else the bass
         };
 
-        let playback_id =
-            player.play_file_source(sample, playback_speed, Some(next_beats_sample_time))?;
+        let playback_id = player.play_file_source(
+            sample,
+            playback_speed,
+            Some(next_beats_sample_time),
+            ResamplingQuality::Default,
+        )?;
 
         // stop (fade out) the source before the next one starts
         player.stop_source_at_sample_time(
