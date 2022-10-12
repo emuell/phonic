@@ -16,16 +16,23 @@ use crate::{
         },
         mixed::{MixedSource, MixedSourceMsg},
         resampled::ResamplingQuality,
-        synth::{SynthPlaybackMessage, SynthSource},
+        synth::SynthPlaybackMessage,
     },
     AudioSource,
 };
 
+#[cfg(any(feature = "dasp", feature = "fundsp"))]
+use crate::source::synth::{SynthPlaybackOptions, SynthSource};
+
+#[cfg(feature = "dasp")]
+use crate::source::synth::dasp::DaspSynthSource;
 #[cfg(feature = "dasp")]
 use dasp::Signal;
 
-#[cfg(feature = "dasp")]
-use crate::source::synth::{dasp::DaspSynthSource, SynthPlaybackOptions};
+#[cfg(feature = "fundsp")]
+use crate::source::synth::fundsp::FunDspSynthSource;
+#[cfg(feature = "fundsp")]
+use fundsp::audiounit::AudioUnit64;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -237,8 +244,8 @@ impl AudioFilePlayer {
         Ok(playback_id)
     }
 
-    /// Play a mono dasp signal with the given options. See [`SynthPlaybackOptions`] for more info
-    /// about available options.
+    /// Play a mono [dasp](https://github.com/RustAudio/dasp) signal with the given options.
+    /// See [`SynthPlaybackOptions`] for more info about available options.
     ///
     /// The signal will be wrapped into a dasp::signal::UntilExhausted so it can be used to play
     /// create one-shots.
@@ -276,7 +283,35 @@ impl AudioFilePlayer {
         self.play_synth(source, options.start_time)
     }
 
-    #[allow(dead_code)]
+    /// Play a mono [funDSP](https://github.com/SamiPerttu/fundsp/) generator with the given options.
+    /// See [`SynthPlaybackOptions`] for more info about available options.
+    ///
+    /// Example generator:
+    /// `oversample(sine_hz(110.0) * 110.0 * 5.0 + 110.0 >> sine())`
+    /// which plays an oversampled FM sine tone at 110 hz.
+    #[cfg(feature = "dasp")]
+    pub fn play_fundsp_synth(
+        &mut self,
+        unit: impl AudioUnit64 + 'static,
+        unit_name: &str,
+        options: SynthPlaybackOptions,
+    ) -> Result<AudioFilePlaybackId, Error> {
+        // validate options
+        if let Err(err) = options.validate() {
+            return Err(err);
+        }
+        // create Dasp source and play it
+        let source = FunDspSynthSource::new(
+            unit,
+            unit_name,
+            options,
+            self.sink.sample_rate(),
+            Some(self.playback_status_sender.clone()),
+        );
+        self.play_synth(source, options.start_time)
+    }
+
+    #[cfg(any(feature = "dasp", feature = "fundsp"))]
     fn play_synth<S: SynthSource>(
         &mut self,
         source: S,

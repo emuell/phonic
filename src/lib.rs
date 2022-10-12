@@ -248,7 +248,10 @@
 //!   - [PreloadedFileSource](`source::file::preloaded::PreloadedFileSource`) decodes entire audio file, then plays it from a buffer.
 //!   - [SteamedFileSource](`source::file::streamed::StreamedFileSource`) streams and decodes audio files on the fly.
 //! - [SynthSource](`source::synth::SynthSource`)
-//!   - [DaspSynthSource](`source::synth::dasp::DaspSynthSource`) plays a custom dasp signal as AudioSource.
+//!   - [DaspSynthSource](`source::synth::dasp::DaspSynthSource`) plays a custom
+//! [dasp](https://github.com/RustAudio/dasp) signal as AudioSource.
+//!   - [FunDspSynthSource](`source::synth::fundsp::FunDspSynthSource`) plays a custom
+//! [funDSP](https://github.com/SamiPerttu/fundsp/) unit as AudioSource.
 //! - [EmptySource](`source::empty::EmptySource`) produces an empty buffer.
 //!
 //! #### Sources which modify signals of other sources:
@@ -272,6 +275,7 @@
 //! [SynthPlaybackoptions](`source::synth::SynthPlaybackOptions`)
 //! alter playback of sources, e.g. to change the volume or playback speed. Options can be
 //! spefified when starting playback.
+
 // private (partly re-exported)
 mod error;
 mod output;

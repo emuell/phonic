@@ -6,7 +6,9 @@ pub mod cubeb;
 /// The enabled audio output type: cpal or cubeb
 #[cfg(feature = "cpal")]
 pub type DefaultAudioOutput = cpal::CpalOutput;
+
 #[cfg(feature = "cubeb")]
+#[cfg(not(feature = "cpal"))]
 pub type DefaultAudioOutput = cubeb::CubebOutput;
 
 /// The enabled audio output sink type: cpal or cubeb

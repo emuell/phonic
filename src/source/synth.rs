@@ -1,10 +1,15 @@
-#[cfg(feature = "dasp")]
-pub mod dasp;
-
 use crossbeam_channel::Sender;
 use std::time::Duration;
 
 use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linear, Error};
+
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(feature = "dasp")]
+pub mod dasp;
+
+#[cfg(feature = "fundsp")]
+pub mod fundsp;
 
 // -------------------------------------------------------------------------------------------------
 

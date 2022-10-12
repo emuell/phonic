@@ -17,6 +17,7 @@ rubato = { version = "0.12.0" }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
 dasp = { version = "0.11.0", features = [ "signal" ], optional = true }
+fundsp = { version = "0.9.0", optional = true }
 cubeb = { version = "0.10.1", optional = true }
 cpal = { version = "^0.14", optional = true }
 
@@ -34,13 +35,17 @@ debug = 1
 cpal-output = ["cpal"]
 cubeb-output = ["cubeb", "windows"]
 dasp-synth = ["dasp"]
-default = ["cpal-output", "dasp-synth"]
+fundsp-synth = ["fundsp"]
+default = ["cpal-output", "dasp-synth", "fundsp-synth"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [[example]]
 name = "play-file"
 [[example]]
 name = "play-synth"
-required-features = ["dasp-synth"]
+required-features = ["dasp-synth", "fundsp-synth"]
 [[example]]
 name = "play-interactive"
 required-features = ["dasp-synth"]

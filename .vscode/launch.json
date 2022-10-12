@@ -29,7 +29,7 @@
         "args": [
           "build",
           "--example=play-synth",
-          "--features=dasp-synth",
+          "--features=dasp-synth,fundsp-synth",
         ],
         "filter": {
           "name": "play-synth",
