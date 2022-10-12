@@ -2,7 +2,7 @@
 name = "afplay"
 version = "0.1.0"
 edition = "2018"
-description = "A cross-platform audio playback library"
+description = "Audio playback library"
 authors = ["Eduard Müller <mail@emuell.net>"]
 exclude = ["assets", "examples"]
 categories = ["audio", "synth", "music", "gamedev"]
@@ -29,7 +29,12 @@ device_query = { version = "1.1.1" }
 ctrlc = { version = "3.2.3" }
 
 [profile.release]
+# enable debug info in release builds for profiling
 debug = 1
+
+[profile.dev.package.rubato]
+# rubato is very slow in debug builds without optimization  
+opt-level = 3
 
 [features]
 cpal-output = ["cpal"]
