@@ -219,25 +219,25 @@ impl AudioSource for MixedSource {
         }
         // clear entire output first, as we're only adding below
         for o in output.iter_mut() {
-            *o = 0_f32;
+            *o = 0.0;
         }
         // run and add all playing sources
-        let mut max_written = 0usize;
+        let mut max_written = 0;
         'all_sources: for playing_source in self.playing_sources.iter_mut() {
             let source = &mut playing_source.source;
-            let mut total_written: usize = 0;
+            let mut total_written = 0;
             // check source's sample start time
             if playing_source.start_time > time.pos_in_frames {
-                let samples_until_source_starts =
-                    (playing_source.start_time - time.pos_in_frames) as usize * self.channel_count;
-                if samples_until_source_starts > 0 {
-                    if samples_until_source_starts >= output_frame_count {
+                let frames_until_source_starts =
+                    (playing_source.start_time - time.pos_in_frames) as usize;
+                if frames_until_source_starts > 0 {
+                    if frames_until_source_starts >= output_frame_count {
                         // playing_sources are sorted by sample time: all following sources will run
                         // after this source, and thus also can also be skipped...
                         break 'all_sources;
                     }
-                    // offset to the sample start
-                    total_written += samples_until_source_starts;
+                    // move offset to the sample's start pos
+                    total_written += frames_until_source_starts * self.channel_count;
                 }
             }
             // We should be the only owner of the source. If not, we'll need to wrap source into a RefCell.
