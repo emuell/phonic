@@ -25,7 +25,9 @@ fn main() -> Result<(), Error> {
 
     // play 8 bars in this example, starting at the player's current playback pos
     const BARS_TO_PLAY: i32 = 8;
-    let playback_start_in_samples = player.output_sample_frame_position();
+    // schedule playback events one second ahead of the current time
+    let preroll_in_samples = samples_per_sec as u64 * 1;
+    let playback_start_in_samples = player.output_sample_frame_position() + preroll_in_samples;
     for beat_counter in 0..(beats_per_bar * BARS_TO_PLAY) {
         // when is the next beat playback due?
         let next_beats_sample_time =
@@ -57,10 +59,12 @@ fn main() -> Result<(), Error> {
         )?;
 
         // sleep until the next even is due
-        if next_beats_sample_time > player.output_sample_frame_position() {
-            let seconds_until_next_beat =
-                samples_to_seconds(next_beats_sample_time - player.output_sample_frame_position());
-            // wake up roughly 1 second before the next beat is due
+        let current_output_frame_position = player.output_sample_frame_position(); 
+        if next_beats_sample_time > current_output_frame_position + preroll_in_samples {
+            let seconds_until_next_beat = samples_to_seconds(
+                next_beats_sample_time - current_output_frame_position - preroll_in_samples,
+            );
+            // wake up roughly 2 seconds before the next beat is due
             let seconds_to_sleep = seconds_until_next_beat - 1.0;
             if seconds_to_sleep > 0.0 {
                 std::thread::sleep(Duration::from_secs_f64(seconds_to_sleep));
