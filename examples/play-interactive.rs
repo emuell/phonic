@@ -217,10 +217,15 @@ fn handle_note_on(
     } else {
         player
             .play_file_source(
-                create_sample_source(),
-                speed_from_note(note),
+                create_sample_source(
+                    FilePlaybackOptions::default()
+                        .volume_db(-6.0)
+                        .speed(speed_from_note(note))
+                        .fade_out(Duration::from_secs(1)),
+                    player.output_sample_rate(),
+                )
+                .expect("failed to clone a sample file"),
                 None,
-                ResamplingQuality::Default,
             )
             .expect("failed to play sample")
     }
@@ -259,18 +264,22 @@ fn create_synth_source(sample_rate: f64, pitch: f64) -> impl signal::Signal<Fram
 
 // -------------------------------------------------------------------------------------------------
 
-fn create_sample_source() -> PreloadedFileSource {
+fn create_sample_source(
+    options: FilePlaybackOptions,
+    sample_rate: u32,
+) -> Result<PreloadedFileSource, Error> {
     // load and decode sample once - lazily
     lazy_static! {
-        static ref SYNTH_SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::new(
+        static ref SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::new(
             "assets/pad-ambient.wav",
             None,
             FilePlaybackOptions::default()
                 .volume_db(-12.0)
                 .fade_out(Duration::from_secs(1)),
+            44100,
         )
         .expect("failed to load synth sample file");
     }
     // then clone the buffer'd source to avoid decoding again
-    SYNTH_SAMPLE_SOURCE.clone()
+    SAMPLE_SOURCE.clone(options, sample_rate)
 }

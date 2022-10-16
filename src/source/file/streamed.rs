@@ -18,11 +18,15 @@ use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
-    source::{AudioSource, AudioSourceTime},
+    source::{resampled::ResamplingQuality, AudioSource, AudioSourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
+        buffer::TempBuffer,
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
+        resampler::{
+            cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
+        },
         unique_usize_id,
     },
 };
@@ -42,6 +46,9 @@ pub struct StreamedFileSource {
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     time_base: TimeBase,
+    resampler: Box<dyn AudioResampler>,
+    resampler_input_buffer: TempBuffer,
+    output_sample_rate: u32,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -52,6 +59,7 @@ impl StreamedFileSource {
         file_path: &str,
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
         options: FilePlaybackOptions,
+        output_sample_rate: u32,
     ) -> Result<Self, Error> {
         // create decoder
         let decoder = AudioDecoder::new(file_path.to_string())?;
@@ -90,8 +98,6 @@ impl StreamedFileSource {
             is_fading_out: Arc::new(AtomicBool::new(false)),
         };
 
-        let playback_finished = false;
-
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
         let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
             let shared_state = worker_state.clone();
@@ -100,6 +106,7 @@ impl StreamedFileSource {
         });
         actor.send(FilePlaybackMessage::Read)?;
 
+        // create volume fader
         let mut volume_fader = VolumeFader::new(signal_spec.channels.count(), signal_spec.rate);
         if let Some(duration) = options.fade_in_duration {
             if !duration.is_zero() {
@@ -107,21 +114,48 @@ impl StreamedFileSource {
             }
         }
 
+        // create resampler
+        let resampler_specs = ResamplingSpecs::new(
+            signal_spec.rate,
+            (output_sample_rate as f64 / options.speed) as u32,
+            signal_spec.channels.count(),
+        );
+        let resampler: Box<dyn AudioResampler> = match options.resampling_quality {
+            ResamplingQuality::HighQuality => Box::new(RubatoResampler::new(resampler_specs)?),
+            ResamplingQuality::Default => Box::new(CubicResampler::new(resampler_specs)?),
+        };
+        const DEFAULT_CHUNK_SIZE: usize = 256;
+        let resample_input_buffer_size = resampler
+            .max_input_buffer_size()
+            .unwrap_or(DEFAULT_CHUNK_SIZE);
+        let resampler_input_buffer = TempBuffer::new(resample_input_buffer_size);
+
+        // create new unique file id
+        let file_id = unique_usize_id();
+
+        // copy remaining options which are applied while playback
+        let volume = options.volume;
+        let fade_out_duration = options.fade_out_duration;
+        let playback_pos_emit_rate = options.playback_pos_emit_rate;
+
         Ok(Self {
             actor,
-            file_id: unique_usize_id(),
-            file_path: file_path.to_string(),
-            volume: options.volume,
+            file_id,
+            file_path: file_path.into(),
+            volume,
             volume_fader,
-            fade_out_duration: options.fade_out_duration,
+            fade_out_duration,
             consumer,
             event_send,
             signal_spec,
             time_base,
+            resampler,
+            resampler_input_buffer,
+            output_sample_rate,
             worker_state,
             playback_pos_report_instant: Instant::now(),
-            playback_pos_emit_rate: options.playback_pos_emit_rate,
-            playback_finished,
+            playback_pos_emit_rate,
+            playback_finished: false,
         })
     }
 
@@ -185,8 +219,46 @@ impl AudioSource for StreamedFileSource {
         if self.playback_finished {
             return 0;
         }
-        // consume output from our ring-buffer
-        let written = self.consumer.read(output).unwrap_or(0);
+        // fetch input from our ring-buffer and resample it
+        let mut written = 0;
+        while written < output.len() {
+            if self.resampler_input_buffer.is_empty() {
+                self.resampler_input_buffer.reset_range();
+                let read_samples = self
+                    .consumer
+                    .read(self.resampler_input_buffer.get_mut())
+                    .unwrap_or(0);
+                self.resampler_input_buffer.set_range(0, read_samples);
+
+                // pad with zeros if resampler has input size constrains
+                if let Some(required_input_len) = self.resampler.required_input_buffer_size() {
+                    if self.resampler_input_buffer.len() < required_input_len
+                       // stop filling up empty input buffers when we've reached the end of file
+                        && (read_samples != 0
+                            || !self.worker_state.end_of_file.load(Ordering::Relaxed))
+                    {
+                        self.resampler_input_buffer.set_range(0, required_input_len);
+                        for o in &mut self.resampler_input_buffer.get_mut()[read_samples..] {
+                            *o = 0.0;
+                        }
+                    }
+                }
+            }
+            let input = self.resampler_input_buffer.get();
+            let target = &mut output[written..];
+            let (input_consumed, output_written) = self
+                .resampler
+                .process(input, target)
+                .expect("StreamedFile resampling failed");
+            self.resampler_input_buffer.consume(input_consumed);
+            written += output_written;
+            if output_written == 0 {
+                // got no more output from file or resampler
+                break;
+            }
+        }
+
+        // update position counters
         let position = self.written_samples(written as u64);
 
         // apply volume parameter
@@ -251,7 +323,7 @@ impl AudioSource for StreamedFileSource {
     }
 
     fn sample_rate(&self) -> u32 {
-        self.signal_spec.rate
+        self.output_sample_rate
     }
 
     fn is_exhausted(&self) -> bool {

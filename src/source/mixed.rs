@@ -251,10 +251,10 @@ impl AudioSource for MixedSource {
                 };
                 // check if there's a pending stop command for the source
                 let mut samples_until_stop = u64::MAX;
-                if let Some(stop_time) = playing_source.stop_time {
-                    if stop_time >= source_time.pos_in_frames {
-                        samples_until_stop =
-                            (stop_time - source_time.pos_in_frames) * self.channel_count as u64;
+                if let Some(stop_time_in_frames) = playing_source.stop_time {
+                    if stop_time_in_frames >= source_time.pos_in_frames {
+                        samples_until_stop = (stop_time_in_frames - source_time.pos_in_frames)
+                            * self.channel_count as u64;
                     }
                 }
                 if samples_until_stop == 0 {

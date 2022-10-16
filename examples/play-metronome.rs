@@ -1,20 +1,28 @@
 use std::time::Duration;
 
 use afplay::{
-    source::{file::preloaded::PreloadedFileSource, resampled::ResamplingQuality},
-    utils::speed_from_note,
-    AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
+    source::file::preloaded::PreloadedFileSource, utils::speed_from_note, AudioFilePlayer,
+    AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
 };
 
 fn main() -> Result<(), Error> {
     // create a player
     let mut player = AudioFilePlayer::new(DefaultAudioOutput::open()?.sink(), None);
+    let sample_rate = player.output_sample_rate();
 
     // preload our metronome and bass sample
-    let metronome_sample =
-        PreloadedFileSource::new("assets/cowbell.wav", None, FilePlaybackOptions::default())?;
-    let bass_sample =
-        PreloadedFileSource::new("assets/bass.wav", None, FilePlaybackOptions::default())?;
+    let metronome_sample = PreloadedFileSource::new(
+        "assets/cowbell.wav",
+        None,
+        FilePlaybackOptions::default(),
+        sample_rate,
+    )?;
+    let bass_sample = PreloadedFileSource::new(
+        "assets/bass.wav",
+        None,
+        FilePlaybackOptions::default(),
+        sample_rate,
+    )?;
 
     // define our metronome speed and signature
     let beats_per_min = 120.0;
@@ -26,7 +34,7 @@ fn main() -> Result<(), Error> {
     // play 8 bars in this example, starting at the player's current playback pos
     const BARS_TO_PLAY: i32 = 8;
     // schedule playback events one second ahead of the current time
-    let preroll_in_samples = samples_per_sec as u64 * 1;
+    let preroll_in_samples = samples_per_sec as u64;
     let playback_start_in_samples = player.output_sample_frame_position() + preroll_in_samples;
     for beat_counter in 0..(beats_per_bar * BARS_TO_PLAY) {
         // when is the next beat playback due?
@@ -40,17 +48,18 @@ fn main() -> Result<(), Error> {
             speed_from_note(60)
         };
         let sample = if (beat_counter / beats_per_bar) % 4 < 2 {
-            metronome_sample.clone() // play the cowell every 2 bars
+            metronome_sample.clone(
+                FilePlaybackOptions::default().speed(playback_speed),
+                sample_rate,
+            )? // play the cowell every 2 bars
         } else {
-            bass_sample.clone() // else the bass
+            bass_sample.clone(
+                FilePlaybackOptions::default().speed(playback_speed),
+                sample_rate,
+            )? // else the bass
         };
 
-        let playback_id = player.play_file_source(
-            sample,
-            playback_speed,
-            Some(next_beats_sample_time),
-            ResamplingQuality::Default,
-        )?;
+        let playback_id = player.play_file_source(sample, Some(next_beats_sample_time))?;
 
         // stop (fade out) the source before the next one starts
         player.stop_source_at_sample_time(
@@ -59,7 +68,7 @@ fn main() -> Result<(), Error> {
         )?;
 
         // sleep until the next even is due
-        let current_output_frame_position = player.output_sample_frame_position(); 
+        let current_output_frame_position = player.output_sample_frame_position();
         if next_beats_sample_time > current_output_frame_position + preroll_in_samples {
             let seconds_until_next_beat = samples_to_seconds(
                 next_beats_sample_time - current_output_frame_position - preroll_in_samples,

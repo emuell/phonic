@@ -21,22 +21,8 @@ impl ConvertedSource {
     where
         InputSource: AudioSource + Sized,
     {
-        Self::new_with_speed(source, channel_count, sample_rate, 1.0, resample_quality)
-    }
-
-    pub fn new_with_speed<InputSource>(
-        source: InputSource,
-        channel_count: usize,
-        sample_rate: u32,
-        speed: f64,
-        resample_quality: ResamplingQuality,
-    ) -> Self
-    where
-        InputSource: AudioSource + Sized,
-    {
-        if source.sample_rate() != sample_rate || speed != 1.0 {
-            let resampled =
-                ResampledSource::new_with_speed(source, sample_rate, speed, resample_quality);
+        if source.sample_rate() != sample_rate {
+            let resampled = ResampledSource::new(source, sample_rate, resample_quality);
             if resampled.channel_count() != channel_count {
                 let mapped = ChannelMappedSource::new(resampled, channel_count);
                 Self {

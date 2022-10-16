@@ -186,25 +186,17 @@ impl AudioFilePlayer {
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
+                self.sink.sample_rate(),
             )?;
-            self.play_file_source(
-                streamed_source,
-                options.speed,
-                options.start_time,
-                options.resampling_quality,
-            )
+            self.play_file_source(streamed_source, options.start_time)
         } else {
             let preloaded_source = PreloadedFileSource::new(
                 file_path,
                 Some(self.playback_status_sender.clone()),
                 options,
+                self.sink.sample_rate(),
             )?;
-            self.play_file_source(
-                preloaded_source,
-                options.speed,
-                options.start_time,
-                options.resampling_quality,
-            )
+            self.play_file_source(preloaded_source, options.start_time)
         }
     }
 
@@ -212,9 +204,7 @@ impl AudioFilePlayer {
     pub fn play_file_source<Source: FileSource>(
         &mut self,
         file_source: Source,
-        speed: f64,
         start_time: Option<u64>,
-        resampling_quality: ResamplingQuality,
     ) -> Result<AudioFilePlaybackId, Error> {
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
@@ -223,12 +213,11 @@ impl AudioFilePlayer {
         let mut playing_sources = self.playing_sources.lock().unwrap();
         playing_sources.insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout and apply optional pitch
-        let converted_source = ConvertedSource::new_with_speed(
+        let converted_source = ConvertedSource::new(
             file_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
-            speed,
-            resampling_quality,
+            ResamplingQuality::Default,
         );
         // play the source by adding it to the mixer
         if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {

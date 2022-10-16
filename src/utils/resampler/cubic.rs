@@ -47,6 +47,13 @@ impl CubicInterpolator {
         let mut num_consumed = 0;
         let mut num_produced = 0;
 
+        if (self.ratio - 1.0).abs() < 0.000001 {
+            // Bypass conversion in case the sample rates are equal.
+            let min = input.len().min(output.len());
+            output[..min].copy_from_slice(&input[..min]);
+            return (min, min);
+        }
+
         // for slice.get_unchecked only
         unsafe {
             // preload our input buffer
@@ -155,19 +162,11 @@ impl CubicResampler {
 }
 
 impl AudioResampler for CubicResampler {
-    fn input_buffer_len(&self) -> usize {
-        1024 * self.spec.channel_count
+    fn required_input_buffer_size(&self) -> Option<usize> {
+        None
     }
-    fn output_buffer_len(&self) -> usize {
-        let input_size = self.input_buffer_len();
-        debug_assert!(input_size % self.spec.channel_count == 0);
-
-        let input_frames = input_size / self.spec.channel_count;
-        // we need two extra samples on the right for the cubic interpolation
-        let output_frames = (self.spec.output_rate as f64 / self.spec.input_rate as f64
-            * input_frames as f64) as usize
-            + 2;
-        output_frames * self.spec.channel_count
+    fn max_input_buffer_size(&self) -> Option<usize> {
+        None
     }
 
     fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<(usize, usize), Error> {
@@ -177,5 +176,11 @@ impl AudioResampler for CubicResampler {
             result = interpolator.process(input, output, channel_index, channel_count);
         }
         Ok(result)
+    }
+
+    fn reset(&mut self) {
+        for interpolator in self.interpolators.iter_mut() {
+            interpolator.reset();
+        }
     }
 }
