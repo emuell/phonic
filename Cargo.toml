@@ -29,12 +29,15 @@ device_query = { version = "1.1.1" }
 ctrlc = { version = "3.2.3" }
 
 [profile.release]
-# enable debug info in release builds for profiling
-debug = 1
+debug = 1 # debug info for profiling
 
+# enable optimization for a few DSP packages that are else extremely slow in debug builds
 [profile.dev.package.rubato]
-# rubato is very slow in debug builds without optimization  
-opt-level = 3
+opt-level = 2
+[profile.dev.package.rustfft]
+opt-level = 2
+[profile.dev.package.realfft]
+opt-level = 2
 
 [features]
 cpal-output = ["cpal"]
