@@ -257,19 +257,14 @@ impl AudioFilePlayer {
     where
         SignalType: Signal<Frame = f64> + Send + Sync + 'static,
     {
-        // validate options
-        if let Err(err) = options.validate() {
-            return Err(err);
-        }
-        // create Dasp source and play it
         let source = DaspSynthSource::new(
             signal,
             signal_name,
             options,
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
-        );
-        self.play_synth(source, options.start_time)
+        )?;
+        self.play_synth_source(source, options.start_time)
     }
 
     /// Play a mono [funDSP](https://github.com/SamiPerttu/fundsp/) generator with the given options.
@@ -285,23 +280,18 @@ impl AudioFilePlayer {
         unit_name: &str,
         options: SynthPlaybackOptions,
     ) -> Result<AudioFilePlaybackId, Error> {
-        // validate options
-        if let Err(err) = options.validate() {
-            return Err(err);
-        }
-        // create Dasp source and play it
         let source = FunDspSynthSource::new(
             unit,
             unit_name,
             options,
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
-        );
-        self.play_synth(source, options.start_time)
+        )?;
+        self.play_synth_source(source, options.start_time)
     }
 
     #[cfg(any(feature = "dasp", feature = "fundsp"))]
-    fn play_synth<S: SynthSource>(
+    pub fn play_synth_source<S: SynthSource>(
         &mut self,
         source: S,
         start_time: Option<u64>,

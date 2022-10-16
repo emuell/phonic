@@ -10,6 +10,7 @@ use crate::{
         fader::{FaderState, VolumeFader},
         unique_usize_id,
     },
+    Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -47,13 +48,18 @@ where
         options: SynthPlaybackOptions,
         sample_rate: u32,
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
+        // validate options
+        if let Err(err) = options.validate() {
+            return Err(err);
+        }
+        // create volume fader
         let mut volume_fader = VolumeFader::new(Self::CHANNEL_COUNT, sample_rate);
         if let Some(duration) = options.fade_in_duration {
             volume_fader.start_fade_in(duration);
         }
         let (send, recv) = unbounded::<SynthPlaybackMessage>();
-        Self {
+        Ok(Self {
             signal: signal.until_exhausted(),
             sample_rate,
             volume: options.volume,
@@ -68,7 +74,7 @@ where
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate: options.playback_pos_emit_rate,
             playback_finished: false,
-        }
+        })
     }
 
     fn should_report_pos(&self) -> bool {

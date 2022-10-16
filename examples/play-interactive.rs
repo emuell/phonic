@@ -11,7 +11,7 @@ use afplay::{
     source::{
         file::{preloaded::PreloadedFileSource, FilePlaybackOptions},
         resampled::ResamplingQuality,
-        synth::SynthPlaybackOptions,
+        synth::{dasp::DaspSynthSource, SynthPlaybackOptions},
     },
     utils::{pitch_from_note, speed_from_note},
     AudioFilePlaybackId, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
@@ -206,14 +206,18 @@ fn handle_note_on(
     // create, then play a synth or sample source and return the playback_id
     if playmode == PlayMode::Synth {
         player
-            .play_dasp_synth(
-                create_synth_source(player.output_sample_rate() as f64, pitch_from_note(note)),
-                format!("Synth Note #{}", note).as_str(),
-                SynthPlaybackOptions::default()
-                    .volume_db(-12.0)
-                    .fade_out(Duration::from_secs(1)),
+            .play_synth_source(
+                create_synth_source(
+                    note,
+                    SynthPlaybackOptions::default()
+                        .volume_db(-12.0)
+                        .fade_out(Duration::from_secs(1)),
+                    player.output_sample_rate(),
+                )
+                .expect("failed to create a new synth source"),
+                None,
             )
-            .expect("failed to play synth note")
+            .expect("failed to play synth")
     } else {
         player
             .play_file_source(
@@ -224,7 +228,7 @@ fn handle_note_on(
                         .fade_out(Duration::from_secs(1)),
                     player.output_sample_rate(),
                 )
-                .expect("failed to clone a sample file"),
+                .expect("failed to create a new sample file"),
                 None,
             )
             .expect("failed to play sample")
@@ -238,16 +242,21 @@ fn handle_note_off(player: &mut AudioFilePlayer, playback_id: AudioFilePlaybackI
 
 // -------------------------------------------------------------------------------------------------
 
-fn create_synth_source(sample_rate: f64, pitch: f64) -> impl signal::Signal<Frame = f64> {
+fn create_synth_source(
+    note: u8,
+    options: SynthPlaybackOptions,
+    sample_rate: u32,
+) -> Result<DaspSynthSource<impl signal::Signal<Frame = f64>>, Error> {
+    let pitch = pitch_from_note(note);
     let duration_in_ms = 1000;
-    let duration_in_samples = (sample_rate / duration_in_ms as f64 * 1000.0) as usize;
+    let duration_in_samples = (sample_rate as f64 / duration_in_ms as f64 * 1000.0) as usize;
     // stack up slightly detuned sine waves
     let fundamental = signal::rate(sample_rate as f64).const_hz(pitch);
     let harmonic_l1 = signal::rate(sample_rate as f64).const_hz(pitch * 2.01);
     let harmonic_h1 = signal::rate(sample_rate as f64).const_hz(pitch / 2.02);
     let harmonic_h2 = signal::rate(sample_rate as f64).const_hz(pitch / 4.04);
     // combine them, limit duration and apply a fade-out envelope
-    signal::from_iter(
+    let signal = signal::from_iter(
         fundamental
             .sine()
             .add_amp(harmonic_l1.sine().scale_amp(0.5))
@@ -259,6 +268,13 @@ fn create_synth_source(sample_rate: f64, pitch: f64) -> impl signal::Signal<Fram
                 let env: f64 = (1.0 - (index as f64) / (duration_in_samples as f64)).powf(2.0);
                 (s * env).to_float_frame()
             }),
+    );
+    DaspSynthSource::new(
+        signal,
+        format!("Synth Note #{}", note).as_str(),
+        options,
+        sample_rate,
+        None,
     )
 }
 

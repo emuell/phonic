@@ -10,6 +10,7 @@ use crate::{
         fader::{FaderState, VolumeFader},
         unique_usize_id,
     },
+    Error,
 };
 
 use fundsp::prelude::*;
@@ -45,7 +46,11 @@ impl FunDspSynthSource {
         options: SynthPlaybackOptions,
         sample_rate: u32,
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
+        // validate options
+        if let Err(err) = options.validate() {
+            return Err(err);
+        }
         // ensure unit is using the correct sample rate
         unit.reset(Some(sample_rate as f64));
         // create volume fader
@@ -54,7 +59,7 @@ impl FunDspSynthSource {
             volume_fader.start_fade_in(duration);
         }
         let (send, recv) = unbounded::<SynthPlaybackMessage>();
-        Self {
+        Ok(Self {
             unit: Box::new(unit),
             sample_rate,
             volume: options.volume,
@@ -70,7 +75,7 @@ impl FunDspSynthSource {
             playback_pos_emit_rate: options.playback_pos_emit_rate,
             playback_finished: false,
             playback_silence_count: 0,
-        }
+        })
     }
 
     fn should_report_pos(&self) -> bool {
