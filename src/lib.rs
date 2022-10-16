@@ -67,7 +67,7 @@
 //! )?;
 //!
 //! // Stop all playing files: this will quickly fade-out all playing files to avoid clicks.
-//! player.stop_all_playing_sources()?;
+//! player.stop_all_sources()?;
 //!
 //! # Ok(()) }; }
 //! ```
@@ -176,7 +176,7 @@
 //!
 //! // If you only want one file to play at the same time, simply stop all playing
 //! // sounds before starting a new one:
-//! player.stop_all_playing_sources()?;
+//! player.stop_all_sources()?;
 //! player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 //!
 //! # Ok(()) }; }
@@ -196,17 +196,19 @@
 //! #
 //! // create a player
 //! let mut player = AudioFilePlayer::new(DefaultAudioOutput::open()?.sink(), None);
-//! // preload a sample file
-//! let preloaded_sample_source = PreloadedFileSource::new(
-//!     "path/to_some_file.wav",
-//!     None, // we don't need a channel for playback events
-//!     FilePlaybackOptions::default(),
-//! )?;
 //!
 //! // calculate at which rate the sample file should be emitted
 //! let beats_per_min = 120.0;
 //! let samples_per_sec = player.output_sample_rate();
 //! let samples_per_beat = || -> f64 { samples_per_sec as f64 * 60.0 / beats_per_min as f64 };
+//!
+//! // preload a sample file
+//! let preloaded_sample_source = PreloadedFileSource::new(
+//!     "path/to_some_file.wav",
+//!     None, // we don't need a channel for playback events
+//!     FilePlaybackOptions::default(),
+//!     samples_per_sec,
+//! )?;
 //!
 //! // schedule playback of the sample file every beat for 8 beats
 //! let playback_start = player.output_sample_frame_position();
@@ -217,8 +219,10 @@
 //!     // play a clone of the preloaded sample at the next beat's sample time.
 //!     // cloning is very cheap as the sample buffer is shared...
 //!     player.play_file_source(
-//!         preloaded_sample_source.clone(),
-//!         speed_from_note(60), // middle-c
+//!         preloaded_sample_source.clone(
+//!             FilePlaybackOptions::default()
+//!               .speed(speed_from_note(60)), // middle-c
+//!             samples_per_sec)?,
 //!         Some(next_beats_sample_time),
 //!     )?;
 //! }
