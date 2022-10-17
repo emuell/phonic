@@ -54,56 +54,63 @@ impl CubicInterpolator {
             return (min, min);
         }
 
-        // for slice.get_unchecked only
-        unsafe {
-            // preload our input buffer
-            if !self.is_initialized {
-                self.is_initialized = true;
-                for f in 0..3 {
+        // preload our input buffer
+        if !self.is_initialized {
+            self.is_initialized = true;
+            for f in 0..3 {
+                unsafe {
                     self.push_sample(*input.get_unchecked(f * channel_count + channel_index));
-                    num_consumed += 1;
                 }
+                num_consumed += 1;
             }
+        }
 
-            // downsample
-            if self.ratio < 1.0 {
-                while num_produced < num_out {
-                    if self.sub_pos >= 1.0 {
-                        if num_consumed == num_in {
-                            break;
-                        }
+        // downsample
+        if self.ratio < 1.0 {
+            while num_produced < num_out {
+                if self.sub_pos >= 1.0 {
+                    if num_consumed == num_in {
+                        break;
+                    }
+                    unsafe {
                         self.push_sample(
                             *input.get_unchecked(num_consumed * channel_count + channel_index),
                         );
-                        num_consumed += 1;
-                        self.sub_pos -= 1.0;
                     }
+                    num_consumed += 1;
+                    self.sub_pos -= 1.0;
+                }
 
+                unsafe {
                     *output.get_unchecked_mut(num_produced * channel_count + channel_index) =
                         self.interpolate(self.sub_pos);
-                    num_produced += 1;
-                    self.sub_pos += self.ratio;
                 }
+                num_produced += 1;
+                self.sub_pos += self.ratio;
             }
-            // upsample
-            else {
-                'outer_loop: while num_produced < num_out {
-                    while self.sub_pos < self.ratio {
-                        if num_consumed == num_in {
-                            break 'outer_loop;
-                        }
+        }
+        // upsample
+        else {
+            'outer_loop: while num_produced < num_out {
+                while self.sub_pos < self.ratio {
+                    if num_consumed == num_in {
+                        break 'outer_loop;
+                    }
+                    unsafe {
                         self.push_sample(
                             *input.get_unchecked(num_consumed * channel_count + channel_index),
                         );
-                        num_consumed += 1;
-                        self.sub_pos += 1.0;
                     }
+                    num_consumed += 1;
+                    self.sub_pos += 1.0;
+                }
 
-                    self.sub_pos -= self.ratio;
+                self.sub_pos -= self.ratio;
+                unsafe {
                     *output.get_unchecked_mut(num_produced * channel_count + channel_index) =
                         self.interpolate(1.0 - self.sub_pos);
-                    num_produced += 1;
                 }
+                num_produced += 1;
             }
         }
 

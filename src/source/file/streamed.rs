@@ -231,16 +231,15 @@ impl AudioSource for StreamedFileSource {
                 self.resampler_input_buffer.set_range(0, read_samples);
 
                 // pad with zeros if resampler has input size constrains
-                if let Some(required_input_len) = self.resampler.required_input_buffer_size() {
-                    if self.resampler_input_buffer.len() < required_input_len
-                       // stop filling up empty input buffers when we've reached the end of file
-                        && (read_samples != 0
-                            || !self.worker_state.end_of_file.load(Ordering::Relaxed))
-                    {
-                        self.resampler_input_buffer.set_range(0, required_input_len);
-                        for o in &mut self.resampler_input_buffer.get_mut()[read_samples..] {
-                            *o = 0.0;
-                        }
+                let required_input_len = self.resampler.required_input_buffer_size().unwrap_or(0);
+                if self.resampler_input_buffer.len() < required_input_len
+                    // stop filling up empty input buffers when we've reached the end of file
+                    && (read_samples != 0
+                        || !self.worker_state.end_of_file.load(Ordering::Relaxed))
+                {
+                    self.resampler_input_buffer.set_range(0, required_input_len);
+                    for o in &mut self.resampler_input_buffer.get_mut()[read_samples..] {
+                        *o = 0.0;
                     }
                 }
             }

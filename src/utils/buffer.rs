@@ -160,11 +160,11 @@ impl TempBuffer {
         copy_len
     }
     /// Copy up to self.len().min(other.len()) from other. returns the sample len that got copied.
-    pub fn copy_from(&mut self, other: &mut [f32]) -> usize {
+    pub fn copy_from(&mut self, other: &[f32]) -> usize {
         let copy_len = other.len().min(self.len());
 
-        let other_slice = &mut other[..copy_len];
         let this_slice = &mut self.get_mut()[..copy_len];
+        let other_slice = &other[..copy_len];
         this_slice.copy_from_slice(other_slice);
 
         copy_len
