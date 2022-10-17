@@ -15,6 +15,7 @@ use crate::{
         AudioSource, AudioSourceTime,
     },
     utils::{
+        buffer::TempBuffer,
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
         resampler::{
@@ -47,6 +48,7 @@ pub struct PreloadedFileSource {
     buffer_channel_count: usize,
     buffer_pos: usize,
     resampler: Box<dyn AudioResampler>,
+    resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
@@ -67,7 +69,7 @@ impl PreloadedFileSource {
 
         // prealloc entire buffer, when the decoder gives us a frame hint
         let buffer_capacity =
-            audio_decoder.codec_params().n_frames.unwrap_or(0) as usize * buffer_channel_count;
+            audio_decoder.codec_params().n_frames.unwrap_or(0) as usize * buffer_channel_count + 1;
         let mut buffer = Arc::new(Vec::with_capacity(buffer_capacity));
 
         // decode the entire file into our buffer in chunks of max_frames_per_packet sizes
@@ -87,6 +89,12 @@ impl PreloadedFileSource {
             return Err(Error::AudioDecodingError(Box::new(
                 symphonia::core::errors::Error::DecodeError("failed to decode file"),
             )));
+        } else {
+            // add one extra empty sample at the end for the cubic resamplers
+            let mut_buffer = Arc::get_mut(&mut buffer).unwrap();
+            for _ in 0..buffer_channel_count {
+                mut_buffer.push(0.0);
+            }
         }
 
         Self::with_buffer(
@@ -135,6 +143,8 @@ impl PreloadedFileSource {
             ResamplingQuality::HighQuality => Box::new(RubatoResampler::new(resampler_specs)?),
             ResamplingQuality::Default => Box::new(CubicResampler::new(resampler_specs)?),
         };
+        let resample_input_buffer_size = resampler.max_input_buffer_size().unwrap_or(0);
+        let resampler_input_buffer = TempBuffer::new(resample_input_buffer_size);
 
         // create new unique file id
         let file_id = unique_usize_id();
@@ -159,6 +169,7 @@ impl PreloadedFileSource {
             buffer_channel_count,
             buffer_pos: 0,
             resampler,
+            resampler_input_buffer,
             output_sample_rate,
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate,
@@ -282,10 +293,26 @@ impl AudioSource for PreloadedFileSource {
             let remaining_input_buffer =
                 &self.buffer[self.buffer_pos..self.buffer_pos + remaining_input_len];
             let remaining_target = &mut output[total_written..];
-            let (input_consumed, output_written) = self
-                .resampler
-                .process(remaining_input_buffer, remaining_target)
-                .expect("PreloadedFile resampling failed");
+            // pad input with zeros if resampler has input size constrains (should only happen in the last process calls)
+            let required_input_len = self.resampler.required_input_buffer_size().unwrap_or(0);
+            let (input_consumed, output_written) =
+                if remaining_input_buffer.len() < required_input_len {
+                    self.resampler_input_buffer.reset_range();
+                    self.resampler_input_buffer
+                        .copy_from(remaining_input_buffer);
+                    for o in &mut self.resampler_input_buffer.get_mut()[remaining_input_len..] {
+                        *o = 0.0;
+                    }
+                    let (_, output_written) = self
+                        .resampler
+                        .process(self.resampler_input_buffer.get(), remaining_target)
+                        .expect("PreloadedFile resampling failed");
+                    (remaining_input_len, output_written)
+                } else {
+                    self.resampler
+                        .process(remaining_input_buffer, remaining_target)
+                        .expect("PreloadedFile resampling failed")
+                };
 
             // apply volume
             if (self.volume - 1.0).abs() > 0.0001 {
@@ -362,5 +389,55 @@ impl AudioSource for PreloadedFileSource {
 
     fn is_exhausted(&self) -> bool {
         self.playback_finished
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resampling() {
+        // add one extra zero sample for cubic resampling
+        let buffer = Arc::new(vec![0.2, 1.0, 0.5, 0.0]);
+
+        // Default
+        let preloaded = PreloadedFileSource::with_buffer(
+            buffer.clone(),
+            44100,
+            1,
+            "temp_file",
+            None,
+            FilePlaybackOptions::default().resampling_quality(ResamplingQuality::Default),
+            48000,
+        );
+        assert!(preloaded.is_ok());
+        let mut preloaded = preloaded.unwrap();
+        let mut output = vec![0.0; 1024];
+        let written = preloaded.write(&mut output, &AudioSourceTime { pos_in_frames: 0 });
+
+        assert_eq!(written, buffer.len() - 1);
+        assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
+
+        // Rubato
+        let preloaded = PreloadedFileSource::with_buffer(
+            buffer.clone(),
+            44100,
+            1,
+            "temp_file",
+            None,
+            FilePlaybackOptions::default().resampling_quality(ResamplingQuality::HighQuality),
+            48000,
+        );
+        assert!(preloaded.is_ok());
+        let mut preloaded = preloaded.unwrap();
+        let mut output = vec![0.0; 1024];
+        let written = preloaded.write(&mut output, &AudioSourceTime { pos_in_frames: 0 });
+
+        assert!(written > buffer.len());
+        assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.2);
+        assert!(output[3..].iter().sum::<f32>() < 0.1);
     }
 }
