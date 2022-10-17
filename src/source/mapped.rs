@@ -7,7 +7,7 @@ pub struct ChannelMappedSource {
     source: Box<dyn AudioSource>,
     input_channels: usize,
     output_channels: usize,
-    buffer: Vec<f32>,
+    input_buffer: Vec<f32>,
 }
 
 impl ChannelMappedSource {
@@ -15,71 +15,93 @@ impl ChannelMappedSource {
     where
         InputSource: AudioSource,
     {
-        const BUFFER_SIZE: usize = 16 * 1024;
+        const BUFFER_SIZE: usize = 256;
         let input_channels = source.channel_count();
         Self {
             source: Box::new(source),
             input_channels,
             output_channels,
-            buffer: vec![0.0; BUFFER_SIZE],
+            input_buffer: vec![0.0; BUFFER_SIZE * input_channels],
         }
     }
 }
 
 impl AudioSource for ChannelMappedSource {
     fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
-        let input_max = (output.len() / self.output_channels) * self.input_channels;
-        let buffer_max = input_max.min(self.buffer.len());
-        let written = self.source.write(&mut self.buffer[..buffer_max], time);
-        let input = &self.buffer[..written];
-        let input_frames = input.chunks_exact(self.input_channels);
-        let output_frames = output.chunks_exact_mut(self.output_channels);
-        match self.input_channels {
-            1 => {
-                match self.output_channels {
-                    1 => {
-                        let mut written = 0_usize;
-                        for (i, o) in input_frames.zip(output_frames) {
-                            o[0] = i[0];
-                            written += 1;
+        let mut total_written = 0;
+        while total_written < output.len() {
+            // read as much input as we can to fill the entire output
+            let input_max =
+                ((output.len() - total_written) / self.output_channels) * self.input_channels;
+            let buffer_max = input_max.min(self.input_buffer.len());
+
+            let source_time = AudioSourceTime {
+                pos_in_frames: time.pos_in_frames
+                    + total_written as u64 / self.output_channels as u64,
+            };
+            let written = self
+                .source
+                .write(&mut self.input_buffer[..buffer_max], &source_time);
+            if written == 0 {
+                // source is exhausted
+                break;
+            }
+
+            // convert
+            let input = &self.input_buffer[..written];
+            let target = &mut output[total_written
+                ..total_written + (written / self.input_channels) * self.output_channels];
+
+            let input_frames = input.chunks_exact(self.input_channels);
+            let output_frames = target.chunks_exact_mut(self.output_channels);
+            total_written += match self.input_channels {
+                1 => {
+                    match self.output_channels {
+                        1 => {
+                            let mut written = 0_usize;
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = i[0];
+                                written += 1;
+                            }
+                            written
                         }
-                        written
-                    }
-                    c => {
-                        let mut written = 0_usize;
-                        for (i, o) in input_frames.zip(output_frames) {
-                            o[0] = i[0];
-                            o[1] = i[0];
-                            // Assume the rest is is implicitly silence.
-                            written += c;
+                        c => {
+                            let mut written = 0_usize;
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = i[0];
+                                o[1] = i[0];
+                                // Assume the rest is is implicitly silence.
+                                written += c;
+                            }
+                            written
                         }
-                        written
                     }
                 }
-            }
-            _ => {
-                match self.output_channels {
-                    1 => {
-                        let mut written = 0_usize;
-                        for (i, o) in input_frames.zip(output_frames) {
-                            o[0] = i[0];
-                            written += 1;
+                _ => {
+                    match self.output_channels {
+                        1 => {
+                            let mut written = 0_usize;
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = i[0];
+                                written += 1;
+                            }
+                            written
                         }
-                        written
-                    }
-                    c => {
-                        let mut written = 0_usize;
-                        for (i, o) in input_frames.zip(output_frames) {
-                            o[0] = i[0];
-                            o[1] = i[1];
-                            // Assume the rest is is implicitly silence.
-                            written += c;
+                        c => {
+                            let mut written = 0_usize;
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = i[0];
+                                o[1] = i[1];
+                                // Assume the rest is is implicitly silence.
+                                written += c;
+                            }
+                            written
                         }
-                        written
                     }
                 }
             }
         }
+        total_written
     }
 
     fn channel_count(&self) -> usize {
