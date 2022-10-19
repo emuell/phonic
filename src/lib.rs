@@ -295,4 +295,4 @@ pub use output::{AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
 pub use player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlayer};
 pub use source::file::FilePlaybackOptions;
 pub use source::synth::SynthPlaybackOptions;
-pub use source::AudioSource;
+pub use source::{AudioSource, AudioSourceTime};

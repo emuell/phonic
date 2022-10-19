@@ -5,6 +5,9 @@ use crate::{player::AudioFilePlaybackId, source::AudioSource, utils::db_to_linea
 
 // -------------------------------------------------------------------------------------------------
 
+#[cfg(any(feature = "dasp", feature = "fundsp"))]
+mod common;
+
 #[cfg(feature = "dasp")]
 pub mod dasp;
 
