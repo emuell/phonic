@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use crate::{
@@ -91,6 +92,7 @@ impl Stream {
             callback_recv,
             source: Box::new(EmptySource),
             playback_pos,
+            playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
             buffer: vec![0.0; 1024 * 1024],
         };
@@ -246,6 +248,7 @@ struct StreamCallback {
     source: Box<dyn AudioSource>,
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,
+    playback_pos_instant: Instant,
     buffer: Vec<f32>,
 }
 
@@ -274,6 +277,7 @@ impl StreamCallback {
             let time = AudioSourceTime {
                 pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
                     / self.source.channel_count() as u64,
+                pos_instant: self.playback_pos_instant,
             };
             let n_samples = self
                 .source

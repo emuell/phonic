@@ -89,10 +89,10 @@ impl AudioSource for ResampledSource {
                 self.output_buffer.reset_range();
                 // when there's no input, try fetch some from our source
                 if self.input_buffer.is_empty() {
-                    let source_time = AudioSourceTime {
-                        pos_in_frames: time.pos_in_frames
-                            + (total_written / self.source.channel_count()) as u64,
-                    };
+                    let source_time = AudioSourceTime::with_frames_added(
+                        time,
+                        (total_written / self.source.channel_count()) as u64,
+                    );
                     self.input_buffer.reset_range();
                     let input_read = self.source.write(self.input_buffer.get_mut(), &source_time);
 

@@ -416,7 +416,7 @@ mod tests {
         assert!(preloaded.is_ok());
         let mut preloaded = preloaded.unwrap();
         let mut output = vec![0.0; 1024];
-        let written = preloaded.write(&mut output, &AudioSourceTime { pos_in_frames: 0 });
+        let written = preloaded.write(&mut output, &AudioSourceTime::default());
 
         assert_eq!(written, buffer.len() - 1);
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
@@ -434,7 +434,7 @@ mod tests {
         assert!(preloaded.is_ok());
         let mut preloaded = preloaded.unwrap();
         let mut output = vec![0.0; 1024];
-        let written = preloaded.write(&mut output, &AudioSourceTime { pos_in_frames: 0 });
+        let written = preloaded.write(&mut output, &AudioSourceTime::default());
 
         assert!(written > buffer.len());
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.2);

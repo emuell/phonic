@@ -1,3 +1,7 @@
+use std::time::Instant;
+
+// -------------------------------------------------------------------------------------------------
+
 pub mod converted;
 pub mod empty;
 pub mod file;
@@ -9,10 +13,34 @@ pub mod synth;
 // -------------------------------------------------------------------------------------------------
 
 /// Timing info for `AudioSource` buffers.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct AudioSourceTime {
-    /// Time in absolute sample frames.
+    /// Buffer time in absolute sample frames since playback started.
     pub pos_in_frames: u64,
+    /// Buffer pos in elapsed wallclock time units since playback started.
+    pub pos_instant: Instant,
+}
+
+impl AudioSourceTime {
+    pub fn new() -> Self {
+        Self {
+            pos_in_frames: 0,
+            pos_instant: Instant::now(),
+        }
+    }
+
+    pub fn with_frames_added(other: &AudioSourceTime, frames: u64) -> Self {
+        Self {
+            pos_in_frames: other.pos_in_frames + frames,
+            pos_instant: other.pos_instant,
+        }
+    }
+}
+
+impl Default for AudioSourceTime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

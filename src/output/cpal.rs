@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
 };
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -183,6 +186,7 @@ impl Stream {
             source: Box::new(EmptySource),
             volume: 1.0,
             playback_pos,
+            playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
         };
 
@@ -258,6 +262,7 @@ struct StreamCallback {
     callback_recv: Receiver<CallbackMsg>,
     source: Box<dyn AudioSource>,
     playback_pos: Arc<AtomicU64>,
+    playback_pos_instant: Instant,
     state: CallbackState,
     volume: f32,
 }
@@ -287,6 +292,7 @@ impl StreamCallback {
             let time = AudioSourceTime {
                 pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
                     / self.source.channel_count() as u64,
+                pos_instant: self.playback_pos_instant,
             };
             let written = self.source.write(output, &time);
 

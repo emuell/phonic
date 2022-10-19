@@ -246,9 +246,10 @@ impl AudioSource for MixedSource {
             );
             // run and mix down the source
             'source: while total_written < output.len() {
-                let source_time = AudioSourceTime {
-                    pos_in_frames: time.pos_in_frames + (total_written / self.channel_count) as u64,
-                };
+                let source_time = AudioSourceTime::with_frames_added(
+                    time,
+                    (total_written / self.channel_count) as u64,
+                );
                 // check if there's a pending stop command for the source
                 let mut samples_until_stop = u64::MAX;
                 if let Some(stop_time_in_frames) = playing_source.stop_time {
