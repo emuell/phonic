@@ -35,10 +35,7 @@ impl AudioSource for ChannelMappedSource {
                 ((output.len() - total_written) / self.output_channels) * self.input_channels;
             let buffer_max = input_max.min(self.input_buffer.len());
 
-            let source_time = AudioSourceTime::with_frames_added(
-                time,
-                (total_written / self.output_channels) as u64,
-            );
+            let source_time = time.with_added_frames((total_written / self.output_channels) as u64);
             let written = self
                 .source
                 .write(&mut self.input_buffer[..buffer_max], &source_time);

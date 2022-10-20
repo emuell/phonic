@@ -22,6 +22,7 @@ pub struct AudioSourceTime {
 }
 
 impl AudioSourceTime {
+    /// Create a new AudioSourceTime with default values.
     pub fn new() -> Self {
         Self {
             pos_in_frames: 0,
@@ -29,11 +30,17 @@ impl AudioSourceTime {
         }
     }
 
-    pub fn with_frames_added(other: &AudioSourceTime, frames: u64) -> Self {
-        Self {
-            pos_in_frames: other.pos_in_frames + frames,
-            pos_instant: other.pos_instant,
-        }
+    /// return a new AudioSourceTime with a frame time which is this times's frame time
+    /// plus the given amount in frames.
+    pub fn with_added_frames(&self, frames: u64) -> Self {
+        let mut copy = *self;
+        copy.add_frames(frames);
+        copy
+    }
+
+    /// Move pos in frames by the given amount in frames.
+    pub fn add_frames(&mut self, frames: u64) {
+        self.pos_in_frames += frames;
     }
 }
 
@@ -54,16 +61,18 @@ impl Default for AudioSourceTime {
 ///
 /// `write` is called in the realtime audio thread, so it must not block!
 pub trait AudioSource: Send + Sync + 'static {
+    /// The source's output sample rate.
+    fn sample_rate(&self) -> u32;
+    /// The source's output channel count.
+    fn channel_count(&self) -> usize;
+
+    /// returns if the source finished playback. Exhausted sources should only return 0 on `write`
+    /// and can be removed from a source render graph.
+    fn is_exhausted(&self) -> bool;
+
     /// Write at most of `output.len()` samples into the interleaved `output`
     /// The given [`AudioSourceTime`] parameter specifies which absolute time this buffer in the
     /// final output stream refers to. It can be used to schedule and apply real-time events.
     /// Returns the number of written **samples** (not frames).
     fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize;
-    /// The source's output channel count.
-    fn channel_count(&self) -> usize;
-    /// The source's output sample rate.
-    fn sample_rate(&self) -> u32;
-    /// returns if the source finished playback. Exhausted sources should only return 0 on `write`
-    /// and can be removed from a source render graph.
-    fn is_exhausted(&self) -> bool;
 }
