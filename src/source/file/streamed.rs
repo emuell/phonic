@@ -9,10 +9,7 @@ use std::{
 
 use crossbeam_channel::Sender;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
-use symphonia::core::{
-    audio::{SampleBuffer, SignalSpec},
-    units::TimeBase,
-};
+use symphonia::core::audio::{SampleBuffer, SignalSpec};
 
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
