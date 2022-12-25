@@ -55,7 +55,7 @@ impl CubicInterpolator {
         }
 
         // preload our input buffer
-        if !self.is_initialized {
+        if !self.is_initialized && input.len() >= 3 {
             self.is_initialized = true;
             for f in 0..3 {
                 unsafe {
