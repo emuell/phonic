@@ -227,7 +227,7 @@ impl PreloadedFileSource {
     fn samples_to_duration(&self, samples: usize) -> Duration {
         let frames = samples / self.buffer_channel_count as usize;
         let seconds = frames as f64 / self.output_sample_rate as f64;
-        Duration::from_millis((seconds * 1000.0) as u64)
+        Duration::from_secs_f64(seconds)
     }
 }
 

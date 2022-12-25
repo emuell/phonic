@@ -45,7 +45,6 @@ pub struct StreamedFileSource {
     worker_state: SharedFileWorkerState,
     event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     signal_spec: SignalSpec,
-    time_base: TimeBase,
     resampler: Box<dyn AudioResampler>,
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
@@ -66,7 +65,6 @@ impl StreamedFileSource {
         // Gather the source signal parameters and compute how often we should report
         // the play-head position.
         let signal_spec = decoder.signal_spec();
-        let time_base = decoder.codec_params().time_base.unwrap();
 
         // Create a ring-buffer for the decoded samples. Worker thread is producing,
         // we are consuming in the `AudioSource` impl.
@@ -148,7 +146,6 @@ impl StreamedFileSource {
             consumer,
             event_send,
             signal_spec,
-            time_base,
             resampler,
             resampler_input_buffer,
             output_sample_rate,
@@ -185,8 +182,8 @@ impl StreamedFileSource {
 
     fn samples_to_duration(&self, samples: u64) -> Duration {
         let frames = samples / self.signal_spec.channels.count() as u64;
-        let time = self.time_base.calc_time(frames);
-        Duration::from_secs(time.seconds) + Duration::from_secs_f64(time.frac)
+        let seconds = frames as f64 / self.output_sample_rate as f64;
+        Duration::from_secs_f64(seconds)
     }
 }
 
