@@ -162,10 +162,15 @@ pub enum FilePlaybackMessage {
 
 /// A source which decodes and plays back an audio file.
 pub trait FileSource: AudioSource {
-    /// Channel to control file playback.
-    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> AudioFilePlaybackId;
+
+    /// Channel to control file playback.
+    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
+
+    /// Channel to receive playback status from the file.
+    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
 
     /// Total number of sample frames in the decoded file: may not be known before playback finished.
     fn total_frames(&self) -> Option<u64>;

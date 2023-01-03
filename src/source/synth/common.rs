@@ -33,9 +33,9 @@ where
     generator: Box<Generator>,
     sample_rate: u32,
     volume_fader: VolumeFader,
-    send: Sender<SynthPlaybackMessage>,
-    recv: Receiver<SynthPlaybackMessage>,
-    event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    playback_message_send: Sender<SynthPlaybackMessage>,
+    playback_message_recv: Receiver<SynthPlaybackMessage>,
+    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_id: AudioFilePlaybackId,
     playback_name: String,
     playback_options: SynthPlaybackOptions,
@@ -71,9 +71,9 @@ where
             generator: Box::new(generator),
             sample_rate,
             volume_fader,
-            send,
-            recv,
-            event_send,
+            playback_message_send: send,
+            playback_message_recv: recv,
+            playback_status_send: event_send,
             playback_id: unique_usize_id(),
             playback_name: generator_name.to_string(),
             playback_options: options,
@@ -104,12 +104,19 @@ impl<Generator> SynthSource for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
-    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
-        self.send.clone()
-    }
-
     fn playback_id(&self) -> AudioFilePlaybackId {
         self.playback_id
+    }
+
+    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
+        self.playback_message_send.clone()
+    }
+
+    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+        self.playback_status_send.clone()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+        self.playback_status_send = sender;
     }
 }
 
@@ -120,7 +127,7 @@ where
     fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
-        if let Ok(msg) = self.recv.try_recv() {
+        if let Ok(msg) = self.playback_message_recv.try_recv() {
             match msg {
                 SynthPlaybackMessage::Stop => {
                     if let Some(duration) = self.playback_options.fade_out_duration {
@@ -159,7 +166,7 @@ where
 
         // send Position Event
         if self.should_report_pos() {
-            if let Some(event_send) = &self.event_send {
+            if let Some(event_send) = &self.playback_status_send {
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.playback_id,
@@ -177,7 +184,7 @@ where
             && self.volume_fader.target_volume() == 0.0;
         if stop_playing || is_exhausted || fade_out_finished {
             self.playback_finished = true;
-            if let Some(event_send) = &self.event_send {
+            if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.playback_id,
                     path: self.playback_name.clone(),

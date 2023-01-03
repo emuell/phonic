@@ -40,11 +40,11 @@ pub struct StreamedFileSource {
     fade_out_duration: Option<Duration>,
     consumer: Consumer<f32>,
     worker_state: SharedFileWorkerState,
-    event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     signal_spec: SignalSpec,
     resampler: Box<dyn AudioResampler>,
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
+    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -53,7 +53,7 @@ pub struct StreamedFileSource {
 impl StreamedFileSource {
     pub fn new(
         file_path: &str,
-        event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -141,12 +141,12 @@ impl StreamedFileSource {
             volume_fader,
             fade_out_duration,
             consumer,
-            event_send,
             signal_spec,
             resampler,
             resampler_input_buffer,
             output_sample_rate,
             worker_state,
+            playback_status_send,
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate,
             playback_finished: false,
@@ -185,12 +185,19 @@ impl StreamedFileSource {
 }
 
 impl FileSource for StreamedFileSource {
+    fn playback_id(&self) -> AudioFilePlaybackId {
+        self.file_id
+    }
+
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.actor.sender()
     }
 
-    fn playback_id(&self) -> AudioFilePlaybackId {
-        self.file_id
+    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+        self.playback_status_send.clone()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+        self.playback_status_send = sender;
     }
 
     fn current_frame_position(&self) -> u64 {
@@ -272,7 +279,7 @@ impl AudioSource for StreamedFileSource {
         self.volume_fader.process(&mut output[0..written]);
 
         // send position change events
-        if let Some(event_send) = &self.event_send {
+        if let Some(event_send) = &self.playback_status_send {
             if self.should_report_pos() {
                 self.playback_pos_report_instant = Instant::now();
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
@@ -292,7 +299,7 @@ impl AudioSource for StreamedFileSource {
         let fadeout_completed = is_fading_out && self.volume_fader.state() == FaderState::Finished;
         if !is_playing || is_exhausted || fadeout_completed {
             // we're reached end of file or got stopped: send stop message
-            if let Some(event_send) = &self.event_send {
+            if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     path: self.file_path.clone(),

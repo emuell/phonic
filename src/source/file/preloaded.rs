@@ -40,9 +40,6 @@ pub struct PreloadedFileSource {
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
     repeat: usize,
-    playback_message_send: Sender<FilePlaybackMessage>,
-    playback_message_receive: Receiver<FilePlaybackMessage>,
-    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     buffer: Arc<Vec<f32>>,
     buffer_sample_rate: u32,
     buffer_channel_count: usize,
@@ -50,6 +47,9 @@ pub struct PreloadedFileSource {
     resampler: Box<dyn AudioResampler>,
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
+    playback_message_send: Sender<FilePlaybackMessage>,
+    playback_message_receive: Receiver<FilePlaybackMessage>,
+    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -161,9 +161,6 @@ impl PreloadedFileSource {
             volume_fader,
             fade_out_duration,
             repeat: options.repeat,
-            playback_message_receive,
-            playback_message_send,
-            playback_status_send,
             buffer,
             buffer_sample_rate,
             buffer_channel_count,
@@ -171,6 +168,9 @@ impl PreloadedFileSource {
             resampler,
             resampler_input_buffer,
             output_sample_rate,
+            playback_message_receive,
+            playback_message_send,
+            playback_status_send,
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate,
             playback_finished: false,
@@ -232,12 +232,19 @@ impl PreloadedFileSource {
 }
 
 impl FileSource for PreloadedFileSource {
+    fn playback_id(&self) -> AudioFilePlaybackId {
+        self.file_id
+    }
+
     fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
         self.playback_message_send.clone()
     }
 
-    fn playback_id(&self) -> AudioFilePlaybackId {
-        self.file_id
+    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+        self.playback_status_send.clone()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+        self.playback_status_send = sender;
     }
 
     fn total_frames(&self) -> Option<u64> {

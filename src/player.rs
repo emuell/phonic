@@ -206,6 +206,11 @@ impl AudioFilePlayer {
         file_source: Source,
         start_time: Option<u64>,
     ) -> Result<AudioFilePlaybackId, Error> {
+        // make sure the source has a valid playback status channel
+        let mut file_source = file_source;
+        if file_source.playback_status_sender().is_none() {
+            file_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
+        }
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
         let playback_message_sender =
@@ -293,18 +298,23 @@ impl AudioFilePlayer {
     #[cfg(any(feature = "dasp", feature = "fundsp"))]
     pub fn play_synth_source<S: SynthSource>(
         &mut self,
-        source: S,
+        synth_source: S,
         start_time: Option<u64>,
     ) -> Result<AudioFilePlaybackId, Error> {
+        // make sure the source has a valid playback status channel
+        let mut synth_source = synth_source;
+        if synth_source.playback_status_sender().is_none() {
+            synth_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
+        }
         // memorize source in playing sources map
-        let playback_id = source.playback_id();
+        let playback_id = synth_source.playback_id();
         let playback_message_sender =
-            PlaybackMessageSender::Synth(source.playback_message_sender());
+            PlaybackMessageSender::Synth(synth_source.playback_message_sender());
         let mut playing_sources = self.playing_sources.lock().unwrap();
         playing_sources.insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout
         let converted = ConvertedSource::new(
-            source,
+            synth_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
             ResamplingQuality::Default, // usually unused

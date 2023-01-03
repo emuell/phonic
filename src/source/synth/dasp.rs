@@ -86,12 +86,19 @@ impl<SignalType> SynthSource for DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64> + Send + Sync + 'static,
 {
+    fn playback_id(&self) -> AudioFilePlaybackId {
+        self.0.playback_id()
+    }
+
     fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
         self.0.playback_message_sender()
     }
 
-    fn playback_id(&self) -> AudioFilePlaybackId {
-        self.0.playback_id()
+    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+        self.0.playback_status_sender()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+        self.0.set_playback_status_sender(sender);
     }
 }
 
