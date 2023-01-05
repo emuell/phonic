@@ -10,7 +10,7 @@ use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::{
-        file::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+        file::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
         resampled::ResamplingQuality,
         AudioSource, AudioSourceTime,
     },
@@ -35,7 +35,7 @@ use crate::{
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
     file_id: AudioFilePlaybackId,
-    file_path: String,
+    file_path: Arc<String>,
     volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
@@ -50,6 +50,7 @@ pub struct PreloadedFileSource {
     playback_message_send: Sender<FilePlaybackMessage>,
     playback_message_receive: Receiver<FilePlaybackMessage>,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    playback_status_context: Option<AudioFilePlaybackStatusContext>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -133,6 +134,9 @@ impl PreloadedFileSource {
             }
         }
 
+        // reset context
+        let playback_status_context = None;
+
         // create resampler
         let resampler_specs = ResamplingSpecs::new(
             buffer_sample_rate,
@@ -156,7 +160,7 @@ impl PreloadedFileSource {
 
         Ok(Self {
             file_id,
-            file_path: file_path.into(),
+            file_path: Arc::new(file_path.into()),
             volume,
             volume_fader,
             fade_out_duration,
@@ -171,6 +175,7 @@ impl PreloadedFileSource {
             playback_message_receive,
             playback_message_send,
             playback_status_send,
+            playback_status_context,
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate,
             playback_finished: false,
@@ -245,6 +250,13 @@ impl FileSource for PreloadedFileSource {
     }
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
         self.playback_status_send = sender;
+    }
+
+   fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+        self.playback_status_context.clone()
+    }
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+        self.playback_status_context = context;
     }
 
     fn total_frames(&self) -> Option<u64> {
@@ -357,6 +369,7 @@ impl AudioSource for PreloadedFileSource {
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,
+                    context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(self.buffer_pos),
                 }) {
@@ -373,6 +386,7 @@ impl AudioSource for PreloadedFileSource {
             if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,
+                    context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
                     exhausted: self.buffer_pos >= self.buffer.len(),
                 }) {

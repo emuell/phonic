@@ -143,7 +143,12 @@
 //! std::thread::spawn(move || {
 //!     while let Ok(event) = playback_status_receiver.recv() {
 //!         match event {
-//!             AudioFilePlaybackStatusEvent::Position { id, path, position } => {
+//!             AudioFilePlaybackStatusEvent::Position { 
+//!                 id, 
+//!                 path, 
+//!                 context: _, 
+//!                 position 
+//!             } => {
 //!                 println!(
 //!                     "Playback pos of source #{} '{}': {}",
 //!                     id,
@@ -154,6 +159,7 @@
 //!             AudioFilePlaybackStatusEvent::Stopped {
 //!                 id,
 //!                 path,
+//!                 context: _,
 //!                 exhausted,
 //!             } => {
 //!                 if exhausted {
@@ -292,7 +298,7 @@ pub mod utils;
 // re-exports
 pub use error::Error;
 pub use output::{AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
-pub use player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlayer};
+pub use player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext, AudioFilePlayer};
 pub use source::file::FilePlaybackOptions;
 pub use source::synth::SynthPlaybackOptions;
 pub use source::{AudioSource, AudioSourceTime};

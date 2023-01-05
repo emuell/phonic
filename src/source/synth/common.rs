@@ -1,10 +1,10 @@
-use std::time::{Duration, Instant};
+use std::{time::{Duration, Instant}, sync::Arc};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
     source::{AudioSource, AudioSourceTime},
     utils::{
         fader::{FaderState, VolumeFader},
@@ -36,8 +36,9 @@ where
     playback_message_send: Sender<SynthPlaybackMessage>,
     playback_message_recv: Receiver<SynthPlaybackMessage>,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    playback_status_context: Option<AudioFilePlaybackStatusContext>,
     playback_id: AudioFilePlaybackId,
-    playback_name: String,
+    playback_name: Arc<String>,
     playback_options: SynthPlaybackOptions,
     playback_pos: u64,
     playback_pos_report_instant: Instant,
@@ -75,7 +76,8 @@ where
             playback_message_recv: recv,
             playback_status_send: event_send,
             playback_id: unique_usize_id(),
-            playback_name: generator_name.to_string(),
+            playback_status_context: None,
+            playback_name: Arc::new(generator_name.to_string()),
             playback_options: options,
             playback_pos: 0,
             playback_pos_report_instant: Instant::now(),
@@ -117,6 +119,13 @@ where
     }
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
         self.playback_status_send = sender;
+    }
+
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> { 
+        self.playback_status_context.clone()
+    }
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+        self.playback_status_context = context;
     }
 }
 
@@ -170,6 +179,7 @@ where
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.playback_id,
+                    context: self.playback_status_context.clone(),
                     path: self.playback_name.clone(),
                     position: self.samples_to_duration(self.playback_pos),
                 }) {
@@ -187,6 +197,7 @@ where
             if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.playback_id,
+                    context: self.playback_status_context.clone(),
                     path: self.playback_name.clone(),
                     exhausted: self.playback_finished,
                 }) {

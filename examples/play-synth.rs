@@ -120,7 +120,12 @@ fn main() -> Result<(), Error> {
         move || {
             while let Ok(event) = status_receiver.recv() {
                 match event {
-                    AudioFilePlaybackStatusEvent::Position { id, path, position } => {
+                    AudioFilePlaybackStatusEvent::Position {
+                        id,
+                        path,
+                        context: _,
+                        position,
+                    } => {
                         println!(
                             "Playback pos of synth #{} '{}': {}",
                             id,
@@ -131,6 +136,7 @@ fn main() -> Result<(), Error> {
                     AudioFilePlaybackStatusEvent::Stopped {
                         id,
                         path,
+                        context: _,
                         exhausted,
                     } => {
                         if exhausted {

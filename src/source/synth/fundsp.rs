@@ -2,8 +2,9 @@ use crossbeam_channel::Sender;
 use fundsp::prelude::*;
 
 use crate::{
-    AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioSource, AudioSourceTime, Error,
-    SynthPlaybackOptions,
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
+    source::{synth::SynthPlaybackOptions, AudioSource, AudioSourceTime},
+    Error,
 };
 
 use super::{
@@ -111,6 +112,13 @@ impl SynthSource for FunDspSynthSource {
     }
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
         self.0.set_playback_status_sender(sender);
+    }
+
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+        self.0.playback_status_context()
+    }
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+        self.0.set_playback_status_context(context);
     }
 }
 

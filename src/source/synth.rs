@@ -1,8 +1,9 @@
-use crossbeam_channel::Sender;
 use std::time::Duration;
 
+use crossbeam_channel::Sender;
+
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
     source::AudioSource,
     utils::db_to_linear,
     Error,
@@ -117,4 +118,8 @@ pub trait SynthSource: AudioSource {
     /// Channel to receive file playback status from the synth.
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
+
+    /// Optional context passed along with the playback status.
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext>;
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>);
 }

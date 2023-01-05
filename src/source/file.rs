@@ -1,11 +1,12 @@
 pub mod preloaded;
 pub mod streamed;
 
-use crossbeam_channel::Sender;
 use std::time::Duration;
 
+use crossbeam_channel::Sender;
+
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
     source::{resampled::ResamplingQuality, AudioSource},
     utils::db_to_linear,
     Error,
@@ -171,6 +172,10 @@ pub trait FileSource: AudioSource {
     /// Channel to receive playback status from the file.
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
+
+    /// Optional context passed along with the playback status.
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext>;
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>);
 
     /// Total number of sample frames in the decoded file: may not be known before playback finished.
     fn total_frames(&self) -> Option<u64>;

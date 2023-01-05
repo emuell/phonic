@@ -14,7 +14,7 @@ use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
     source::{resampled::ResamplingQuality, AudioSource, AudioSourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
@@ -34,7 +34,7 @@ use crate::{
 pub struct StreamedFileSource {
     actor: ActorHandle<FilePlaybackMessage>,
     file_id: usize,
-    file_path: String,
+    file_path: Arc<String>,
     volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
@@ -45,6 +45,7 @@ pub struct StreamedFileSource {
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+    playback_status_context: Option<AudioFilePlaybackStatusContext>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -128,6 +129,9 @@ impl StreamedFileSource {
         // create new unique file id
         let file_id = unique_usize_id();
 
+        // create empty context
+        let playback_status_context = None;
+
         // copy remaining options which are applied while playback
         let volume = options.volume;
         let fade_out_duration = options.fade_out_duration;
@@ -136,7 +140,7 @@ impl StreamedFileSource {
         Ok(Self {
             actor,
             file_id,
-            file_path: file_path.into(),
+            file_path: Arc::new(file_path.into()),
             volume,
             volume_fader,
             fade_out_duration,
@@ -147,6 +151,7 @@ impl StreamedFileSource {
             output_sample_rate,
             worker_state,
             playback_status_send,
+            playback_status_context,
             playback_pos_report_instant: Instant::now(),
             playback_pos_emit_rate,
             playback_finished: false,
@@ -198,6 +203,13 @@ impl FileSource for StreamedFileSource {
     }
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
         self.playback_status_send = sender;
+    }
+
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+        self.playback_status_context.clone()
+    }
+    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+        self.playback_status_context = context;
     }
 
     fn current_frame_position(&self) -> u64 {
@@ -285,6 +297,7 @@ impl AudioSource for StreamedFileSource {
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
                     id: self.file_id,
+                    context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
                 }) {
@@ -302,6 +315,7 @@ impl AudioSource for StreamedFileSource {
             if let Some(event_send) = &self.playback_status_send {
                 if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.file_id,
+                    context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
                     exhausted: is_exhausted,
                 }) {
