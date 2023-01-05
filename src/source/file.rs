@@ -6,7 +6,7 @@ use std::time::Duration;
 use crossbeam_channel::Sender;
 
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
     source::{resampled::ResamplingQuality, AudioSource},
     utils::db_to_linear,
     Error,

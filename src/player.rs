@@ -1,8 +1,9 @@
 use crossbeam_channel::{unbounded, Sender};
 use std::{
+    any::Any,
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration, any::Any,
+    time::Duration,
 };
 
 use crate::{
@@ -183,13 +184,13 @@ impl AudioFilePlayer {
     ) -> Result<AudioFilePlaybackId, Error> {
         self.play_file_with_context(file_path, options, None)
     }
-    /// Play a new file with the given file path, options and context. 
+    /// Play a new file with the given file path, options and context.
     /// See [`FilePlaybackOptions`] for more info on which options can be applied.
     pub fn play_file_with_context(
         &mut self,
         file_path: &str,
         options: FilePlaybackOptions,
-        context: Option<Arc<dyn Any + Send + Sync>>,
+        context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
         // validate options
         if let Err(err) = options.validate() {
@@ -215,7 +216,7 @@ impl AudioFilePlayer {
         }
     }
 
-        /// Play a self created or cloned file source.
+    /// Play a self created or cloned file source.
     pub fn play_file_source<Source: FileSource>(
         &mut self,
         file_source: Source,
@@ -228,7 +229,7 @@ impl AudioFilePlayer {
         &mut self,
         file_source: Source,
         start_time: Option<u64>,
-        context: Option<Arc<dyn Any + Send + Sync>>,
+        context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
         // make sure the source has a valid playback status channel
         let mut file_source = file_source;
@@ -290,7 +291,7 @@ impl AudioFilePlayer {
     {
         self.play_dasp_synth_with_context(signal, signal_name, options, None)
     }
-    /// Play a mono [dasp](https://github.com/RustAudio/dasp) signal with the given options 
+    /// Play a mono [dasp](https://github.com/RustAudio/dasp) signal with the given options
     /// and playback status context.
     #[cfg(feature = "dasp")]
     pub fn play_dasp_synth_with_context<SignalType>(
@@ -298,7 +299,7 @@ impl AudioFilePlayer {
         signal: SignalType,
         signal_name: &str,
         options: SynthPlaybackOptions,
-        context: Option<Arc<dyn Any + Send + Sync>>,
+        context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error>
     where
         SignalType: Signal<Frame = f64> + Send + Sync + 'static,
@@ -326,7 +327,7 @@ impl AudioFilePlayer {
         unit_name: &str,
         options: SynthPlaybackOptions,
     ) -> Result<AudioFilePlaybackId, Error> {
-       self.play_fundsp_synth_with_context(unit, unit_name, options, None) 
+        self.play_fundsp_synth_with_context(unit, unit_name, options, None)
     }
     /// Play a mono [funDSP](https://github.com/SamiPerttu/fundsp/) generator with the given options
     /// and playback status context.
@@ -336,7 +337,7 @@ impl AudioFilePlayer {
         unit: impl AudioUnit64 + 'static,
         unit_name: &str,
         options: SynthPlaybackOptions,
-        context: Option<Arc<dyn Any + Send + Sync>>,
+        context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
         let source = FunDspSynthSource::new(
             unit,
@@ -357,14 +358,14 @@ impl AudioFilePlayer {
     ) -> Result<AudioFilePlaybackId, Error> {
         self.play_synth_source_with_context(synth_source, start_time, None)
     }
-    /// Play a self created synth source with the given playback options and 
+    /// Play a self created synth source with the given playback options and
     /// playback status context.
     #[cfg(any(feature = "dasp", feature = "fundsp"))]
     pub fn play_synth_source_with_context<S: SynthSource>(
         &mut self,
         synth_source: S,
         start_time: Option<u64>,
-        context: Option<Arc<dyn Any + Send + Sync>>,
+        context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
         // make sure the source has a valid playback status channel
         let mut synth_source = synth_source;
