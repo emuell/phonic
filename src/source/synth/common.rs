@@ -59,9 +59,7 @@ where
         event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // validate options
-        if let Err(err) = options.validate() {
-            return Err(err);
-        }
+        options.validate()?;
         // create volume fader
         let mut volume_fader = VolumeFader::new(Self::CHANNEL_COUNT, sample_rate);
         if let Some(duration) = options.fade_in_duration {

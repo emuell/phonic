@@ -63,6 +63,8 @@ impl PreloadedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
+        // validate options
+        options.validate()?;
         // create decoder and get buffe rsignal specs
         let mut audio_decoder = AudioDecoder::new(file_path.to_string())?;
         let buffer_sample_rate = audio_decoder.signal_spec().rate;
@@ -120,9 +122,7 @@ impl PreloadedFileSource {
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         // validate options
-        if let Err(err) = options.validate() {
-            return Err(err);
-        }
+        options.validate()?;
         // create a channel for playback messages
         let (playback_message_send, playback_message_receive) = unbounded::<FilePlaybackMessage>();
 
@@ -230,7 +230,7 @@ impl PreloadedFileSource {
     }
 
     fn samples_to_duration(&self, samples: usize) -> Duration {
-        let frames = samples / self.buffer_channel_count as usize;
+        let frames = samples / self.buffer_channel_count;
         let seconds = frames as f64 / self.output_sample_rate as f64;
         Duration::from_secs_f64(seconds)
     }
@@ -397,7 +397,7 @@ impl AudioSource for PreloadedFileSource {
             self.playback_finished = true;
         }
 
-        total_written as usize
+        total_written
     }
 
     fn channel_count(&self) -> usize {

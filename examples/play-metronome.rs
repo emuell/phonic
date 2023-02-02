@@ -28,7 +28,7 @@ fn main() -> Result<(), Error> {
     let beats_per_min = 120.0;
     let beats_per_bar = 4;
     let samples_per_sec = player.output_sample_rate();
-    let samples_per_beat = samples_per_sec as f64 * 60.0 / beats_per_min as f64;
+    let samples_per_beat = samples_per_sec as f64 * 60.0 / beats_per_min;
     let samples_to_seconds = |samples: u64| -> f64 { samples as f64 / samples_per_sec as f64 };
 
     // play 8 bars in this example, starting at the player's current playback pos

@@ -192,10 +192,6 @@ impl AudioFilePlayer {
         options: FilePlaybackOptions,
         context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
-        // validate options
-        if let Err(err) = options.validate() {
-            return Err(err);
-        }
         // create a stremed or preloaded source, depending on the options and play it
         if options.stream {
             let streamed_source = StreamedFileSource::new(
@@ -304,6 +300,7 @@ impl AudioFilePlayer {
     where
         SignalType: Signal<Frame = f64> + Send + Sync + 'static,
     {
+        // create synth source
         let source = DaspSynthSource::new(
             signal,
             signal_name,
@@ -311,6 +308,7 @@ impl AudioFilePlayer {
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
         )?;
+        // and play it
         self.play_synth_source_with_context(source, options.start_time, context)
     }
 
@@ -339,6 +337,7 @@ impl AudioFilePlayer {
         options: SynthPlaybackOptions,
         context: Option<AudioFilePlaybackStatusContext>,
     ) -> Result<AudioFilePlaybackId, Error> {
+        // create synth source
         let source = FunDspSynthSource::new(
             unit,
             unit_name,
@@ -346,6 +345,7 @@ impl AudioFilePlayer {
             self.sink.sample_rate(),
             Some(self.playback_status_sender.clone()),
         )?;
+        // and play it
         self.play_synth_source_with_context(source, options.start_time, context)
     }
 

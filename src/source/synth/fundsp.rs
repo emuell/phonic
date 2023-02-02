@@ -44,7 +44,7 @@ impl SynthSourceGenerator for FunDspSynthGenerator {
         let mut written = 0;
         while written < output.len() {
             let frames_left = output.len() - written;
-            let to_write = std::cmp::Ord::min(frames_left, MAX_BUFFER_SIZE as usize);
+            let to_write = std::cmp::Ord::min(frames_left, MAX_BUFFER_SIZE);
             self.unit.process(to_write, &[], &mut [&mut temp_buffer]);
             let out = &mut output[written..written + to_write];
             for (o, i) in out.iter_mut().zip(temp_buffer) {

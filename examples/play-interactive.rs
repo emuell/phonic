@@ -262,7 +262,7 @@ fn create_synth_source(
             .add_amp(harmonic_l1.sine().scale_amp(0.5))
             .add_amp(harmonic_h1.sine().scale_amp(0.5))
             .add_amp(harmonic_h2.sine().scale_amp(0.5))
-            .take(duration_in_samples as usize)
+            .take(duration_in_samples)
             .zip(0..duration_in_samples)
             .map(move |(s, index)| {
                 let env: f64 = (1.0 - (index as f64) / (duration_in_samples as f64)).powf(2.0);

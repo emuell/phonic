@@ -58,6 +58,8 @@ impl StreamedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
+        // validate options
+        options.validate()?;
         // create decoder
         let decoder = AudioDecoder::new(file_path.to_string())?;
         // Gather the source signal parameters and compute how often we should report
