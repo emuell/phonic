@@ -1,4 +1,4 @@
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{bounded, unbounded, Sender};
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
 use std::{any::Any, sync::Arc, time::Duration};
@@ -103,14 +103,14 @@ impl PlaybackMessageSender {
         };
     }
 
-    pub fn send_stop(&self) -> Result<(), Error>{
+    pub fn send_stop(&self) -> Result<(), Error> {
         match self {
-            PlaybackMessageSender::File(sender) => {
-                sender.push(FilePlaybackMessage::Stop).map_err(|_err| Error::SendError)
-            }
-            PlaybackMessageSender::Synth(sender) => {
-                sender.push(SynthPlaybackMessage::Stop).map_err(|_err| Error::SendError)
-            }
+            PlaybackMessageSender::File(sender) => sender
+                .push(FilePlaybackMessage::Stop)
+                .map_err(|_err| Error::SendError),
+            PlaybackMessageSender::Synth(sender) => sender
+                .push(SynthPlaybackMessage::Stop)
+                .map_err(|_err| Error::SendError),
         }
     }
 }
@@ -513,9 +513,18 @@ impl AudioFilePlayer {
         Sender<AudioFilePlaybackStatusEvent>,
         Sender<AudioSourceDropEvent>,
     ) {
-        let (drop_send, drop_recv) = unbounded::<AudioSourceDropEvent>();
-        let (playback_send_proxy, playback_recv_proxy) =
-            unbounded::<AudioFilePlaybackStatusEvent>();
+        let (drop_send, drop_recv) = bounded::<AudioSourceDropEvent>(128);
+        let mut playing_sources_capacity = None;
+        if let Some(playback_sender) = &playback_sender {
+            playing_sources_capacity = playback_sender.capacity();
+        }
+        let (playback_send_proxy, playback_recv_proxy) = {
+            if let Some(capacity) = playing_sources_capacity {
+                bounded::<AudioFilePlaybackStatusEvent>(capacity)
+            } else {
+                unbounded::<AudioFilePlaybackStatusEvent>()
+            }
+        };
 
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())
@@ -526,12 +535,7 @@ impl AudioFilePlayer {
                     }
                     recv(playback_recv_proxy) -> msg => {
                         if let Ok(event) = msg {
-                           if let AudioFilePlaybackStatusEvent::Stopped {
-                            id,
-                            context: _,
-                            path: _,
-                            exhausted: _,
-                            } = event {
+                           if let AudioFilePlaybackStatusEvent::Stopped { id, .. } = event {
                                 playing_sources.remove(&id);
                             }
                             if let Some(sender) = &playback_sender {
