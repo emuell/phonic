@@ -10,7 +10,7 @@ use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::{
-        file::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
+        file::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
         resampled::ResamplingQuality,
         AudioSource, AudioSourceTime,
     },
@@ -252,7 +252,7 @@ impl FileSource for PreloadedFileSource {
         self.playback_status_send = sender;
     }
 
-   fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
         self.playback_status_context.clone()
     }
     fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
