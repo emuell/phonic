@@ -1,5 +1,6 @@
-use dashmap::DashMap;
 use crossbeam_channel::{unbounded, Sender};
+use crossbeam_queue::ArrayQueue;
+use dashmap::DashMap;
 use std::{any::Any, sync::Arc, time::Duration};
 
 use crate::{
@@ -114,7 +115,7 @@ pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
     playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
     playback_status_sender: Sender<AudioFilePlaybackStatusEvent>,
-    mixer_event_sender: Sender<MixedSourceMsg>,
+    mixer_event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
 }
 
 impl AudioFilePlayer {
@@ -131,7 +132,7 @@ impl AudioFilePlayer {
             Self::handle_events(playback_status_sender, playing_sources.clone());
         // Create a mixer source, add it to the audio sink and start running
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate(), drain_send);
-        let mixer_event_sender = mixer_source.event_sender();
+        let mixer_event_queue = mixer_source.event_queue();
         let mut sink = sink;
         sink.play(mixer_source);
         sink.resume();
@@ -139,7 +140,7 @@ impl AudioFilePlayer {
             sink,
             playing_sources,
             playback_status_sender: playback_status_sender_proxy,
-            mixer_event_sender,
+            mixer_event_queue,
         }
     }
 
@@ -244,16 +245,20 @@ impl AudioFilePlayer {
             ResamplingQuality::Default,
         );
         // play the source by adding it to the mixer
-        if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
-            playback_id,
-            playback_message_sender,
-            source: Arc::new(converted_source),
-            sample_time: start_time.unwrap_or(0),
-        }) {
-            log::error!("failed to send mixer event: {}", err);
-            return Err(Error::SendError);
+        if self
+            .mixer_event_queue
+            .push(MixedSourceMsg::AddSource {
+                playback_id,
+                playback_message_sender,
+                source: Arc::new(converted_source),
+                sample_time: start_time.unwrap_or(0),
+            })
+            .is_err()
+        {
+            log::warn!("mixer's event queue is full. playback event got skipped!");
+            log::warn!("increase the mixer event queue to prevent this from happening...");
         }
-        // return new file's id on success
+        // return new file's id
         Ok(playback_id)
     }
 
@@ -383,14 +388,18 @@ impl AudioFilePlayer {
             ResamplingQuality::Default, // usually unused
         );
         // play the source
-        if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::AddSource {
-            playback_id,
-            playback_message_sender,
-            source: Arc::new(converted),
-            sample_time: start_time.unwrap_or(0),
-        }) {
-            log::error!("failed to send mixer event: {}", err);
-            return Err(Error::SendError);
+        if self
+            .mixer_event_queue
+            .push(MixedSourceMsg::AddSource {
+                playback_id,
+                playback_message_sender,
+                source: Arc::new(converted),
+                sample_time: start_time.unwrap_or(0),
+            })
+            .is_err()
+        {
+            log::warn!("mixer's event queue is full. playback event got skipped!");
+            log::warn!("increase the mixer event queue to prevent this from happening...");
         }
         // return new synth's id
         Ok(playback_id)
@@ -421,21 +430,26 @@ impl AudioFilePlayer {
     /// Immediately stop a playing file or synth source. NB: This will fade-out the source when a
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
-        if let Some(msg_sender) = self.playing_sources.get(&playback_id) {
-            if let Err(err) = msg_sender.value().try_send_stop() {
-                log::warn!(
-                    "failed to send stop command to file source: {}",
-                    err.to_string()
-                );
+        let stopped = match self.playing_sources.get(&playback_id) {
+            Some(msg_sender) => {
+                if let Err(err) = msg_sender.value().try_send_stop() {
+                    log::warn!(
+                        "failed to send stop command to file source: {}",
+                        err.to_string()
+                    );
+                }
+                true
             }
+            None => false,
+        };
+        if stopped {
             // we shortly will receive an Exhaused event which removes the source, but neverthless
             // remove it now, to force all following attempts to stop this source to fail
             self.playing_sources.remove(&playback_id);
-            return Ok(());
+            Ok(())
         } else {
-            // log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
+            Err(Error::MediaFileNotFound)
         }
-        Err(Error::MediaFileNotFound)
     }
 
     /// Stop a playing file or synth source at a given sample time in future.
@@ -446,14 +460,12 @@ impl AudioFilePlayer {
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
         if self.playing_sources.contains_key(&playback_id) {
-            // pass stop request to mixer
-            if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::StopSource {
-                playback_id,
-                sample_time: stop_time,
-            }) {
-                log::error!("failed to send mixer event: {}", err);
-                return Err(Error::SendError);
-            }
+            // pass stop request to mixer (force push stop events!)
+            self.mixer_event_queue
+                .force_push(MixedSourceMsg::StopSource {
+                    playback_id,
+                    sample_time: stop_time,
+                });
             // NB: do not remove from playing_sources, as the event may apply in a long time in future.
             Ok(())
         } else {
@@ -463,23 +475,19 @@ impl AudioFilePlayer {
 
     /// Immediately stop all playing and possibly scheduled sources.
     pub fn stop_all_sources(&mut self) -> Result<(), Error> {
-        // stop everything which is playing now
-        let playing_source_ids = self
-            .playing_sources
-            .iter()
-            .map(|e| *e.key())
-            .collect::<Vec<_>>();
+        // stop everything that is playing now
+        let playing_source_ids = {
+            self.playing_sources
+                .iter()
+                .map(|e| *e.key())
+                .collect::<Vec<_>>()
+        };
         for source_id in playing_source_ids {
             self.stop_source(source_id)?;
         }
-        // remove all upcoming, scheduled sources in the mixer too
-        if let Err(err) = self
-            .mixer_event_sender
-            .send(MixedSourceMsg::RemoveAllPendingSources)
-        {
-            log::error!("failed to send mixer event: {}", err);
-            return Err(Error::SendError);
-        }
+        // remove all upcoming, scheduled sources in the mixer too (force push stop events!)
+        self.mixer_event_queue
+            .force_push(MixedSourceMsg::RemoveAllPendingSources);
         Ok(())
     }
 }

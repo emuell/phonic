@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 
 use crate::{
     player::{AudioSourceDropEvent, PlaybackMessageSender},
-    source::{
-        converted::ConvertedSource, resampled::ResamplingQuality, AudioSource, AudioSourceTime,
-    },
+    source::{AudioSource, AudioSourceTime},
     AudioFilePlaybackId,
 };
 
@@ -45,8 +44,7 @@ pub enum MixedSourceMsg {
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
-    event_send: Sender<MixedSourceMsg>,
-    event_recv: Receiver<MixedSourceMsg>,
+    event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
     drop_send: Sender<AudioSourceDropEvent>,
     channel_count: usize,
     sample_rate: u32,
@@ -62,15 +60,17 @@ impl MixedSource {
         sample_rate: u32,
         drop_send: Sender<AudioSourceDropEvent>,
     ) -> Self {
-        let (event_send, event_recv) = unbounded::<MixedSourceMsg>();
+        // assume that we'll never add more than on event per sample with a delay/buffer of a second
+        // even if we exceed this size, this won't panic, but will skip older events...
+        let event_queue_size = sample_rate as usize * 2;
+        let event_queue = Arc::new(ArrayQueue::new(event_queue_size));
         // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
         // avoid allocs in real-time threads
         const PLAYING_EVENTS_CAPACITY: usize = 1024;
         Self {
             playing_sources: Vec::with_capacity(PLAYING_EVENTS_CAPACITY),
-            event_recv,
-            event_send,
+            event_queue,
             drop_send,
             channel_count,
             sample_rate,
@@ -78,48 +78,10 @@ impl MixedSource {
         }
     }
 
-    /// Add a source to the mix
-    pub fn add(
-        &mut self,
-        playback_id: AudioFilePlaybackId,
-        playback_message_sender: PlaybackMessageSender,
-        source: impl AudioSource,
-        quality: ResamplingQuality,
-    ) {
-        let sample_time = 0;
-        self.add_at_sample_time(
-            playback_id,
-            playback_message_sender,
-            source,
-            sample_time,
-            quality,
-        );
-    }
-
-    /// Add a source to the mix scheduling it to play at the given absolute sample time.
-    pub fn add_at_sample_time(
-        &mut self,
-        playback_id: AudioFilePlaybackId,
-        playback_message_sender: PlaybackMessageSender,
-        source: impl AudioSource,
-        sample_time: u64,
-        quality: ResamplingQuality,
-    ) {
-        let converted = ConvertedSource::new(source, self.channel_count, self.sample_rate, quality);
-        if let Err(err) = self.event_send.send(MixedSourceMsg::AddSource {
-            playback_id,
-            playback_message_sender,
-            source: Arc::new(converted),
-            sample_time,
-        }) {
-            log::error!("Failed to add mixer source: {}", { err });
-        }
-    }
-
-    /// Allows controlling the mixer via a message channel.
+    /// Allows controlling the mixer by pushing messages into this event queue.
     /// NB: When adding new sources, ensure they match the mixers sample rate and channel layout
-    pub(crate) fn event_sender(&self) -> crossbeam_channel::Sender<MixedSourceMsg> {
-        self.event_send.clone()
+    pub(crate) fn event_queue(&self) -> Arc<ArrayQueue<MixedSourceMsg>> {
+        self.event_queue.clone()
     }
 
     /// remove all entries from self.playing_sources which match the given filter function.
@@ -158,7 +120,7 @@ impl AudioSource for MixedSource {
     fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
         // process events
         let mut got_new_sources = false;
-        while let Ok(event) = self.event_recv.try_recv() {
+        while let Some(event) = self.event_queue.pop() {
             match event {
                 MixedSourceMsg::AddSource {
                     playback_id,
@@ -257,7 +219,8 @@ impl AudioSource for MixedSource {
                     }
                 }
                 if samples_until_stop == 0 {
-                    if let Err(err) = playing_source.playback_message_sender.try_send_stop() {
+                    let sender = &playing_source.playback_message_sender;
+                    if let Err(err) = sender.try_send_stop() {
                         log::warn!("failed to send stop event: {}", err)
                     }
                     samples_until_stop = u64::MAX;
