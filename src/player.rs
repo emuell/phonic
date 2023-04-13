@@ -1,4 +1,4 @@
-use crossbeam_channel::{bounded, unbounded, Sender};
+use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
 use std::{any::Any, sync::Arc, time::Duration};
@@ -513,16 +513,16 @@ impl AudioFilePlayer {
         Sender<AudioFilePlaybackStatusEvent>,
         Sender<AudioSourceDropEvent>,
     ) {
-        let (drop_send, drop_recv) = bounded::<AudioSourceDropEvent>(128);
+        let (drop_send, drop_recv) = crossbeam_channel::bounded::<AudioSourceDropEvent>(128);
         let mut playing_sources_capacity = None;
         if let Some(playback_sender) = &playback_sender {
             playing_sources_capacity = playback_sender.capacity();
         }
         let (playback_send_proxy, playback_recv_proxy) = {
             if let Some(capacity) = playing_sources_capacity {
-                bounded::<AudioFilePlaybackStatusEvent>(capacity)
+                crossbeam_channel::bounded::<AudioFilePlaybackStatusEvent>(capacity)
             } else {
-                unbounded::<AudioFilePlaybackStatusEvent>()
+                crossbeam_channel::unbounded::<AudioFilePlaybackStatusEvent>()
             }
         };
 
@@ -539,6 +539,7 @@ impl AudioFilePlayer {
                                 playing_sources.remove(&id);
                             }
                             if let Some(sender) = &playback_sender {
+                                // NB: send and not try_send: block until sender queue is free
                                 if let Err(err) = sender.send(event) {
                                     log::warn!("failed to send file status message: {}", err);
                                 }

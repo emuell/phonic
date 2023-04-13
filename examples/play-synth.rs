@@ -27,7 +27,8 @@ fn main() -> Result<(), Error> {
     let audio_output = DefaultAudioOutput::open()?;
 
     // create channel for playback status events
-    let (status_sender, status_receiver) = crossbeam_channel::unbounded();
+    // Prefer using a bounded channel here to avoid memory allocations in the audio thread.
+    let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
     // create a source player
     let mut player = AudioFilePlayer::new(audio_output.sink(), Some(status_sender));
 

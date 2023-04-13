@@ -15,7 +15,7 @@ use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
+    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
     source::{resampled::ResamplingQuality, AudioSource, AudioSourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
@@ -117,7 +117,7 @@ impl StreamedFileSource {
             move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
         });
         actor.send(StreamedFileSourceMessage::Read)?;
-        
+
         // create event queue for the player
         let event_queue = Arc::new(ArrayQueue::new(128));
 
@@ -247,18 +247,18 @@ impl FileSource for StreamedFileSource {
 }
 
 impl AudioSource for StreamedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {        
+    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // consume playback messages
         while let Some(event) = self.event_queue.pop() {
             match event {
-                FilePlaybackMessage::Seek(position) => {
-                    if let Err(err) = self.actor.send(StreamedFileSourceMessage::Seek(position)) {
-                      log::warn!("failed to send playback event: {}", err)
+                FilePlaybackMessage::Seek(pos) => {
+                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Seek(pos)) {
+                        log::warn!("failed to send playback seek event: {}", err)
                     }
-                },
+                }
                 FilePlaybackMessage::Stop => {
-                    if let Err(err) = self.actor.send(StreamedFileSourceMessage::Stop) {
-                        log::warn!("failed to send playback event: {}", err)
+                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Stop) {
+                        log::warn!("failed to send playback stop event: {}", err)
                     }
                 }
             };
@@ -268,7 +268,7 @@ impl AudioSource for StreamedFileSource {
         if self.playback_finished {
             return 0;
         }
-        
+
         // fetch input from our ring-buffer and resample it
         let mut written = 0;
         while written < output.len() {

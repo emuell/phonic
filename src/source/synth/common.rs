@@ -192,7 +192,7 @@ where
         if stop_playing || is_exhausted || fade_out_finished {
             self.playback_finished = true;
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.send(AudioFilePlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
                     id: self.playback_id,
                     context: self.playback_status_context.clone(),
                     path: self.playback_name.clone(),

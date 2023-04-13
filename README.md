@@ -87,7 +87,8 @@ use dasp::Signal;
 let audio_output = DefaultAudioOutput::open()?;
 
 // Create an optional channel to receive playback status events ("Position", "Stopped" events)
-let (playback_status_sender, playback_status_receiver) = crossbeam_channel::unbounded();
+// Prefer using a bounded channel here to avoid memory allocations in the audio thread.
+let (playback_status_sender, playback_status_receiver) = crossbeam_channel::bounded(32);
 // Create a player and transfer ownership of the audio output to the player. The player will
 // play, mix down and manage all files and synth sources for us from here.
 let mut player = AudioFilePlayer::new(audio_output.sink(), Some(playback_status_sender));
