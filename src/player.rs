@@ -514,12 +514,13 @@ impl AudioFilePlayer {
         Sender<AudioSourceDropEvent>,
     ) {
         let (drop_send, drop_recv) = crossbeam_channel::bounded::<AudioSourceDropEvent>(128);
-        let mut playing_sources_capacity = None;
+        // use same capacity in proxy as original one
+        let mut playback_sender_proxy_capacity = None;
         if let Some(playback_sender) = &playback_sender {
-            playing_sources_capacity = playback_sender.capacity();
+            playback_sender_proxy_capacity = playback_sender.capacity();
         }
         let (playback_send_proxy, playback_recv_proxy) = {
-            if let Some(capacity) = playing_sources_capacity {
+            if let Some(capacity) = playback_sender_proxy_capacity {
                 crossbeam_channel::bounded::<AudioFilePlaybackStatusEvent>(capacity)
             } else {
                 crossbeam_channel::unbounded::<AudioFilePlaybackStatusEvent>()
