@@ -11,6 +11,14 @@ use afplay::{
     DefaultAudioOutput, Error, FilePlaybackOptions,
 };
 
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(all(debug_assertions, feature = "assert-no-alloc"))]
+#[global_allocator]
+static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
+// -------------------------------------------------------------------------------------------------
+
 fn main() -> Result<(), Error> {
     // Open default device
     let audio_output = DefaultAudioOutput::open()?;

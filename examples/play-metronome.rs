@@ -5,6 +5,14 @@ use afplay::{
     AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
 };
 
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(all(debug_assertions, feature = "assert-no-alloc"))]
+#[global_allocator]
+static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
+// -------------------------------------------------------------------------------------------------
+
 fn main() -> Result<(), Error> {
     // create a player
     let mut player = AudioFilePlayer::new(DefaultAudioOutput::open()?.sink(), None);

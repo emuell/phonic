@@ -16,6 +16,7 @@ audio_thread_priority = { version = "^0.26", default-features = false, features 
 rubato = { version = "0.12.0" }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
+assert_no_alloc = {version = "1.1.2", optional = true }
 dasp = { version = "0.11.0", features = [ "signal" ], optional = true }
 fundsp = { version = "0.9.0", optional = true }
 cubeb = { version = "0.10.1", optional = true }
@@ -40,6 +41,7 @@ opt-level = 2
 opt-level = 2
 
 [features]
+assert-no-alloc = ["assert_no_alloc"]
 cpal-output = ["cpal"]
 cubeb-output = ["cubeb", "windows"]
 dasp-synth = ["dasp"]
