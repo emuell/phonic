@@ -44,6 +44,7 @@ pub enum MixedSourceMsg {
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
+    stopped_sources: Vec<Arc<dyn AudioSource>>,
     event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
     drop_send: Sender<AudioSourceDropEvent>,
     channel_count: usize,
@@ -53,28 +54,29 @@ pub struct MixedSource {
 
 impl MixedSource {
     /// Create a new mixer source with the given signal specs.
-    /// Param `sample_time` is the intial sample frame time that we start to run with.
-    /// This usually will be the audio outputs playback pos.
     pub fn new(
         channel_count: usize,
         sample_rate: u32,
         drop_send: Sender<AudioSourceDropEvent>,
     ) -> Self {
+        // avoid allocs in real-time threads
+        const PLAYING_EVENTS_CAPACITY: usize = 1024;
+        let playing_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
+        let stopped_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
         // assume that we'll never add more than on event per sample with a delay/buffer of a second
-        // even if we exceed this size, this won't panic, but will skip older events...
-        let event_queue_size = sample_rate as usize * 2;
+        let event_queue_size = sample_rate as usize;
         let event_queue = Arc::new(ArrayQueue::new(event_queue_size));
         // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
-        // avoid allocs in real-time threads
-        const PLAYING_EVENTS_CAPACITY: usize = 1024;
+        let temp_out = vec![0.0; BUFFER_SIZE];
         Self {
-            playing_sources: Vec::with_capacity(PLAYING_EVENTS_CAPACITY),
+            playing_sources,
+            stopped_sources,
             event_queue,
             drop_send,
             channel_count,
             sample_rate,
-            temp_out: vec![0.0; BUFFER_SIZE],
+            temp_out,
         }
     }
 
@@ -89,18 +91,27 @@ impl MixedSource {
     where
         F: Fn(&MixedPlayingSource) -> bool,
     {
-        let drop_send = self.drop_send.clone();
-        self.playing_sources.retain(move |p| {
+        let stopped_sources = &mut self.stopped_sources;
+        self.playing_sources.retain(|p| {
             if match_fn(p) {
-                // drop it in the player's main thread if it has no other refs
-                if let Err(err) = drop_send.try_send(AudioSourceDropEvent::new(p.source.clone())) {
-                    log::warn!("failed to send drop source event: {}", err)
-                }
+                stopped_sources.push(p.source.clone());
                 false // remove
             } else {
                 true // keep
             }
         });
+        
+        // drop dead sources in the player's main thread if it has no other refs
+        let drop_send = self.drop_send.clone();
+        while !stopped_sources.is_empty() {
+            let last = stopped_sources.remove(stopped_sources.len() - 1);
+            if drop_send.try_send(AudioSourceDropEvent::new(last.clone())).is_err() {
+                // put it back and retry next time in case the channel is full
+                stopped_sources.push(last.clone());
+                break;
+            }
+        } 
+
     }
 
     /// remove all entries from self.playing_sources.
