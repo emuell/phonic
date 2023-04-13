@@ -206,7 +206,7 @@
 //! // calculate at which rate the sample file should be emitted
 //! let beats_per_min = 120.0;
 //! let samples_per_sec = player.output_sample_rate();
-//! let samples_per_beat = || -> f64 { samples_per_sec as f64 * 60.0 / beats_per_min as f64 };
+//! let samples_per_beat = samples_per_sec as f64 * 60.0 / beats_per_min as f64;
 //!
 //! // preload a sample file
 //! let preloaded_sample_source = PreloadedFileSource::new(
