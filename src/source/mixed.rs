@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
+use sort::bubble_sort_cmp;
 
 use crate::{
     player::{AudioSourceDropEvent, PlaybackMessageSender},
@@ -100,18 +101,20 @@ impl MixedSource {
                 true // keep
             }
         });
-        
+
         // drop dead sources in the player's main thread if it has no other refs
         let drop_send = self.drop_send.clone();
         while !stopped_sources.is_empty() {
             let last = stopped_sources.remove(stopped_sources.len() - 1);
-            if drop_send.try_send(AudioSourceDropEvent::new(last.clone())).is_err() {
+            if drop_send
+                .try_send(AudioSourceDropEvent::new(last.clone()))
+                .is_err()
+            {
                 // put it back and retry next time in case the channel is full
                 stopped_sources.push(last.clone());
                 break;
             }
-        } 
-
+        }
     }
 
     /// remove all entries from self.playing_sources.
@@ -180,9 +183,11 @@ impl AudioSource for MixedSource {
             }
         }
         // keep sources sorted by sample time: this makes batch processing easier
+        // NB: use "swap" based sorting here to avoid memory allocations 
         if got_new_sources {
-            self.playing_sources
-                .sort_by(|a, b| a.start_time.cmp(&b.start_time));
+            bubble_sort_cmp(&mut self.playing_sources, |a, b| {
+                a.start_time.cmp(&b.start_time) as isize
+            });
         }
 
         // return empty handed when we have no sources
