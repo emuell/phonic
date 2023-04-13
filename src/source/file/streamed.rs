@@ -8,6 +8,7 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
 
@@ -30,9 +31,22 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+/// Events to control the decoder thread of a streamed FileSource
+pub enum StreamedFileSourceMessage {
+    /// Seek the decoder to a new position
+    Seek(Duration),
+    /// Start reading streamed source
+    Read,
+    /// Stop the decoder
+    Stop,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// A source which streams & decodes an audio file asynchromiously in a worker thread.
 pub struct StreamedFileSource {
-    actor: ActorHandle<FilePlaybackMessage>,
+    actor: ActorHandle<StreamedFileSourceMessage>,
+    event_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
     file_id: usize,
     file_path: Arc<String>,
     volume: f32,
@@ -102,7 +116,10 @@ impl StreamedFileSource {
             let repeat = options.repeat;
             move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
         });
-        actor.send(FilePlaybackMessage::Read)?;
+        actor.send(StreamedFileSourceMessage::Read)?;
+        
+        // create event queue for the player
+        let event_queue = Arc::new(ArrayQueue::new(128));
 
         // create volume fader
         let mut volume_fader = VolumeFader::new(signal_spec.channels.count(), signal_spec.rate);
@@ -141,6 +158,7 @@ impl StreamedFileSource {
 
         Ok(Self {
             actor,
+            event_queue,
             file_id,
             file_path: Arc::new(file_path.into()),
             volume,
@@ -196,8 +214,8 @@ impl FileSource for StreamedFileSource {
         self.file_id
     }
 
-    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
-        self.actor.sender()
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
+        self.event_queue.clone()
     }
 
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
@@ -229,11 +247,28 @@ impl FileSource for StreamedFileSource {
 }
 
 impl AudioSource for StreamedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {        
+        // consume playback messages
+        while let Some(event) = self.event_queue.pop() {
+            match event {
+                FilePlaybackMessage::Seek(position) => {
+                    if let Err(err) = self.actor.send(StreamedFileSourceMessage::Seek(position)) {
+                      log::warn!("failed to send playback event: {}", err)
+                    }
+                },
+                FilePlaybackMessage::Stop => {
+                    if let Err(err) = self.actor.send(StreamedFileSourceMessage::Stop) {
+                        log::warn!("failed to send playback event: {}", err)
+                    }
+                }
+            };
+        }
+
         // return empty handed when playback finished
         if self.playback_finished {
             return 0;
         }
+        
         // fetch input from our ring-buffer and resample it
         let mut written = 0;
         while written < output.len() {
@@ -351,7 +386,7 @@ impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
         self.fade_out_duration = None;
-        let _ = self.actor.send(FilePlaybackMessage::Stop);
+        let _ = self.actor.send(StreamedFileSourceMessage::Stop);
     }
 }
 
@@ -377,7 +412,7 @@ struct SharedFileWorkerState {
 
 struct StreamedFileWorker {
     /// Sending part of our own actor channel.
-    this: Sender<FilePlaybackMessage>,
+    this: Sender<StreamedFileSourceMessage>,
     /// Decoder we are reading packets/samples from.
     input: AudioDecoder,
     /// Audio properties of the decoded signal.
@@ -407,7 +442,7 @@ impl StreamedFileWorker {
     }
 
     fn new(
-        this: Sender<FilePlaybackMessage>,
+        this: Sender<StreamedFileSourceMessage>,
         input: AudioDecoder,
         output: SpscRb<f32>,
         shared_state: SharedFileWorkerState,
@@ -447,14 +482,14 @@ impl StreamedFileWorker {
 }
 
 impl Actor for StreamedFileWorker {
-    type Message = FilePlaybackMessage;
+    type Message = StreamedFileSourceMessage;
     type Error = Error;
 
-    fn handle(&mut self, msg: FilePlaybackMessage) -> Result<Act<Self>, Self::Error> {
+    fn handle(&mut self, msg: StreamedFileSourceMessage) -> Result<Act<Self>, Self::Error> {
         match msg {
-            FilePlaybackMessage::Seek(time) => self.on_seek(time),
-            FilePlaybackMessage::Read => self.on_read(),
-            FilePlaybackMessage::Stop => self.on_stop(),
+            StreamedFileSourceMessage::Seek(time) => self.on_seek(time),
+            StreamedFileSourceMessage::Read => self.on_read(),
+            StreamedFileSourceMessage::Stop => self.on_stop(),
         }
     }
 }
@@ -468,7 +503,7 @@ impl StreamedFileWorker {
                 .store(true, Ordering::Relaxed);
             // keep running until fade-out completed
             if !self.is_reading {
-                self.this.send(FilePlaybackMessage::Read)?;
+                self.this.send(StreamedFileSourceMessage::Read)?;
             }
             Ok(Act::Continue)
         } else {
@@ -485,7 +520,7 @@ impl StreamedFileWorker {
                 if self.is_reading {
                     self.samples_to_write = 0..0;
                 } else {
-                    self.this.send(FilePlaybackMessage::Read)?;
+                    self.this.send(StreamedFileSourceMessage::Read)?;
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
@@ -514,7 +549,7 @@ impl StreamedFileWorker {
                 self.samples_written += written as u64;
                 self.samples_to_write.start += written;
                 self.is_reading = true;
-                self.this.send(FilePlaybackMessage::Read)?;
+                self.this.send(StreamedFileSourceMessage::Read)?;
                 Ok(Act::Continue)
             } else {
                 // Buffer is full.  Wait a bit a try again.  We also have to indicate that the
@@ -523,7 +558,7 @@ impl StreamedFileWorker {
                 self.is_reading = false;
                 Ok(Act::WaitOr {
                     timeout: Duration::from_millis(500),
-                    timeout_msg: FilePlaybackMessage::Read,
+                    timeout_msg: StreamedFileSourceMessage::Read,
                 })
             }
         } else {
@@ -533,7 +568,7 @@ impl StreamedFileWorker {
                     // continue reading
                     self.samples_to_write = 0..self.input_packet.samples().len();
                     self.is_reading = true;
-                    self.this.send(FilePlaybackMessage::Read)?;
+                    self.this.send(StreamedFileSourceMessage::Read)?;
                 }
                 None => {
                     // reached EOF
@@ -547,7 +582,7 @@ impl StreamedFileWorker {
                         self.samples_to_write = 0..0;
                         self.shared_state.position.store(0, Ordering::Relaxed);
                         self.is_reading = true;
-                        self.this.send(FilePlaybackMessage::Read)?;
+                        self.this.send(StreamedFileSourceMessage::Read)?;
                     } else {
                         // stop reading and mark as exhausted
                         self.is_reading = false;

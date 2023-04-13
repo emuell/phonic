@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 use dasp::{signal::UntilExhausted, Signal};
 
 use crate::{
@@ -91,8 +94,8 @@ where
         self.0.playback_id()
     }
 
-    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
-        self.0.playback_message_sender()
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>> {
+        self.0.playback_message_queue()
     }
 
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {

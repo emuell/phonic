@@ -1,6 +1,7 @@
 use std::{time::{Duration, Instant}, sync::Arc};
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
@@ -33,8 +34,7 @@ where
     generator: Box<Generator>,
     sample_rate: u32,
     volume_fader: VolumeFader,
-    playback_message_send: Sender<SynthPlaybackMessage>,
-    playback_message_recv: Receiver<SynthPlaybackMessage>,
+    playback_message_queue: Arc<ArrayQueue<SynthPlaybackMessage>>,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_status_context: Option<AudioFilePlaybackStatusContext>,
     playback_id: AudioFilePlaybackId,
@@ -65,13 +65,12 @@ where
         if let Some(duration) = options.fade_in_duration {
             volume_fader.start_fade_in(duration);
         }
-        let (send, recv) = unbounded::<SynthPlaybackMessage>();
+        let playback_message_queue = Arc::new(ArrayQueue::new(128));
         Ok(Self {
             generator: Box::new(generator),
             sample_rate,
             volume_fader,
-            playback_message_send: send,
-            playback_message_recv: recv,
+            playback_message_queue,
             playback_status_send: event_send,
             playback_id: unique_usize_id(),
             playback_status_context: None,
@@ -108,8 +107,8 @@ where
         self.playback_id
     }
 
-    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage> {
-        self.playback_message_send.clone()
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>> {
+        self.playback_message_queue.clone()
     }
 
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
@@ -134,7 +133,7 @@ where
     fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
-        if let Ok(msg) = self.playback_message_recv.try_recv() {
+        if let Some(msg) = self.playback_message_queue.pop() {
             match msg {
                 SynthPlaybackMessage::Stop => {
                     if let Some(duration) = self.playback_options.fade_out_duration {

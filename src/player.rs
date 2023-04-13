@@ -87,17 +87,31 @@ impl AudioSourceDropEvent {
 /// Wraps File and Synth Playback messages together into one object, allowing to easily stop them.
 #[derive(Clone)]
 pub enum PlaybackMessageSender {
-    File(Sender<FilePlaybackMessage>),
-    Synth(Sender<SynthPlaybackMessage>),
+    File(Arc<ArrayQueue<FilePlaybackMessage>>),
+    Synth(Arc<ArrayQueue<SynthPlaybackMessage>>),
 }
 
 impl PlaybackMessageSender {
-    pub fn try_send_stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn force_send_stop(&self) {
         match self {
-            PlaybackMessageSender::File(sender) => sender.try_send(FilePlaybackMessage::Stop)?,
-            PlaybackMessageSender::Synth(sender) => sender.try_send(SynthPlaybackMessage::Stop)?,
+            PlaybackMessageSender::File(sender) => {
+                sender.force_push(FilePlaybackMessage::Stop);
+            }
+            PlaybackMessageSender::Synth(sender) => {
+                sender.force_push(SynthPlaybackMessage::Stop);
+            }
         };
-        Ok(())
+    }
+
+    pub fn send_stop(&self) -> Result<(), Error>{
+        match self {
+            PlaybackMessageSender::File(sender) => {
+                sender.push(FilePlaybackMessage::Stop).map_err(|_err| Error::SendError)
+            }
+            PlaybackMessageSender::Synth(sender) => {
+                sender.push(SynthPlaybackMessage::Stop).map_err(|_err| Error::SendError)
+            }
+        }
     }
 }
 
@@ -233,10 +247,10 @@ impl AudioFilePlayer {
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
-        let playback_message_sender =
-            PlaybackMessageSender::File(file_source.playback_message_sender());
+        let playback_message_queue =
+            PlaybackMessageSender::File(file_source.playback_message_queue());
         self.playing_sources
-            .insert(playback_id, playback_message_sender.clone());
+            .insert(playback_id, playback_message_queue.clone());
         // convert file to mixer's rate and channel layout and apply optional pitch
         let converted_source = ConvertedSource::new(
             file_source,
@@ -249,7 +263,7 @@ impl AudioFilePlayer {
             .mixer_event_queue
             .push(MixedSourceMsg::AddSource {
                 playback_id,
-                playback_message_sender,
+                playback_message_queue,
                 source: Arc::new(converted_source),
                 sample_time: start_time.unwrap_or(0),
             })
@@ -376,10 +390,10 @@ impl AudioFilePlayer {
         synth_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = synth_source.playback_id();
-        let playback_message_sender =
-            PlaybackMessageSender::Synth(synth_source.playback_message_sender());
+        let playback_message_queue =
+            PlaybackMessageSender::Synth(synth_source.playback_message_queue());
         self.playing_sources
-            .insert(playback_id, playback_message_sender.clone());
+            .insert(playback_id, playback_message_queue.clone());
         // convert file to mixer's rate and channel layout
         let converted = ConvertedSource::new(
             synth_source,
@@ -392,7 +406,7 @@ impl AudioFilePlayer {
             .mixer_event_queue
             .push(MixedSourceMsg::AddSource {
                 playback_id,
-                playback_message_sender,
+                playback_message_queue,
                 source: Arc::new(converted),
                 sample_time: start_time.unwrap_or(0),
             })
@@ -413,9 +427,10 @@ impl AudioFilePlayer {
         position: Duration,
     ) -> Result<(), Error> {
         if let Some(msg_sender) = self.playing_sources.get(&playback_id) {
-            if let PlaybackMessageSender::File(sender) = msg_sender.value() {
-                if let Err(err) = sender.send(FilePlaybackMessage::Seek(position)) {
-                    log::warn!("failed to send seek command to file: {}", err.to_string());
+            if let PlaybackMessageSender::File(queue) = msg_sender.value() {
+                if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
+                    log::warn!("failed to send seek command to file");
+                    return Err(Error::SendError);
                 }
             } else {
                 log::warn!("trying to seek a synth source, which is not supported");
@@ -431,12 +446,9 @@ impl AudioFilePlayer {
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
         let stopped = match self.playing_sources.get(&playback_id) {
-            Some(msg_sender) => {
-                if let Err(err) = msg_sender.value().try_send_stop() {
-                    log::warn!(
-                        "failed to send stop command to file source: {}",
-                        err.to_string()
-                    );
+            Some(msg_queue) => {
+                if msg_queue.value().send_stop().is_err() {
+                    return Err(Error::SendError);
                 }
                 true
             }

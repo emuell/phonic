@@ -1,6 +1,7 @@
-use std::time::Duration;
+use std::{time::Duration, sync::Arc};
 
 use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 
 use crate::{
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
@@ -112,8 +113,8 @@ pub trait SynthSource: AudioSource {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
     fn playback_id(&self) -> AudioFilePlaybackId;
 
-    /// Channel sender to control this sources's playback.
-    fn playback_message_sender(&self) -> Sender<SynthPlaybackMessage>;
+    /// Message queue to control this sources's playback.
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>>;
 
     /// Channel to receive file playback status from the synth.
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;

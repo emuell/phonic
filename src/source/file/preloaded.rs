@@ -3,7 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 use symphonia::core::audio::SampleBuffer;
 
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
@@ -47,8 +48,7 @@ pub struct PreloadedFileSource {
     resampler: Box<dyn AudioResampler>,
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
-    playback_message_send: Sender<FilePlaybackMessage>,
-    playback_message_receive: Receiver<FilePlaybackMessage>,
+    playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
     playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
     playback_status_context: Option<AudioFilePlaybackStatusContext>,
     playback_pos_report_instant: Instant,
@@ -123,8 +123,8 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
-        // create a channel for playback messages
-        let (playback_message_send, playback_message_receive) = unbounded::<FilePlaybackMessage>();
+        // create a queue for playback messages
+        let playback_message_queue = Arc::new(ArrayQueue::new(128));
 
         // create new volume fader
         let mut volume_fader = VolumeFader::new(buffer_channel_count, buffer_sample_rate);
@@ -172,8 +172,7 @@ impl PreloadedFileSource {
             resampler,
             resampler_input_buffer,
             output_sample_rate,
-            playback_message_receive,
-            playback_message_send,
+            playback_message_queue,
             playback_status_send,
             playback_status_context,
             playback_pos_report_instant: Instant::now(),
@@ -241,8 +240,8 @@ impl FileSource for PreloadedFileSource {
         self.file_id
     }
 
-    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage> {
-        self.playback_message_send.clone()
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
+        self.playback_message_queue.clone()
     }
 
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
@@ -275,7 +274,7 @@ impl FileSource for PreloadedFileSource {
 impl AudioSource for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
         // consume playback messages
-        while let Ok(msg) = self.playback_message_receive.try_recv() {
+        while let Some(msg) = self.playback_message_queue.pop() {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
                     let buffer_pos = position.as_secs_f64()
@@ -284,7 +283,6 @@ impl AudioSource for PreloadedFileSource {
                     self.buffer_pos = (buffer_pos as usize).clamp(0, self.buffer.len());
                     self.resampler.reset();
                 }
-                FilePlaybackMessage::Read => (),
                 FilePlaybackMessage::Stop => {
                     if let Some(duration) = self.fade_out_duration {
                         if !duration.is_zero() {

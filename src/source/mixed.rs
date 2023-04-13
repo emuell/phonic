@@ -15,7 +15,7 @@ use crate::{
 struct MixedPlayingSource {
     is_active: bool,
     playback_id: AudioFilePlaybackId,
-    playback_message_sender: PlaybackMessageSender,
+    playback_message_queue: PlaybackMessageSender,
     source: Arc<dyn AudioSource>,
     start_time: u64,
     stop_time: Option<u64>,
@@ -27,7 +27,7 @@ struct MixedPlayingSource {
 pub enum MixedSourceMsg {
     AddSource {
         playback_id: AudioFilePlaybackId,
-        playback_message_sender: PlaybackMessageSender,
+        playback_message_queue: PlaybackMessageSender,
         source: Arc<dyn AudioSource>,
         sample_time: u64,
     },
@@ -124,7 +124,7 @@ impl AudioSource for MixedSource {
             match event {
                 MixedSourceMsg::AddSource {
                     playback_id,
-                    playback_message_sender,
+                    playback_message_queue,
                     source,
                     sample_time,
                 } => {
@@ -142,7 +142,7 @@ impl AudioSource for MixedSource {
                     self.playing_sources.push(MixedPlayingSource {
                         is_active: true,
                         playback_id,
-                        playback_message_sender,
+                        playback_message_queue,
                         source,
                         start_time: sample_time,
                         stop_time: None,
@@ -219,8 +219,8 @@ impl AudioSource for MixedSource {
                     }
                 }
                 if samples_until_stop == 0 {
-                    let sender = &playing_source.playback_message_sender;
-                    if let Err(err) = sender.try_send_stop() {
+                    let sender = &playing_source.playback_message_queue;
+                    if let Err(err) = sender.send_stop() {
                         log::warn!("failed to send stop event: {}", err)
                     }
                     samples_until_stop = u64::MAX;

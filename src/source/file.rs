@@ -1,9 +1,10 @@
 pub mod preloaded;
 pub mod streamed;
 
-use std::time::Duration;
+use std::{time::Duration, sync::Arc};
 
 use crossbeam_channel::Sender;
+use crossbeam_queue::ArrayQueue;
 
 use crate::{
     player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
@@ -153,8 +154,6 @@ impl FilePlaybackOptions {
 pub enum FilePlaybackMessage {
     /// Seek the file source to a new position
     Seek(Duration),
-    /// Start reading streamed sources (internally used only)
-    Read,
     /// Stop the source
     Stop,
 }
@@ -166,9 +165,9 @@ pub trait FileSource: AudioSource {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> AudioFilePlaybackId;
 
-    /// Channel to control file playback.
-    fn playback_message_sender(&self) -> Sender<FilePlaybackMessage>;
-
+    /// Message queue to control file playback.
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>>;
+    
     /// Channel to receive playback status from the file.
     fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
     fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
