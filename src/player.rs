@@ -1,10 +1,6 @@
+use dashmap::DashMap;
 use crossbeam_channel::{unbounded, Sender};
-use std::{
-    any::Any,
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use crate::{
     error::Error,
@@ -116,7 +112,7 @@ impl PlaybackMessageSender {
 /// NB: For playback of [`SynthSource`]s, the `dasp-synth` feature needs to be enabled.
 pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
-    playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
+    playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
     playback_status_sender: Sender<AudioFilePlaybackStatusEvent>,
     mixer_event_sender: Sender<MixedSourceMsg>,
 }
@@ -130,9 +126,9 @@ impl AudioFilePlayer {
         playback_status_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
     ) -> Self {
         // Create a proxy for the playback status channel, so we can trap stop messages
-        let playing_sources = Arc::new(Mutex::new(HashMap::new()));
+        let playing_sources = Arc::new(DashMap::with_capacity(1024));
         let (playback_status_sender_proxy, drain_send) =
-            Self::handle_events(playback_status_sender, Arc::clone(&playing_sources));
+            Self::handle_events(playback_status_sender, playing_sources.clone());
         // Create a mixer source, add it to the audio sink and start running
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate(), drain_send);
         let mixer_event_sender = mixer_source.event_sender();
@@ -238,8 +234,8 @@ impl AudioFilePlayer {
         let playback_id = file_source.playback_id();
         let playback_message_sender =
             PlaybackMessageSender::File(file_source.playback_message_sender());
-        let mut playing_sources = self.playing_sources.lock().unwrap();
-        playing_sources.insert(playback_id, playback_message_sender.clone());
+        self.playing_sources
+            .insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout and apply optional pitch
         let converted_source = ConvertedSource::new(
             file_source,
@@ -377,8 +373,8 @@ impl AudioFilePlayer {
         let playback_id = synth_source.playback_id();
         let playback_message_sender =
             PlaybackMessageSender::Synth(synth_source.playback_message_sender());
-        let mut playing_sources = self.playing_sources.lock().unwrap();
-        playing_sources.insert(playback_id, playback_message_sender.clone());
+        self.playing_sources
+            .insert(playback_id, playback_message_sender.clone());
         // convert file to mixer's rate and channel layout
         let converted = ConvertedSource::new(
             synth_source,
@@ -407,9 +403,8 @@ impl AudioFilePlayer {
         playback_id: AudioFilePlaybackId,
         position: Duration,
     ) -> Result<(), Error> {
-        let playing_sources = self.playing_sources.lock().unwrap();
-        if let Some(msg_sender) = playing_sources.get(&playback_id) {
-            if let PlaybackMessageSender::File(sender) = msg_sender {
+        if let Some(msg_sender) = self.playing_sources.get(&playback_id) {
+            if let PlaybackMessageSender::File(sender) = msg_sender.value() {
                 if let Err(err) = sender.send(FilePlaybackMessage::Seek(position)) {
                     log::warn!("failed to send seek command to file: {}", err.to_string());
                 }
@@ -426,9 +421,8 @@ impl AudioFilePlayer {
     /// Immediately stop a playing file or synth source. NB: This will fade-out the source when a
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: AudioFilePlaybackId) -> Result<(), Error> {
-        let mut playing_sources = self.playing_sources.lock().unwrap();
-        if let Some(msg_sender) = playing_sources.get(&playback_id) {
-            if let Err(err) = msg_sender.try_send_stop() {
+        if let Some(msg_sender) = self.playing_sources.get(&playback_id) {
+            if let Err(err) = msg_sender.value().try_send_stop() {
                 log::warn!(
                     "failed to send stop command to file source: {}",
                     err.to_string()
@@ -436,7 +430,7 @@ impl AudioFilePlayer {
             }
             // we shortly will receive an Exhaused event which removes the source, but neverthless
             // remove it now, to force all following attempts to stop this source to fail
-            playing_sources.remove(&playback_id);
+            self.playing_sources.remove(&playback_id);
             return Ok(());
         } else {
             // log::warn!("trying to stop source #{playback_id} which is not or no longer playing");
@@ -451,8 +445,7 @@ impl AudioFilePlayer {
         stop_time: u64,
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
-        let playing_sources = self.playing_sources.lock().unwrap();
-        if playing_sources.contains_key(&playback_id) {
+        if self.playing_sources.contains_key(&playback_id) {
             // pass stop request to mixer
             if let Err(err) = self.mixer_event_sender.send(MixedSourceMsg::StopSource {
                 playback_id,
@@ -471,11 +464,11 @@ impl AudioFilePlayer {
     /// Immediately stop all playing and possibly scheduled sources.
     pub fn stop_all_sources(&mut self) -> Result<(), Error> {
         // stop everything which is playing now
-        let playing_source_ids: Vec<AudioFilePlaybackId>;
-        {
-            let playing_sources = self.playing_sources.lock().unwrap();
-            playing_source_ids = playing_sources.keys().copied().collect();
-        }
+        let playing_source_ids = self
+            .playing_sources
+            .iter()
+            .map(|e| *e.key())
+            .collect::<Vec<_>>();
         for source_id in playing_source_ids {
             self.stop_source(source_id)?;
         }
@@ -495,7 +488,7 @@ impl AudioFilePlayer {
 impl AudioFilePlayer {
     fn handle_events(
         playback_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
-        playing_sources: Arc<Mutex<HashMap<AudioFilePlaybackId, PlaybackMessageSender>>>,
+        playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
     ) -> (
         Sender<AudioFilePlaybackStatusEvent>,
         Sender<AudioSourceDropEvent>,
@@ -519,7 +512,7 @@ impl AudioFilePlayer {
                             path: _,
                             exhausted: _,
                             } = event {
-                                playing_sources.lock().unwrap().remove(&id);
+                                playing_sources.remove(&id);
                             }
                             if let Some(sender) = &playback_sender {
                                 if let Err(err) = sender.send(event) {
