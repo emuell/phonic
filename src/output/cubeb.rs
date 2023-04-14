@@ -80,7 +80,7 @@ impl Stream {
         // Call CoInitialize() before any other calls to the API.
         #[cfg(target_os = "windows")]
         unsafe {
-            if let Err(err) = windows::Win32::System::Com::CoInitialize(std::ptr::null_mut()) {
+            if let Err(err) = windows::Win32::System::Com::CoInitialize(None) {
                 log::error!("CoInitialize failed: {}", err);
             }
         };
