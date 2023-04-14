@@ -45,7 +45,7 @@ pub enum MixedSourceMsg {
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
-    stopped_sources: Vec<Arc<dyn AudioSource>>,
+    dead_sources: Vec<Arc<dyn AudioSource>>,
     event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
     drop_send: Sender<AudioSourceDropEvent>,
     channel_count: usize,
@@ -63,16 +63,19 @@ impl MixedSource {
         // avoid allocs in real-time threads
         const PLAYING_EVENTS_CAPACITY: usize = 1024;
         let playing_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
-        let stopped_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
-        // assume that we'll never add more than on event per sample with a delay/buffer of a second
-        let event_queue_size = sample_rate as usize;
-        let event_queue = Arc::new(ArrayQueue::new(event_queue_size));
+        let dead_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
+
+        // assume that we'll never start/stop more than 4096 samples per write batch
+        const EVENT_QUEUE_SIZE: usize = 4096;
+        let event_queue = Arc::new(ArrayQueue::new(EVENT_QUEUE_SIZE));
+        
         // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
         let temp_out = vec![0.0; BUFFER_SIZE];
+        
         Self {
             playing_sources,
-            stopped_sources,
+            dead_sources,
             event_queue,
             drop_send,
             channel_count,
@@ -92,26 +95,28 @@ impl MixedSource {
     where
         F: Fn(&MixedPlayingSource) -> bool,
     {
-        let stopped_sources = &mut self.stopped_sources;
-        self.playing_sources.retain(|p| {
-            if match_fn(p) {
-                stopped_sources.push(p.source.clone());
-                false // remove
-            } else {
-                true // keep
+        self.playing_sources.retain({
+            let dead_sources = &mut self.dead_sources;
+            move |p| {
+                if match_fn(p) {
+                    dead_sources.push(p.source.clone());
+                    false // remove
+                } else {
+                    true // keep
+                }
             }
         });
 
         // drop dead sources in the player's main thread if it has no other refs
-        let drop_send = self.drop_send.clone();
-        while !stopped_sources.is_empty() {
-            let last = stopped_sources.remove(stopped_sources.len() - 1);
-            if drop_send
+        while !self.dead_sources.is_empty() {
+            let last = self.dead_sources.remove(self.dead_sources.len() - 1);
+            if self
+                .drop_send
                 .try_send(AudioSourceDropEvent::new(last.clone()))
                 .is_err()
             {
                 // put it back and retry next time in case the channel is full
-                stopped_sources.push(last.clone());
+                self.dead_sources.push(last);
                 break;
             }
         }
@@ -119,14 +124,7 @@ impl MixedSource {
 
     /// remove all entries from self.playing_sources.
     fn remove_all_sources(&mut self) {
-        let drop_send = self.drop_send.clone();
-        for p in self.playing_sources.iter() {
-            // drop it in the player's main thread if it has no other refs
-            if let Err(err) = drop_send.try_send(AudioSourceDropEvent::new(p.source.clone())) {
-                log::warn!("failed to send drop source event: {}", err)
-            }
-        }
-        self.playing_sources.clear();
+        self.remove_matching_sources(|_| true);
     }
 }
 
@@ -183,7 +181,7 @@ impl AudioSource for MixedSource {
             }
         }
         // keep sources sorted by sample time: this makes batch processing easier
-        // NB: use "swap" based sorting here to avoid memory allocations 
+        // NB: use "swap" based sorting here to avoid memory allocations
         if got_new_sources {
             bubble_sort_cmp(&mut self.playing_sources, |a, b| {
                 a.start_time.cmp(&b.start_time) as isize
