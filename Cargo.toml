@@ -10,6 +10,7 @@ categories = ["audio", "synth", "music", "gamedev"]
 [dependencies]
 log = { version = "^0.4", features = ["max_level_debug", "release_max_level_info"] }
 lazy_static = { version = "^1.4" }
+cfg-if = { version = "^1.0" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^5.4" }

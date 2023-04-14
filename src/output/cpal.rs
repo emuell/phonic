@@ -1,6 +1,3 @@
-#[cfg(feature = "assert-no-alloc")]
-use assert_no_alloc::*;
-
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -9,7 +6,12 @@ use std::{
     time::Instant,
 };
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(feature = "assert-no-alloc")]
+use assert_no_alloc::*;
+
+use cfg_if::cfg_if;
+
+use cpal::{traits::{DeviceTrait, HostTrait, StreamTrait}, StreamConfig};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
@@ -18,6 +20,19 @@ use crate::{
     source::{empty::EmptySource, AudioSource, AudioSourceTime},
     utils::actor::{Act, Actor, ActorHandle},
 };
+
+// -------------------------------------------------------------------------------------------------
+
+const PREFERRED_SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
+const PREFERRED_SAMPLE_RATE: cpal::SampleRate = cpal::SampleRate(44100);
+const PREFERRED_CHANNELS: cpal::ChannelCount = 2;
+cfg_if! {
+    if #[cfg(debug_assertions)] {
+        const PREFERRED_BUFFER_SIZE: cpal::BufferSize = cpal::BufferSize::Default;
+    } else {
+        const PREFERRED_BUFFER_SIZE: cpal::BufferSize = cpal::BufferSize::Fixed(2048);
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -46,7 +61,10 @@ impl CpalOutput {
         let (callback_send, callback_recv) = bounded(16);
 
         let handle = Stream::spawn_with_default_cap("audio_output", {
-            let config = supported.config();
+            let config = StreamConfig {
+                buffer_size: PREFERRED_BUFFER_SIZE,
+                ..supported.config()
+            };
             let playback_pos = Arc::clone(&playback_pos);
             move |this| Stream::open(device, config, playback_pos, callback_recv, this).unwrap()
         });
@@ -68,10 +86,6 @@ impl CpalOutput {
     fn preferred_output_config(
         device: &cpal::Device,
     ) -> Result<cpal::SupportedStreamConfig, Error> {
-        const PREFERRED_SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
-        const PREFERRED_SAMPLE_RATE: cpal::SampleRate = cpal::SampleRate(44_100);
-        const PREFERRED_CHANNELS: cpal::ChannelCount = 2;
-
         for s in device.supported_output_configs()? {
             let rates = s.min_sample_rate()..=s.max_sample_rate();
             if s.channels() == PREFERRED_CHANNELS
@@ -202,7 +216,7 @@ impl Stream {
             |err| {
                 log::error!("audio output error: {}", err);
             },
-            None
+            None,
         )?;
 
         Ok(Self {
