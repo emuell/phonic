@@ -1,7 +1,18 @@
+use core::time;
+use std::{
+    any::Any,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+
+use basedrop::{Collector, Handle, Owned};
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
-use std::{any::Any, sync::Arc, time::Duration};
 
 use crate::{
     error::Error,
@@ -16,7 +27,6 @@ use crate::{
         resampled::ResamplingQuality,
         synth::SynthPlaybackMessage,
     },
-    AudioSource,
 };
 
 #[cfg(any(feature = "dasp", feature = "fundsp"))]
@@ -68,22 +78,6 @@ pub enum AudioFilePlaybackStatusEvent {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Event send back from Mixer to the Player drop exhausted sources, avoiding that this happens
-/// in the Mixer's real-time thread.
-#[derive(Clone)]
-pub struct AudioSourceDropEvent {
-    #[allow(dead_code)]
-    source: Arc<dyn AudioSource>,
-}
-
-impl AudioSourceDropEvent {
-    pub fn new(source: Arc<dyn AudioSource>) -> Self {
-        Self { source }
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// Wraps File and Synth Playback messages together into one object, allowing to easily stop them.
 #[derive(Clone)]
 pub enum PlaybackMessageSender {
@@ -129,6 +123,8 @@ pub struct AudioFilePlayer {
     sink: DefaultAudioSink,
     playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
     playback_status_sender: Sender<AudioFilePlaybackStatusEvent>,
+    collector_handle: Handle,
+    collector_running: Arc<AtomicBool>,
     mixer_event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
 }
 
@@ -142,18 +138,28 @@ impl AudioFilePlayer {
     ) -> Self {
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(DashMap::with_capacity(1024));
-        let (playback_status_sender_proxy, drain_send) =
-            Self::handle_events(playback_status_sender, playing_sources.clone());
+        let playback_status_sender_proxy =
+            Self::handle_playback_events(playback_status_sender, playing_sources.clone());
+
+        // Create audio garbage collector and thread
+        let collector = Collector::new();
+        let collector_handle = collector.handle();
+        let collector_running = Arc::new(AtomicBool::new(true));
+        Self::handle_drop_collects(collector, collector_running.clone());
+
         // Create a mixer source, add it to the audio sink and start running
-        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate(), drain_send);
+        let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
         let mixer_event_queue = mixer_source.event_queue();
         let mut sink = sink;
         sink.play(mixer_source);
         sink.resume();
+
         Self {
             sink,
             playing_sources,
             playback_status_sender: playback_status_sender_proxy,
+            collector_handle,
+            collector_running,
             mixer_event_queue,
         }
     }
@@ -264,7 +270,7 @@ impl AudioFilePlayer {
             .push(MixedSourceMsg::AddSource {
                 playback_id,
                 playback_message_queue,
-                source: Arc::new(converted_source),
+                source: Owned::new(&self.collector_handle, Box::new(converted_source)),
                 sample_time: start_time.unwrap_or(0),
             })
             .is_err()
@@ -407,7 +413,7 @@ impl AudioFilePlayer {
             .push(MixedSourceMsg::AddSource {
                 playback_id,
                 playback_message_queue,
-                source: Arc::new(converted),
+                source: Owned::new(&self.collector_handle, Box::new(converted)),
                 sample_time: start_time.unwrap_or(0),
             })
             .is_err()
@@ -506,14 +512,10 @@ impl AudioFilePlayer {
 
 /// details
 impl AudioFilePlayer {
-    fn handle_events(
+    fn handle_playback_events(
         playback_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
         playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
-    ) -> (
-        Sender<AudioFilePlaybackStatusEvent>,
-        Sender<AudioSourceDropEvent>,
-    ) {
-        let (drop_send, drop_recv) = crossbeam_channel::bounded::<AudioSourceDropEvent>(128);
+    ) -> Sender<AudioFilePlaybackStatusEvent> {
         // use same capacity in proxy as original one
         let mut playback_sender_proxy_capacity = None;
         if let Some(playback_sender) = &playback_sender {
@@ -530,27 +532,48 @@ impl AudioFilePlayer {
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())
             .spawn(move || loop {
-                crossbeam_channel::select! {
-                    recv(drop_recv) -> _msg => {
-                        // nothing to do apart from receiving the message...
+                if let Ok(event) = playback_recv_proxy.recv() {
+                    if let AudioFilePlaybackStatusEvent::Stopped { id, .. } = event {
+                        playing_sources.remove(&id);
                     }
-                    recv(playback_recv_proxy) -> msg => {
-                        if let Ok(event) = msg {
-                           if let AudioFilePlaybackStatusEvent::Stopped { id, .. } = event {
-                                playing_sources.remove(&id);
-                            }
-                            if let Some(sender) = &playback_sender {
-                                // NB: send and not try_send: block until sender queue is free
-                                if let Err(err) = sender.send(event) {
-                                    log::warn!("failed to send file status message: {}", err);
-                                }
-                            }
+                    if let Some(sender) = &playback_sender {
+                        // NB: send and not try_send: block until sender queue is free
+                        if let Err(err) = sender.send(event) {
+                            log::warn!("failed to send file status message: {}", err);
                         }
                     }
+                } else {
+                    log::info!("playback event loop stopped");
+                    break;
                 }
             })
             .expect("failed to spawn audio message thread");
 
-        (playback_send_proxy, drop_send)
+        playback_send_proxy
+    }
+
+    fn handle_drop_collects(mut collector: Collector, running: Arc<AtomicBool>) {
+        std::thread::Builder::new()
+            .name("audio_player_drops".to_string())
+            .spawn(move || {
+                while running.load(atomic::Ordering::Relaxed) {
+                    collector.collect();
+                    thread::sleep(time::Duration::from_millis(100));
+                }
+                log::info!("audio collector loop stopped");
+                collector.collect();
+                if collector.try_cleanup().is_err() {
+                    log::warn!("Failed to cleanup collector");
+                }
+            })
+            .expect("failed to spawn audio message thread");
+    }
+}
+
+impl Drop for AudioFilePlayer {
+    fn drop(&mut self) {
+        // stop collector thread
+        self.collector_running
+            .store(false, atomic::Ordering::Relaxed);
     }
 }

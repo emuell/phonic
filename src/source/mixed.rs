@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crossbeam_channel::Sender;
+use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
 use sort::bubble_sort_cmp;
 
 use crate::{
-    player::{AudioSourceDropEvent, PlaybackMessageSender},
+    player::PlaybackMessageSender,
     source::{AudioSource, AudioSourceTime},
     AudioFilePlaybackId,
 };
@@ -17,7 +17,7 @@ struct MixedPlayingSource {
     is_active: bool,
     playback_id: AudioFilePlaybackId,
     playback_message_queue: PlaybackMessageSender,
-    source: Arc<dyn AudioSource>,
+    source: Owned<Box<dyn AudioSource>>,
     start_time: u64,
     stop_time: Option<u64>,
 }
@@ -29,7 +29,7 @@ pub enum MixedSourceMsg {
     AddSource {
         playback_id: AudioFilePlaybackId,
         playback_message_queue: PlaybackMessageSender,
-        source: Arc<dyn AudioSource>,
+        source: Owned<Box<dyn AudioSource>>,
         sample_time: u64,
     },
     StopSource {
@@ -45,9 +45,7 @@ pub enum MixedSourceMsg {
 /// A source which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
-    dead_sources: Vec<Arc<dyn AudioSource>>,
     event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
-    drop_send: Sender<AudioSourceDropEvent>,
     channel_count: usize,
     sample_rate: u32,
     temp_out: Vec<f32>,
@@ -55,29 +53,22 @@ pub struct MixedSource {
 
 impl MixedSource {
     /// Create a new mixer source with the given signal specs.
-    pub fn new(
-        channel_count: usize,
-        sample_rate: u32,
-        drop_send: Sender<AudioSourceDropEvent>,
-    ) -> Self {
+    pub fn new(channel_count: usize, sample_rate: u32) -> Self {
         // avoid allocs in real-time threads
         const PLAYING_EVENTS_CAPACITY: usize = 1024;
         let playing_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
-        let dead_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
 
         // assume that we'll never start/stop more than 4096 samples per write batch
         const EVENT_QUEUE_SIZE: usize = 4096;
         let event_queue = Arc::new(ArrayQueue::new(EVENT_QUEUE_SIZE));
-        
+
         // temp mix buffer size
         const BUFFER_SIZE: usize = 8 * 1024;
         let temp_out = vec![0.0; BUFFER_SIZE];
-        
+
         Self {
             playing_sources,
-            dead_sources,
             event_queue,
-            drop_send,
             channel_count,
             sample_rate,
             temp_out,
@@ -95,36 +86,12 @@ impl MixedSource {
     where
         F: Fn(&MixedPlayingSource) -> bool,
     {
-        self.playing_sources.retain({
-            let dead_sources = &mut self.dead_sources;
-            move |p| {
-                if match_fn(p) {
-                    dead_sources.push(p.source.clone());
-                    false // remove
-                } else {
-                    true // keep
-                }
-            }
-        });
-
-        // drop dead sources in the player's main thread if it has no other refs
-        while !self.dead_sources.is_empty() {
-            let last = self.dead_sources.remove(self.dead_sources.len() - 1);
-            if self
-                .drop_send
-                .try_send(AudioSourceDropEvent::new(last.clone()))
-                .is_err()
-            {
-                // put it back and retry next time in case the channel is full
-                self.dead_sources.push(last);
-                break;
-            }
-        }
+        self.playing_sources.retain(move |p| !match_fn(p));
     }
 
     /// remove all entries from self.playing_sources.
     fn remove_all_sources(&mut self) {
-        self.remove_matching_sources(|_| true);
+        self.playing_sources.clear();
     }
 }
 
@@ -216,10 +183,6 @@ impl AudioSource for MixedSource {
                     total_written += frames_until_source_starts * self.channel_count;
                 }
             }
-            // We should be the only owner of the source. If not, we'll need to wrap source into a RefCell.
-            let source = Arc::get_mut(source).expect(
-                "Failed to access a source as mutable in the mixer. Is someone else holding a ref?",
-            );
             // run and mix down the source
             'source: while total_written < output.len() {
                 let source_time =
