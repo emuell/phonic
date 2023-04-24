@@ -222,7 +222,7 @@
 //! for beat_counter in 0..8 {
 //!     // when is the next beat playback due?
 //!     let next_beats_sample_time =
-//!         (playback_start as f64 + beat_counter as f64 * samples_per_beat()) as u64;
+//!         (playback_start as f64 + beat_counter as f64 * samples_per_beat) as u64;
 //!     // play a clone of the preloaded sample at the next beat's sample time.
 //!     // cloning is very cheap as the sample buffer is shared...
 //!     player.play_file_source(
