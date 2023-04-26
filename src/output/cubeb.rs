@@ -1,4 +1,4 @@
-#[cfg(feature = "assert-no-alloc")]
+#[cfg(feature = "assert_no_alloc")]
 use assert_no_alloc::*;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -282,11 +282,11 @@ impl StreamCallback {
                     / self.source.channel_count() as u64,
                 pos_instant: self.playback_pos_instant,
             };
-            #[cfg(not(feature = "assert-no-alloc"))]
+            #[cfg(not(feature = "assert_no_alloc"))]
             let n_samples = self
                 .source
                 .write(&mut self.buffer[..n_output_samples], &time);
-            #[cfg(feature = "assert-no-alloc")]
+            #[cfg(feature = "assert_no_alloc")]
             let n_samples = assert_no_alloc(|| {
                 self.source
                     .write(&mut self.buffer[..n_output_samples], &time)

@@ -7,7 +7,7 @@ use afplay::{
 
 // -------------------------------------------------------------------------------------------------
 
-#[cfg(all(debug_assertions, feature = "assert-no-alloc"))]
+#[cfg(all(debug_assertions, feature = "assert_no_alloc"))]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 

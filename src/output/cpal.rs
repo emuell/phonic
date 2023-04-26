@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-#[cfg(feature = "assert-no-alloc")]
+#[cfg(feature = "assert_no_alloc")]
 use assert_no_alloc::*;
 
 use cfg_if::cfg_if;
@@ -313,9 +313,9 @@ impl StreamCallback {
                 pos_instant: self.playback_pos_instant,
             };
 
-            #[cfg(not(feature = "assert-no-alloc"))]
+            #[cfg(not(feature = "assert_no_alloc"))]
             let written = self.source.write(output, &time);
-            #[cfg(feature = "assert-no-alloc")]
+            #[cfg(feature = "assert_no_alloc")]
             let written = assert_no_alloc(|| self.source.write(output, &time));
 
             // Apply the global volume level.

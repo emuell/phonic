@@ -8,6 +8,7 @@ exclude = ["assets", "examples"]
 categories = ["audio", "synth", "music", "gamedev"]
 
 [dependencies]
+# required
 log = { version = "^0.4", features = ["max_level_debug", "release_max_level_info"] }
 lazy_static = { version = "^1.4" }
 cfg-if = { version = "^1.0" }
@@ -20,6 +21,7 @@ audio_thread_priority = { version = "^0.26", default-features = false, features 
 rubato = { version = "^0.12" }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
+# optional
 assert_no_alloc = {version = "^1.1", optional = true }
 dasp = { version = "^0.11", features = [ "signal" ], optional = true }
 fundsp = { version = "^0.13", optional = true }
@@ -45,11 +47,13 @@ opt-level = 2
 opt-level = 2
 
 [features]
-assert-no-alloc = ["assert_no_alloc"]
 cpal-output = ["cpal"]
 cubeb-output = ["cubeb", "windows"]
 dasp-synth = ["dasp"]
 fundsp-synth = ["fundsp"]
+assert-allocs = ["assert_no_alloc"]
+
+# default = ["cpal-output", "dasp-synth", "fundsp-synth", "assert-allocs"]
 default = ["cpal-output", "dasp-synth", "fundsp-synth"]
 
 [package.metadata.docs.rs]
