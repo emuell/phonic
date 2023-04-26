@@ -516,16 +516,20 @@ impl AudioFilePlayer {
         playback_sender: Option<Sender<AudioFilePlaybackStatusEvent>>,
         playing_sources: Arc<DashMap<AudioFilePlaybackId, PlaybackMessageSender>>,
     ) -> Sender<AudioFilePlaybackStatusEvent> {
-        // use same capacity in proxy as original one
-        let mut playback_sender_proxy_capacity = None;
-        if let Some(playback_sender) = &playback_sender {
-            playback_sender_proxy_capacity = playback_sender.capacity();
-        }
         let (playback_send_proxy, playback_recv_proxy) = {
-            if let Some(capacity) = playback_sender_proxy_capacity {
-                crossbeam_channel::bounded::<AudioFilePlaybackStatusEvent>(capacity)
+            // use same capacity in proxy as original one
+            if let Some(playback_sender) = &playback_sender {
+                if let Some(capacity) = playback_sender.capacity() {
+                    crossbeam_channel::bounded::<AudioFilePlaybackStatusEvent>(capacity)
+                } else {
+                    crossbeam_channel::unbounded::<AudioFilePlaybackStatusEvent>()
+                }
+            // use a bounded channel with a default cap for playback tracking, when there's no original channel
             } else {
-                crossbeam_channel::unbounded::<AudioFilePlaybackStatusEvent>()
+                const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 1024;
+                crossbeam_channel::bounded::<AudioFilePlaybackStatusEvent>(
+                    DEFAULT_PLAYBACK_EVENTS_CAPACITY,
+                )
             }
         };
 
