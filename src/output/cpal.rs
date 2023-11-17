@@ -309,7 +309,7 @@ impl StreamCallback {
             // Write out as many samples as possible from the audio source to the output buffer.
             let time = AudioSourceTime {
                 pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
-                    / self.source.channel_count() as u64,
+                    / self.source.channel_count().max(1) as u64,
                 pos_instant: self.playback_pos_instant,
             };
 

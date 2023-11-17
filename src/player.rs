@@ -579,5 +579,7 @@ impl Drop for AudioFilePlayer {
         // stop collector thread
         self.collector_running
             .store(false, atomic::Ordering::Relaxed);
+        // stop playback thread and release mixer source
+        self.sink.stop();
     }
 }
