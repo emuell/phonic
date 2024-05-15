@@ -11,7 +11,10 @@ use assert_no_alloc::*;
 
 use cfg_if::cfg_if;
 
-use cpal::{traits::{DeviceTrait, HostTrait, StreamTrait}, StreamConfig};
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    Host, StreamConfig,
+};
 use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
@@ -43,8 +46,11 @@ pub struct CpalOutput {
 
 impl CpalOutput {
     pub fn open() -> Result<Self, Error> {
+        Self::open_with_host(cpal::default_host())
+    }
+    pub fn open_with_host(host: Host) -> Result<Self, Error> {
         // Open the default output device.
-        let device = cpal::default_host()
+        let device = host
             .default_output_device()
             .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?;
 
