@@ -11,6 +11,19 @@ pub type DefaultAudioOutput = cpal::CpalOutput;
 #[cfg(not(feature = "cpal"))]
 pub type DefaultAudioOutput = cubeb::CubebOutput;
 
+/// Available audio hosts (platform specific)
+pub enum AudioHostId {
+    Default, // system default
+    #[cfg(target_os = "windows")]
+    Asio,
+    #[cfg(target_os = "windows")]
+    Wasapi,
+    #[cfg(target_os = "linux")]
+    Alsa,
+    #[cfg(target_os = "linux")]
+    Jack,
+}
+
 /// The enabled audio output sink type: cpal or cubeb
 pub type DefaultAudioSink = <DefaultAudioOutput as AudioOutput>::Sink;
 

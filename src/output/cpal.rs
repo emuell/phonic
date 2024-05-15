@@ -13,13 +13,13 @@ use cfg_if::cfg_if;
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    Host, StreamConfig,
+    StreamConfig,
 };
 use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
     error::Error,
-    output::{AudioOutput, AudioSink},
+    output::{AudioHostId, AudioOutput, AudioSink},
     source::{empty::EmptySource, AudioSource, AudioSourceTime},
     utils::actor::{Act, Actor, ActorHandle},
 };
@@ -46,9 +46,26 @@ pub struct CpalOutput {
 
 impl CpalOutput {
     pub fn open() -> Result<Self, Error> {
-        Self::open_with_host(cpal::default_host())
+        Self::open_with_host(AudioHostId::Default)
     }
-    pub fn open_with_host(host: Host) -> Result<Self, Error> {
+
+    pub fn open_with_host(hostid: AudioHostId) -> Result<Self, Error> {
+        let host = match hostid {
+            AudioHostId::Default => cpal::default_host(),
+            #[cfg(target_os = "windows")]
+            AudioHostId::Asio => cpal::host_from_id(cpal::HostId::Asio)
+                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+            #[cfg(target_os = "windows")]
+            AudioHostId::Wasapi => cpal::host_from_id(cpal::HostId::Wasapi)
+                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+            #[cfg(target_os = "linux")]
+            AudioHostId::Alsa => cpal::host_from_id(cpal::HostId::Alsa)
+                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+            #[cfg(target_os = "linux")]
+            AudioHostId::Jack => cpal::host_from_id(cpal::HostId::Jack)
+                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+        };
+
         // Open the default output device.
         let device = host
             .default_output_device()
