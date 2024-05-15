@@ -1,4 +1,4 @@
-use rubato::{InterpolationParameters, InterpolationType, SincFixedIn, VecResampler};
+use rubato::{SincFixedIn, SincInterpolationParameters, SincInterpolationType, VecResampler};
 
 use crate::{
     utils::buffer::{interleaved_to_planar, planar_to_interleaved, TempBuffer},
@@ -20,9 +20,9 @@ pub struct RubatoResampler {
 impl RubatoResampler {
     pub fn new(spec: ResamplingSpecs) -> Result<Self, Error> {
         const CHUNK_SIZE: usize = 256;
-        let parameters = InterpolationParameters {
+        let parameters = SincInterpolationParameters {
             f_cutoff: 0.95,
-            interpolation: InterpolationType::Cubic,
+            interpolation: SincInterpolationType::Cubic,
             oversampling_factor: 128,
             sinc_len: 256,
             window: rubato::WindowFunction::BlackmanHarris2,
@@ -36,12 +36,12 @@ impl RubatoResampler {
         ) {
             Err(err) => Err(Error::ResamplingError(Box::new(err))),
             Ok(resampler) => {
-                let mut input = resampler.input_buffer_allocate();
+                let mut input = resampler.input_buffer_allocate(true);
                 // buffers are only allocated with the needed capacity only, not len
                 for channel in input.iter_mut() {
                     channel.resize(channel.capacity(), 0.0_f32);
                 }
-                let output = resampler.output_buffer_allocate();
+                let output = resampler.output_buffer_allocate(true);
                 let pending = TempBuffer::new(spec.channel_count * resampler.output_frames_max());
                 Ok(Self {
                     resampler,

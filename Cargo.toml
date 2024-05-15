@@ -18,12 +18,10 @@ cfg-if = { version = "^1.0" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^5.4" }
-basedrop = { version = "0.1.2" }
+basedrop = { version = "^0.1" }
 sort = { version = "^0.8" }
-audio_thread_priority = { version = "^0.27", default-features = false, features = [
-    "winapi",
-] }
-rubato = { version = "^0.12" }
+audio_thread_priority = { version = "^0.32", default-features = false }
+rubato = { version = "^0.15" }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = ["aac", "alac", "mp3", "isomp4"] }
 # optional
@@ -31,17 +29,17 @@ assert_no_alloc = { version = "^1.1", features = [
     "warn_debug",
 ], optional = true }
 dasp = { version = "^0.11", features = ["signal"], optional = true }
-fundsp = { version = "^0.13", optional = true }
-cubeb = { version = "^0.10", optional = true }
-cpal = { version = "^0.15", optional = true }
+fundsp = { version = "^0.17", optional = true }
+cubeb = { version = "^0.13", optional = true }
+cpal = { version = "^0.15", optional = true, features = ["jack", "asio"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "^0.48", features = [
+windows = { version = "^0.56", features = [
     "Win32_System_Com",
 ], optional = true }
 
 [dev-dependencies]
-device_query = { version = "^1.1" }
+device_query = { version = "^2.0" }
 ctrlc = { version = "^3.2" }
 
 [profile.release]

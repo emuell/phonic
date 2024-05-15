@@ -29,7 +29,7 @@ pub(crate) struct FunDspSynthGenerator {
 impl FunDspSynthGenerator {
     pub fn new(mut unit: impl AudioUnit64 + 'static, sample_rate: u32) -> Self {
         // set target sample rate to unit
-        unit.reset(Some(sample_rate as f64));
+        unit.reset();
         // preallocate all needed memory in the main thread to avoid allocating in
         // real-time threads later on...
         unit.allocate();
