@@ -80,10 +80,11 @@ impl Stream {
         // Call CoInitialize() before any other calls to the API.
         #[cfg(target_os = "windows")]
         unsafe {
-            if let Err(err) = windows::Win32::System::Com::CoInitialize(None) {
-                log::error!("CoInitialize failed: {}", err);
+            let result = windows::Win32::System::Com::CoInitialize(None);
+            if result.is_err() {
+                log::error!("CoInitialize failed: {}", result);
             }
-        };
+        }
 
         let backend_name = env::var("CUBEB_BACKEND")
             .ok()
