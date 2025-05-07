@@ -1,5 +1,5 @@
 use dasp::{signal, Frame, Signal};
-use device_query::{DeviceEvents, DeviceState, Keycode};
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use lazy_static::lazy_static;
 use std::{
     collections::HashMap,
@@ -66,7 +66,8 @@ fn main() -> Result<(), Error> {
     println!();
 
     // run key event handlers to play, stop and modify sounds interactively
-    let device_state = DeviceState::new();
+    let event_handler = DeviceEventsHandler::new(Duration::from_millis(10))
+        .expect("Could not initialize event loop");
 
     ctrlc::set_handler({
         let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
@@ -78,7 +79,7 @@ fn main() -> Result<(), Error> {
     .map_err(|_err| Error::SendError)?;
 
     // key down handler
-    let _key_down_guard = device_state.on_key_down({
+    let _key_down_guard = event_handler.on_key_down({
         let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
         let player = Arc::clone(&player);
         let playing_synth_ids = Arc::clone(&playing_synth_ids);
@@ -150,7 +151,7 @@ fn main() -> Result<(), Error> {
     });
 
     // key up handler
-    let _key_up_guard = device_state.on_key_up({
+    let _key_up_guard = event_handler.on_key_up({
         let player = Arc::clone(&player);
         let playing_synth_ids = Arc::clone(&playing_synth_ids);
 

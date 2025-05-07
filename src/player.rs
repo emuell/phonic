@@ -40,7 +40,7 @@ use dasp::Signal;
 #[cfg(feature = "fundsp")]
 use crate::source::synth::fundsp::FunDspSynthSource;
 #[cfg(feature = "fundsp")]
-use fundsp::audiounit::AudioUnit64;
+use fundsp::audiounit::AudioUnit;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -342,7 +342,7 @@ impl AudioFilePlayer {
     #[cfg(feature = "fundsp")]
     pub fn play_fundsp_synth(
         &mut self,
-        unit: impl AudioUnit64 + 'static,
+        unit: impl AudioUnit + 'static,
         unit_name: &str,
         options: SynthPlaybackOptions,
     ) -> Result<AudioFilePlaybackId, Error> {
@@ -353,7 +353,7 @@ impl AudioFilePlayer {
     #[cfg(feature = "fundsp")]
     pub fn play_fundsp_synth_with_context(
         &mut self,
-        unit: impl AudioUnit64 + 'static,
+        unit: impl AudioUnit + 'static,
         unit_name: &str,
         options: SynthPlaybackOptions,
         context: Option<AudioFilePlaybackStatusContext>,

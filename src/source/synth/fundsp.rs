@@ -17,24 +17,26 @@ use super::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A synth source generator which runs a fundsp::AudioUnit64 generator (no inputs, one output).
+/// A synth source generator which runs a fundsp::AudioUnit generator (no inputs, one output).
 /// When no audible signal was generated for more than half a second it's treated as "exhausted".
 pub(crate) struct FunDspSynthGenerator {
-    unit: Box<dyn AudioUnit64>,
+    unit: Box<dyn AudioUnit>,
+    output_buffer: BufferVec,
     sample_rate: u32,
     silence_count: u64,
     is_exhausted: bool,
 }
 
 impl FunDspSynthGenerator {
-    pub fn new(mut unit: impl AudioUnit64 + 'static, sample_rate: u32) -> Self {
-        // set target sample rate to unit
+    pub fn new(mut unit: impl AudioUnit + 'static, sample_rate: u32) -> Self {
+        // reset and set target sample rate to unit and preallocate all memory in the main
+        // thread to avoid allocating in real-time threads later on...
         unit.reset();
-        // preallocate all needed memory in the main thread to avoid allocating in
-        // real-time threads later on...
+        unit.set_sample_rate(sample_rate as f64);
         unit.allocate();
         Self {
             unit: Box::new(unit),
+            output_buffer: BufferVec::new(1),
             sample_rate,
             silence_count: 0,
             is_exhausted: false,
@@ -45,16 +47,19 @@ impl FunDspSynthGenerator {
 impl SynthSourceGenerator for FunDspSynthGenerator {
     fn generate(&mut self, output: &mut [f32]) -> usize {
         // run unit in MAX_BUFFER_SIZE blocks
-        let mut temp_buffer = [0f64; MAX_BUFFER_SIZE];
         let mut exhausted_test_sum = 0.0;
         let mut written = 0;
         while written < output.len() {
             let frames_left = output.len() - written;
             let to_write = std::cmp::Ord::min(frames_left, MAX_BUFFER_SIZE);
-            self.unit.process(to_write, &[], &mut [&mut temp_buffer]);
+            self.unit.process(
+                to_write,
+                &BufferRef::empty(),
+                &mut self.output_buffer.buffer_mut(),
+            );
             let out = &mut output[written..written + to_write];
-            for (o, i) in out.iter_mut().zip(temp_buffer) {
-                *o = i as f32;
+            for (o, i) in out.iter_mut().zip(self.output_buffer.channel_f32(0)) {
+                *o = *i;
                 exhausted_test_sum += i;
             }
             written += to_write;
@@ -62,7 +67,7 @@ impl SynthSourceGenerator for FunDspSynthGenerator {
 
         // check if output is exhausted (produced silence for longer than half a second)
         if !self.is_exhausted {
-            if (exhausted_test_sum / written as f64).abs() < 0.0000001 {
+            if (exhausted_test_sum as f64 / written as f64).abs() < 0.0000001 {
                 self.silence_count += written as u64;
                 if self.silence_count > self.sample_rate as u64 / 2 {
                     self.is_exhausted = true;
@@ -88,7 +93,7 @@ pub struct FunDspSynthSource(SynthSourceImpl<FunDspSynthGenerator>);
 
 impl FunDspSynthSource {
     pub fn new(
-        unit: impl AudioUnit64 + 'static,
+        unit: impl AudioUnit + 'static,
         unit_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,

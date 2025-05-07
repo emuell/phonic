@@ -56,14 +56,13 @@ fn main() -> Result<(), Error> {
         )
     };
 
-    #[allow(clippy::precedence)]
-    let generate_fundsp_note = |pitch: f64, amplitude: f64| {
+    let generate_fundsp_note = |pitch: f32, amplitude: f32| {
         let f = pitch;
         let m = lfo(|t: f64| exp(-t));
         let dur_secs = 4.0;
-        let signal = sine_hz(f) * f * m + f >> sine();
+        let signal = (sine_hz::<f32>(f) * f * m + f) >> sine::<f32>();
         let envelope = amplitude
-            * envelope(move |t: f64| {
+            * envelope(move |t: f32| {
                 if t / dur_secs < 1.0 {
                     pow(lerp(1.0, 0.0, t / dur_secs), 2.0)
                 } else {
