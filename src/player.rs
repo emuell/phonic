@@ -339,7 +339,7 @@ impl AudioFilePlayer {
     /// Example generator:
     /// `oversample(sine_hz(110.0) * 110.0 * 5.0 + 110.0 >> sine())`
     /// which plays an oversampled FM sine tone at 110 hz.
-    #[cfg(feature = "dasp")]
+    #[cfg(feature = "fundsp")]
     pub fn play_fundsp_synth(
         &mut self,
         unit: impl AudioUnit64 + 'static,
@@ -350,7 +350,7 @@ impl AudioFilePlayer {
     }
     /// Play a mono [funDSP](https://github.com/SamiPerttu/fundsp/) generator with the given options
     /// and playback status context.
-    #[cfg(feature = "dasp")]
+    #[cfg(feature = "fundsp")]
     pub fn play_fundsp_synth_with_context(
         &mut self,
         unit: impl AudioUnit64 + 'static,

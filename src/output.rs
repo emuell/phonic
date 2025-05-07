@@ -1,14 +1,21 @@
+// Check feature, target dependencies
+#[cfg(not(any(not(feature = "cubeb"), all(feature = "cubeb", feature = "windows"))))]
+compile_error!("cubeb requires the windows feature to be enabled too");
+
+#[cfg(all(target_arch = "wasm32", feature = "cubeb"))]
+compile_error!("wasm32 builds are not compatible with cubeb. use cpal instead");
+
+// Note: when cpal and cubeb features are enabled, we use cpal only
 #[cfg(feature = "cpal")]
 pub mod cpal;
-#[cfg(feature = "cubeb")]
+#[cfg(all(feature = "cubeb", not(feature = "cpal")))]
 pub mod cubeb;
 
 /// The enabled audio output type: cpal or cubeb
 #[cfg(feature = "cpal")]
 pub type DefaultAudioOutput = cpal::CpalOutput;
 
-#[cfg(feature = "cubeb")]
-#[cfg(not(feature = "cpal"))]
+#[cfg(all(feature = "cubeb", not(feature = "cpal")))]
 pub type DefaultAudioOutput = cubeb::CubebOutput;
 
 /// Available audio hosts (platform specific)
