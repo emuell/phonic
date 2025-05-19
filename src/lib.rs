@@ -289,7 +289,7 @@
 
 // private (partly re-exported)
 mod error;
-#[cfg(any(feature = "cpal", feature = "cubeb"))]
+#[cfg(any(feature = "cpal", feature = "sokol"))]
 mod output;
 mod player;
 
@@ -299,7 +299,7 @@ pub mod utils;
 
 // re-exports
 pub use error::Error;
-#[cfg(any(feature = "cpal", feature = "cubeb"))]
+#[cfg(any(feature = "cpal", feature = "sokol"))]
 pub use output::{AudioHostId, AudioOutput, AudioSink, DefaultAudioOutput, DefaultAudioSink};
 pub use player::{
     AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent,
