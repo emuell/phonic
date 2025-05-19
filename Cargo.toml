@@ -1,13 +1,15 @@
 [package]
-name = "phonic"
-version = "0.3.0"
-edition = "2018"
-description = "Audio playback library"
 authors = ["Eduard Müller <mail@emuell.net>"]
-repository = "https://github.com/emuell/phonic"
-exclude = ["assets", "examples"]
 categories = ["multimedia::audio"]
+description = "Audio playback library"
+edition = "2021"
+exclude = ["assets", "examples"]
 keywords = ["audio", "playback", "dsp", "synth", "emscripten", "gamedev"]
+license = "MIT OR Apache-2.0"
+name = "phonic"
+readme = "README.md"
+repository = "https://github.com/emuell/phonic"
+version = "0.3.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
