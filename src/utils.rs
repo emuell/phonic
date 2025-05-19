@@ -1,3 +1,4 @@
+//! Helper functions to e.g. convert musical units.
 #![allow(dead_code, unused_macros)]
 
 pub(crate) mod actor;

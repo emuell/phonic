@@ -1,4 +1,4 @@
-use super::{AudioSource, AudioSourceTime};
+use super::{Source, SourceTime};
 
 use crate::utils::{
     buffer::TempBuffer,
@@ -7,10 +7,10 @@ use crate::utils::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// The resampler that ResampledSource should use for resampling.
+/// The resampler quality an audio source should be resampled with.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum ResamplingQuality {
-    /// simple and fast, non bandlimited cubic interpolation. Your daily workhorse for e.g. real-time
+    /// Simple and fast, non bandlimited cubic interpolation. Your daily workhorse for e.g. real-time
     /// sampler playback or when CPU resources are are a problem. Downsampling may cause aliasing.
     Default,
     /// HQ resampling performed via bandlimited `rubato` resampler. When only playing back a few
@@ -22,7 +22,7 @@ pub enum ResamplingQuality {
 
 /// A source which resamples the input source to adjust the source's sample rate.
 pub struct ResampledSource {
-    source: Box<dyn AudioSource>,
+    source: Box<dyn Source>,
     output_sample_rate: u32,
     resampler: Box<dyn AudioResampler>,
     input_buffer: TempBuffer,
@@ -37,7 +37,7 @@ impl ResampledSource {
         quality: ResamplingQuality,
     ) -> Self
     where
-        InputSource: AudioSource,
+        InputSource: Source,
     {
         Self::new_with_speed(source, output_sample_rate, 1.0, quality)
     }
@@ -49,7 +49,7 @@ impl ResampledSource {
         quality: ResamplingQuality,
     ) -> Self
     where
-        InputSource: AudioSource,
+        InputSource: Source,
     {
         let resampler_specs = ResamplingSpecs::new(
             source.sample_rate(),
@@ -81,8 +81,8 @@ impl ResampledSource {
     }
 }
 
-impl AudioSource for ResampledSource {
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+impl Source for ResampledSource {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         let mut total_written = 0;
         while total_written < output.len() {
             if self.output_buffer.is_empty() {

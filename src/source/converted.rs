@@ -1,14 +1,14 @@
 use super::{
     mapped::ChannelMappedSource,
     resampled::{ResampledSource, ResamplingQuality},
-    AudioSource, AudioSourceTime,
+    Source, SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// A source which changes the input source's channel layout and sample rate.
 pub struct ConvertedSource {
-    converted: Box<dyn AudioSource>,
+    converted: Box<dyn Source>,
 }
 
 impl ConvertedSource {
@@ -19,7 +19,7 @@ impl ConvertedSource {
         resample_quality: ResamplingQuality,
     ) -> Self
     where
-        InputSource: AudioSource + Sized,
+        InputSource: Source + Sized,
     {
         if source.sample_rate() != sample_rate {
             let resampled = ResampledSource::new(source, sample_rate, resample_quality);
@@ -46,8 +46,8 @@ impl ConvertedSource {
     }
 }
 
-impl AudioSource for ConvertedSource {
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+impl Source for ConvertedSource {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         self.converted.write(output, time)
     }
 

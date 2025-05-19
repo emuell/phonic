@@ -7,14 +7,10 @@ use std::{
     time::Duration,
 };
 
-use afplay::{
-    source::{
-        file::{preloaded::PreloadedFileSource, FilePlaybackOptions},
-        resampled::ResamplingQuality,
-        synth::{dasp::DaspSynthSource, SynthPlaybackOptions},
-    },
+use phonic::{
     utils::{pitch_from_note, speed_from_note},
-    AudioFilePlaybackId, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
+    DaspSynthSource, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, PlaybackId,
+    Player, PreloadedFileSource, ResamplingQuality, SynthPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -27,10 +23,10 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 fn main() -> Result<(), Error> {
     // open default audio output
-    let audio_output = DefaultAudioOutput::open()?;
+    let audio_output = DefaultOutputDevice::open()?;
 
     // create player and move audio device
-    let player = Arc::new(Mutex::new(AudioFilePlayer::new(audio_output.sink(), None)));
+    let player = Arc::new(Mutex::new(Player::new(audio_output.sink(), None)));
 
     // create condvar to block the main thread
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
@@ -53,7 +49,7 @@ fn main() -> Result<(), Error> {
     )?;
 
     // print header
-    println!("*** afplay interactive playback example:");
+    println!("*** phonic interactive playback example:");
     println!("  Use keys 'A, S, D, F, G, H,J' to play notes 'C, D, E, F, G, A, H'.");
     println!("  Arrow 'up/down' keys change the current octave.");
     println!("  Arrow 'left/right' to seek through the loop sample");
@@ -205,11 +201,7 @@ enum PlayMode {
     Synth,
 }
 
-fn handle_note_on(
-    player: &mut AudioFilePlayer,
-    note: u8,
-    playmode: PlayMode,
-) -> AudioFilePlaybackId {
+fn handle_note_on(player: &mut Player, note: u8, playmode: PlayMode) -> PlaybackId {
     // create, then play a synth or sample source and return the playback_id
     if playmode == PlayMode::Synth {
         player
@@ -242,7 +234,7 @@ fn handle_note_on(
     }
 }
 
-fn handle_note_off(player: &mut AudioFilePlayer, playback_id: AudioFilePlaybackId) {
+fn handle_note_off(player: &mut Player, playback_id: PlaybackId) {
     // stop playing source with the given playback_id
     player.stop_source(playback_id).unwrap_or_default();
 }

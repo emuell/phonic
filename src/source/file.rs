@@ -1,21 +1,21 @@
 pub mod preloaded;
 pub mod streamed;
 
-use std::{time::Duration, sync::Arc};
+use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
-    source::{resampled::ResamplingQuality, AudioSource},
+    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    source::{resampled::ResamplingQuality, Source},
     utils::db_to_linear,
-    Error,
+    Error, Player,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a FileSource.
+/// Options to control playback of a [`FileSource`].
 #[derive(Clone, Copy)]
 pub struct FilePlaybackOptions {
     /// By default false: when true, the file will be decoded and streamed on the fly.
@@ -51,7 +51,7 @@ pub struct FilePlaybackOptions {
     /// or down.
     pub resampling_quality: ResamplingQuality,
 
-    /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
+    /// Wallclock time rate of playback pos events, emited via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
@@ -150,7 +150,7 @@ impl FilePlaybackOptions {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Events to control playback of a FileSource
+/// Events to control playback of a [`FileSource`]
 pub enum FilePlaybackMessage {
     /// Seek the file source to a new position
     Seek(Duration),
@@ -161,20 +161,20 @@ pub enum FilePlaybackMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which decodes and plays back an audio file.
-pub trait FileSource: AudioSource {
+pub trait FileSource: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
-    fn playback_id(&self) -> AudioFilePlaybackId;
+    fn playback_id(&self) -> PlaybackId;
 
     /// Message queue to control file playback.
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>>;
-    
+
     /// Channel to receive playback status from the file.
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>>;
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>);
 
     /// Optional context passed along with the playback status.
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext>;
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>);
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext>;
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>);
 
     /// Total number of sample frames in the decoded file: may not be known before playback finished.
     fn total_frames(&self) -> Option<u64>;
@@ -183,4 +183,46 @@ pub trait FileSource: AudioSource {
 
     /// True when the source played through the entire file, else false.
     fn end_of_track(&self) -> bool;
+}
+
+// -------------------------------------------------------------------------------------------------
+
+impl Player {
+    /// Play a new file with the given file path and options. See [`FilePlaybackOptions`]
+    /// for more info on which options can be applied.
+    pub fn play_file(
+        &mut self,
+        file_path: &str,
+        options: FilePlaybackOptions,
+    ) -> Result<PlaybackId, Error> {
+        self.play_file_with_context(file_path, options, None)
+    }
+
+    /// Play a new file with the given file path, options and context.
+    /// See [`FilePlaybackOptions`] for more info on which options can be applied.
+    pub fn play_file_with_context(
+        &mut self,
+        file_path: &str,
+        options: FilePlaybackOptions,
+        context: Option<PlaybackStatusContext>,
+    ) -> Result<PlaybackId, Error> {
+        // create a stremed or preloaded source, depending on the options and play it
+        if options.stream {
+            let streamed_source = streamed::StreamedFileSource::new(
+                file_path,
+                Some(self.playback_status_sender()),
+                options,
+                self.output_sample_rate(),
+            )?;
+            self.play_file_source_with_context(streamed_source, options.start_time, context)
+        } else {
+            let preloaded_source = preloaded::PreloadedFileSource::new(
+                file_path,
+                Some(self.playback_status_sender()),
+                options,
+                self.output_sample_rate(),
+            )?;
+            self.play_file_source_with_context(preloaded_source, options.start_time, context)
+        }
+    }
 }

@@ -6,9 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use afplay::{
-    utils::speed_from_note, AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput,
-    DefaultAudioOutput, Error, FilePlaybackOptions,
+use phonic::{
+    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice,
+    PlaybackStatusEvent, Player,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -21,12 +21,12 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 fn main() -> Result<(), Error> {
     // Open default device
-    let audio_output = DefaultAudioOutput::open()?;
+    let audio_output = DefaultOutputDevice::open()?;
 
     // create channel for playback status events
     // Prefer using a bounded channel here to avoid memory allocations in the audio thread.
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
-    let mut player = AudioFilePlayer::new(audio_output.sink(), Some(status_sender));
+    let mut player = Player::new(audio_output.sink(), Some(status_sender));
 
     // pause playing until we've added all sources
     player.stop();
@@ -65,7 +65,7 @@ fn main() -> Result<(), Error> {
         move || {
             while let Ok(event) = status_receiver.recv() {
                 match event {
-                    AudioFilePlaybackStatusEvent::Position {
+                    PlaybackStatusEvent::Position {
                         id,
                         path,
                         context: _,
@@ -78,7 +78,7 @@ fn main() -> Result<(), Error> {
                             position.as_secs_f32()
                         );
                     }
-                    AudioFilePlaybackStatusEvent::Stopped {
+                    PlaybackStatusEvent::Stopped {
                         id,
                         path,
                         context: _,

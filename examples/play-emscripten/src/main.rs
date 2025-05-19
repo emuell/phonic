@@ -1,10 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, ffi};
 
-use afplay::{
-    source::{file::preloaded::PreloadedFileSource, synth::dasp::DaspSynthSource},
+use phonic::{
     utils::{pitch_from_note, speed_from_note},
-    AudioFilePlaybackId, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
-    FilePlaybackOptions, SynthPlaybackOptions,
+    OutputDevice, PlaybackId, Player, DaspSynthSource, DefaultOutputDevice, Error,
+    FilePlaybackOptions, PreloadedFileSource, SynthPlaybackOptions,
 };
 
 use dasp::{signal, Frame, Signal};
@@ -24,10 +23,10 @@ extern "C" {
 thread_local!(static PLAYER: RefCell<Option<EmscriptenPlayer>> = const { RefCell::new(None) });
 
 struct EmscriptenPlayer {
-    player: AudioFilePlayer,
+    player: Player,
     playback_beat_counter: u32,
     playback_start_time: u64,
-    playing_synth_notes: HashMap<u8, AudioFilePlaybackId>,
+    playing_synth_notes: HashMap<u8, PlaybackId>,
     samples: Vec<PreloadedFileSource>,
     run_frame_id: ffi::c_long,
 }
@@ -36,10 +35,10 @@ impl EmscriptenPlayer {
     // Create a new player and preload samples
     pub fn new() -> Result<Self, Error> {
         println!("Initialize audio output...");
-        let output = DefaultAudioOutput::open()?.sink();
+        let output = DefaultOutputDevice::open()?.sink();
 
         println!("Creating audio file player...");
-        let player = AudioFilePlayer::new(output, None);
+        let player = Player::new(output, None);
         let sample_rate = player.output_sample_rate();
 
         println!("Preloading sample files...");

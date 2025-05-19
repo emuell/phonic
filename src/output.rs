@@ -1,21 +1,22 @@
 // Check feature, target dependencies
 #[cfg(all(target_arch = "wasm32", feature = "cpal"))]
-compile_error!("wasm32 builds are not compatible with cpal. use sokol instead");
+compile_error!("wasm builds are not compatible with cpal. use sokol-output instead");
 
-// Note: when cpal and cubeb features are enabled, we use cpal only
+// Note: when cpal and sokol features are enabled, we use cpal only
 #[cfg(feature = "cpal")]
 pub mod cpal;
 #[cfg(all(feature = "sokol", not(feature = "cpal")))]
 pub mod sokol;
 
-/// The enabled audio output type: cpal or cubeb
+/// The enabled audio output type: cpal or sokol
 #[cfg(feature = "cpal")]
-pub type DefaultAudioOutput = cpal::CpalOutput;
+pub type DefaultOutputDevice = cpal::CpalOutput;
 
 #[cfg(all(feature = "sokol", not(feature = "cpal")))]
-pub type DefaultAudioOutput = sokol::SokolOutput;
+pub type DefaultOutputDevice = sokol::SokolOutput;
 
-/// Available audio hosts (platform specific)
+/// Available audio hosts for cpal output (platform specific)
+#[cfg(feature = "cpal")]
 pub enum AudioHostId {
     Default, // system default
     #[cfg(target_os = "windows")]
@@ -29,14 +30,14 @@ pub enum AudioHostId {
 }
 
 /// The enabled audio output sink type: cpal or sokol
-pub type DefaultAudioSink = <DefaultAudioOutput as AudioOutput>::Sink;
+pub type DefaultOutputSink = <DefaultOutputDevice as OutputDevice>::Sink;
 
-use super::source::AudioSource;
+use super::source::Source;
 
 // -------------------------------------------------------------------------------------------------
 
-/// AudioOutput controller
-pub trait AudioSink {
+/// OutputDevice controller
+pub trait OutputSink {
     /// Signal specs.
     fn channel_count(&self) -> usize;
     fn sample_rate(&self) -> u32;
@@ -49,7 +50,7 @@ pub trait AudioSink {
     fn set_volume(&mut self, volume: f32);
 
     /// Play given source as main output source.
-    fn play(&mut self, source: impl AudioSource);
+    fn play(&mut self, source: impl Source);
     /// Drop actual source, replacing it with silence
     fn stop(&mut self);
     /// Pause playback without dropping the ouput source.
@@ -63,8 +64,8 @@ pub trait AudioSink {
 
 // -------------------------------------------------------------------------------------------------
 
-/// AudioOutput implementation: provides a sink controller.
-pub trait AudioOutput {
-    type Sink: AudioSink;
+/// OutputDevice implementation: provides a sink controller.
+pub trait OutputDevice {
+    type Sink: OutputSink;
     fn sink(&self) -> Self::Sink;
 }

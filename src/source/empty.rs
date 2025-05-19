@@ -1,12 +1,12 @@
-use super::{AudioSource, AudioSourceTime};
+use super::{Source, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
 /// A source which does not produce any samples.
 pub struct EmptySource;
 
-impl AudioSource for EmptySource {
-    fn write(&mut self, _output: &mut [f32], _time: &AudioSourceTime) -> usize {
+impl Source for EmptySource {
+    fn write(&mut self, _output: &mut [f32], _time: &SourceTime) -> usize {
         0
     }
 

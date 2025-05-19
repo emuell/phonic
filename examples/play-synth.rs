@@ -7,10 +7,9 @@ use std::{
 };
 
 use dasp::{signal, Frame, Signal};
-use fundsp::prelude::*;
 
-use afplay::{
-    AudioFilePlaybackStatusEvent, AudioFilePlayer, AudioOutput, DefaultAudioOutput, Error,
+use phonic::{
+    DaspSynthSource, DefaultOutputDevice, Error, OutputDevice, PlaybackStatusEvent, Player,
     SynthPlaybackOptions,
 };
 
@@ -24,13 +23,13 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 fn main() -> Result<(), Error> {
     // Open default device
-    let audio_output = DefaultAudioOutput::open()?;
+    let audio_output = DefaultOutputDevice::open()?;
 
     // create channel for playback status events
     // Prefer using a bounded channel here to avoid memory allocations in the audio thread.
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
     // create a source player
-    let mut player = AudioFilePlayer::new(audio_output.sink(), Some(status_sender));
+    let mut player = Player::new(audio_output.sink(), Some(status_sender));
 
     // Creates a signal of a detuned sine with dasp.
     let sample_rate = player.output_sample_rate();
@@ -56,22 +55,6 @@ fn main() -> Result<(), Error> {
         )
     };
 
-    let generate_fundsp_note = |pitch: f32, amplitude: f32| {
-        let f = pitch;
-        let m = lfo(|t: f64| exp(-t));
-        let dur_secs = 4.0;
-        let signal = (sine_hz::<f32>(f) * f * m + f) >> sine::<f32>();
-        let envelope = amplitude
-            * envelope(move |t: f32| {
-                if t / dur_secs < 1.0 {
-                    pow(lerp(1.0, 0.0, t / dur_secs), 2.0)
-                } else {
-                    0.0
-                }
-            });
-        signal * envelope
-    };
-
     // combine 3 notes to a chord
     let note_amp = 0.5_f64;
     let note_duration = 4 * sample_rate;
@@ -90,36 +73,18 @@ fn main() -> Result<(), Error> {
         ));
 
     // create audio source for the chord and sine and memorize the id for the playback status
-    let mut playing_synth_ids = vec![
-        player.play_dasp_synth(
+    let mut playing_synth_ids = vec![player.play_synth_source(
+        DaspSynthSource::new(
             chord,
             "dasp_chord",
             SynthPlaybackOptions::default().fade_out(Duration::from_secs(2)),
+            player.output_sample_rate(),
+            Some(player.playback_status_sender()),
         )?,
-        player.play_fundsp_synth(
-            generate_fundsp_note(220.0, 1.0),
-            "fundsp_fm1",
-            SynthPlaybackOptions::default()
-                .volume_db(-3.0)
-                .start_at_time(sample_rate as u64 * 2),
-        )?,
-        player.play_fundsp_synth(
-            generate_fundsp_note(220.0 * 2.0, 1.0),
-            "fundsp_fm2",
-            SynthPlaybackOptions::default()
-                .volume_db(-3.0)
-                .start_at_time(sample_rate as u64 * 3),
-        )?,
-        player.play_fundsp_synth(
-            generate_fundsp_note(220.0 * 3.0, 1.0),
-            "fundsp_fm3",
-            SynthPlaybackOptions::default()
-                .volume_db(-3.0)
-                .start_at_time(sample_rate as u64 * 4),
-        )?,
-    ];
+        None,
+    )?];
 
-    let mut fundsp_synth_id = Some(playing_synth_ids[0]);
+    let mut synth_id = Some(playing_synth_ids[0]);
     let is_running = Arc::new(AtomicBool::new(true));
 
     // handle events from the file sources
@@ -128,7 +93,7 @@ fn main() -> Result<(), Error> {
         move || {
             while let Ok(event) = status_receiver.recv() {
                 match event {
-                    AudioFilePlaybackStatusEvent::Position {
+                    PlaybackStatusEvent::Position {
                         id,
                         path,
                         context: _,
@@ -141,7 +106,7 @@ fn main() -> Result<(), Error> {
                             position.as_secs_f32()
                         );
                     }
-                    AudioFilePlaybackStatusEvent::Stopped {
+                    PlaybackStatusEvent::Stopped {
                         id,
                         path,
                         context: _,
@@ -167,9 +132,9 @@ fn main() -> Result<(), Error> {
     // stop (fade-out) the sine after 2 secs
     let play_time = Instant::now();
     while is_running.load(Ordering::Relaxed) {
-        if fundsp_synth_id.is_some() && play_time.elapsed() > Duration::from_secs(2) {
-            // player.stop_source(fundsp_synth_id.unwrap())?;
-            fundsp_synth_id = None;
+        if synth_id.is_some() && play_time.elapsed() > Duration::from_secs(2) {
+            // player.stop_source(synth_id.unwrap())?;
+            synth_id = None;
         }
         std::thread::sleep(Duration::from_secs(1));
     }

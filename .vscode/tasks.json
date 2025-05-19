@@ -4,7 +4,7 @@
 		{
 			"type": "cargo",
 			"command": "build",
-			"args": ["--features", "dasp-synth,fundsp-synth", "--example", "*"],
+			"args": ["--features", "dasp-synth", "--example", "*"],
 			"problemMatcher": [
 				"$rustc"
 			],

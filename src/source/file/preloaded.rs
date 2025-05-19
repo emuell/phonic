@@ -11,9 +11,9 @@ use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
     source::{
-        file::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
+        file::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
         resampled::ResamplingQuality,
-        AudioSource, AudioSourceTime,
+        Source, SourceTime,
     },
     utils::{
         buffer::TempBuffer,
@@ -28,14 +28,14 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A buffered, clonable file source, which decodes the entire file into a buffer before its
+/// A buffered, clonable [`FileSource`], which decodes the entire file into a buffer before its
 /// played back.
 ///
 /// Buffers of preloaded file sources are shared (wrapped in an Arc), so cloning a source is
 /// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
-    file_id: AudioFilePlaybackId,
+    file_id: PlaybackId,
     file_path: Arc<String>,
     volume: f32,
     volume_fader: VolumeFader,
@@ -49,8 +49,8 @@ pub struct PreloadedFileSource {
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
     playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
-    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    playback_status_context: Option<AudioFilePlaybackStatusContext>,
+    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_status_context: Option<PlaybackStatusContext>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -59,7 +59,7 @@ pub struct PreloadedFileSource {
 impl PreloadedFileSource {
     pub fn new(
         file_path: &str,
-        playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -117,7 +117,7 @@ impl PreloadedFileSource {
         buffer_sample_rate: u32,
         buffer_channel_count: usize,
         file_path: &str,
-        playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -236,7 +236,7 @@ impl PreloadedFileSource {
 }
 
 impl FileSource for PreloadedFileSource {
-    fn playback_id(&self) -> AudioFilePlaybackId {
+    fn playback_id(&self) -> PlaybackId {
         self.file_id
     }
 
@@ -244,17 +244,17 @@ impl FileSource for PreloadedFileSource {
         self.playback_message_queue.clone()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
         self.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
         self.playback_status_send = sender;
     }
 
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
         self.playback_status_context.clone()
     }
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
         self.playback_status_context = context;
     }
 
@@ -271,8 +271,8 @@ impl FileSource for PreloadedFileSource {
     }
 }
 
-impl AudioSource for PreloadedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
+impl Source for PreloadedFileSource {
+    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
         // consume playback messages
         while let Some(msg) = self.playback_message_queue.pop() {
             match msg {
@@ -365,7 +365,7 @@ impl AudioSource for PreloadedFileSource {
             if self.should_report_pos() {
                 self.playback_pos_report_instant = Instant::now();
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.file_id,
                     context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
@@ -382,7 +382,7 @@ impl AudioSource for PreloadedFileSource {
             && self.volume_fader.target_volume() == 0.0;
         if end_of_file || fade_out_completed {
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
@@ -435,7 +435,7 @@ mod tests {
         assert!(preloaded.is_ok());
         let mut preloaded = preloaded.unwrap();
         let mut output = vec![0.0; 1024];
-        let written = preloaded.write(&mut output, &AudioSourceTime::default());
+        let written = preloaded.write(&mut output, &SourceTime::default());
 
         assert_eq!(written, buffer.len() - 1);
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
@@ -453,7 +453,7 @@ mod tests {
         assert!(preloaded.is_ok());
         let mut preloaded = preloaded.unwrap();
         let mut output = vec![0.0; 1024];
-        let written = preloaded.write(&mut output, &AudioSourceTime::default());
+        let written = preloaded.write(&mut output, &SourceTime::default());
 
         assert!(written > buffer.len());
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.2);

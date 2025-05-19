@@ -5,9 +5,9 @@ use crossbeam_queue::ArrayQueue;
 use dasp::{signal::UntilExhausted, Signal};
 
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
-    source::{synth::SynthPlaybackOptions, AudioSource, AudioSourceTime},
-    Error,
+    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    source::{synth::SynthPlaybackOptions, Source, SourceTime},
+    Error, Player,
 };
 
 use super::{
@@ -17,7 +17,7 @@ use super::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A synth generator which runs a dasp Signal until it is exhausted.
+/// A synth generator which runs a dasp `Signal` until it is exhausted.
 pub struct DaspSynthGenerator<SignalType>
 where
     SignalType: Signal<Frame = f64>,
@@ -60,7 +60,7 @@ where
 
 // -------------------------------------------------------------------------------------------------
 
-/// A synth source which runs a dasp Signal until it is exhausted.
+/// A [`SynthSource`] which runs a dasp `Signal` until it is exhausted.
 pub struct DaspSynthSource<SignalType>(SynthSourceImpl<DaspSynthGenerator<SignalType>>)
 where
     SignalType: Signal<Frame = f64> + Send + Sync + 'static;
@@ -74,7 +74,7 @@ where
         signal_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,
-        event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         Ok(Self(SynthSourceImpl::new(
             DaspSynthGenerator::new(signal, sample_rate),
@@ -90,7 +90,7 @@ impl<SignalType> SynthSource for DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64> + Send + Sync + 'static,
 {
-    fn playback_id(&self) -> AudioFilePlaybackId {
+    fn playback_id(&self) -> PlaybackId {
         self.0.playback_id()
     }
 
@@ -98,26 +98,26 @@ where
         self.0.playback_message_queue()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
         self.0.playback_status_sender()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
         self.0.set_playback_status_sender(sender);
     }
 
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
         self.0.playback_status_context()
     }
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
         self.0.set_playback_status_context(context);
     }
 }
 
-impl<SignalType> AudioSource for DaspSynthSource<SignalType>
+impl<SignalType> Source for DaspSynthSource<SignalType>
 where
     SignalType: dasp::Signal<Frame = f64> + Send + Sync + 'static,
 {
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         self.0.write(output, time)
     }
 
@@ -131,5 +131,62 @@ where
 
     fn is_exhausted(&self) -> bool {
         self.0.is_exhausted()
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+impl Player {
+    /// Play a mono [dasp](https://github.com/RustAudio/dasp) signal with the given options.
+    /// See [`SynthPlaybackOptions`] for more info about available options.
+    ///
+    /// The signal will be wrapped into a dasp::signal::UntilExhausted so it can be used to play
+    /// create one-shots.
+    ///
+    /// Example one-shot signal:
+    /// ```ignore
+    /// dasp::signal::from_iter(
+    ///     dasp::signal::rate(sample_rate as f64)
+    ///         .const_hz(440.0)
+    ///         .sine()
+    ///         .take(sample_rate as usize * 2),
+    /// )
+    /// ```
+    /// which plays a sine wave at 440 hz for 2 seconds.
+    #[cfg(feature = "dasp")]
+    pub fn play_dasp_synth<SignalType>(
+        &mut self,
+        signal: SignalType,
+        signal_name: &str,
+        options: SynthPlaybackOptions,
+    ) -> Result<PlaybackId, Error>
+    where
+        SignalType: Signal<Frame = f64> + Send + Sync + 'static,
+    {
+        self.play_dasp_synth_with_context(signal, signal_name, options, None)
+    }
+    /// Play a mono [dasp](https://github.com/RustAudio/dasp) signal with the given options
+    /// and playback status context.
+    #[cfg(feature = "dasp")]
+    pub fn play_dasp_synth_with_context<SignalType>(
+        &mut self,
+        signal: SignalType,
+        signal_name: &str,
+        options: SynthPlaybackOptions,
+        context: Option<PlaybackStatusContext>,
+    ) -> Result<PlaybackId, Error>
+    where
+        SignalType: Signal<Frame = f64> + Send + Sync + 'static,
+    {
+        // create synth source
+        let source = DaspSynthSource::new(
+            signal,
+            signal_name,
+            options,
+            self.output_sample_rate(),
+            Some(self.playback_status_sender()),
+        )?;
+        // and play it
+        self.play_synth_source_with_context(source, options.start_time, context)
     }
 }

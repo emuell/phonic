@@ -13,8 +13,6 @@ use std::{
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 
-use cfg_if::cfg_if;
-
 use sokol::{
     audio::{self as saudio},
     log as slog,
@@ -22,14 +20,14 @@ use sokol::{
 
 use crate::{
     error::Error,
-    output::{AudioOutput, AudioSink},
-    source::{empty::EmptySource, AudioSource, AudioSourceTime},
+    output::{OutputDevice, OutputSink},
+    source::{empty::EmptySource, Source, SourceTime},
 };
 
 // -------------------------------------------------------------------------------------------------
 
 enum CallbackMessage {
-    PlaySource(Box<dyn AudioSource>),
+    PlaySource(Box<dyn Source>),
     Pause,
     Resume,
     SetVolume(f32),
@@ -42,7 +40,7 @@ enum CallbackState {
 
 struct SokolContext {
     callback_recv: Receiver<CallbackMessage>,
-    source: Box<dyn AudioSource>,
+    source: Box<dyn Source>,
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
@@ -75,7 +73,7 @@ impl Drop for SokolContextRef {
 
 // -------------------------------------------------------------------------------------------------
 
-// AudioSink for Sokol audio output
+// OutputSink for Sokol audio output
 #[derive(Debug, Clone)]
 pub struct SokolSink {
     volume: f32,
@@ -85,7 +83,7 @@ pub struct SokolSink {
     context_ref: Rc<SokolContextRef>,
 }
 
-impl AudioSink for SokolSink {
+impl OutputSink for SokolSink {
     fn channel_count(&self) -> usize {
         assert!(
             saudio::isvalid(),
@@ -116,7 +114,7 @@ impl AudioSink for SokolSink {
             .unwrap();
     }
 
-    fn play(&mut self, source: impl AudioSource) {
+    fn play(&mut self, source: impl Source) {
         // ensure source has our sample rate and channel layout
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
@@ -235,18 +233,18 @@ impl SokolOutput {
         // Write out as many samples as possible from the audio source to the output buffer.
         let samples_written = match state.state {
             CallbackState::Playing => {
-                let time = AudioSourceTime {
+                let time = SourceTime {
                     pos_in_frames: state.playback_pos.load(Ordering::Relaxed)
                         / state.source.channel_count() as u64,
                     pos_instant: state.playback_pos_instant,
                 };
-                cfg_if! {
-                    if #[cfg(feature = "assert_no_alloc")] {
-                        assert_no_alloc(|| state.source.write(&mut output[..output_samples], &time))
-                    }
-                    else {
-                        state.source.write(&mut output[..output_samples], &time)
-                    }
+                #[cfg(not(feature = "assert_no_alloc"))]
+                {
+                    state.source.write(&mut output[..output_samples], &time)
+                }
+                #[cfg(feature = "assert_no_alloc")]
+                {
+                    assert_no_alloc(|| state.source.write(&mut output[..output_samples], &time))
                 }
             }
             CallbackState::Paused => 0,
@@ -271,7 +269,7 @@ impl SokolOutput {
     }
 }
 
-impl AudioOutput for SokolOutput {
+impl OutputDevice for SokolOutput {
     type Sink = SokolSink;
 
     fn sink(&self) -> Self::Sink {

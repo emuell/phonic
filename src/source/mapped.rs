@@ -1,10 +1,10 @@
-use super::{AudioSource, AudioSourceTime};
+use super::{Source, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
 /// A source which changes the channel layout of some other source.
 pub struct ChannelMappedSource {
-    source: Box<dyn AudioSource>,
+    source: Box<dyn Source>,
     input_channels: usize,
     output_channels: usize,
     input_buffer: Vec<f32>,
@@ -13,7 +13,7 @@ pub struct ChannelMappedSource {
 impl ChannelMappedSource {
     pub fn new<InputSource>(source: InputSource, output_channels: usize) -> Self
     where
-        InputSource: AudioSource,
+        InputSource: Source,
     {
         const BUFFER_SIZE: usize = 256;
         let input_channels = source.channel_count();
@@ -26,8 +26,8 @@ impl ChannelMappedSource {
     }
 }
 
-impl AudioSource for ChannelMappedSource {
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+impl Source for ChannelMappedSource {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         let mut total_written = 0;
         while total_written < output.len() {
             // read as much input as we can to fill the entire output

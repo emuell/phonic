@@ -9,8 +9,6 @@ use std::{
 #[cfg(feature = "assert_no_alloc")]
 use assert_no_alloc::*;
 
-use cfg_if::cfg_if;
-
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     StreamConfig,
@@ -19,8 +17,8 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
     error::Error,
-    output::{AudioHostId, AudioOutput, AudioSink},
-    source::{empty::EmptySource, AudioSource, AudioSourceTime},
+    output::{AudioHostId, OutputDevice, OutputSink},
+    source::{empty::EmptySource, Source, SourceTime},
     utils::actor::{Act, Actor, ActorHandle},
 };
 
@@ -29,13 +27,11 @@ use crate::{
 const PREFERRED_SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
 const PREFERRED_SAMPLE_RATE: cpal::SampleRate = cpal::SampleRate(44100);
 const PREFERRED_CHANNELS: cpal::ChannelCount = 2;
-cfg_if! {
-    if #[cfg(debug_assertions)] {
-        const PREFERRED_BUFFER_SIZE: cpal::BufferSize = cpal::BufferSize::Default;
-    } else {
-        const PREFERRED_BUFFER_SIZE: cpal::BufferSize = cpal::BufferSize::Fixed(2048);
-    }
-}
+const PREFERRED_BUFFER_SIZE: cpal::BufferSize = if cfg!(debug_assertions) {
+    cpal::BufferSize::Default
+} else {
+    cpal::BufferSize::Fixed(2048)
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -54,16 +50,16 @@ impl CpalOutput {
             AudioHostId::Default => cpal::default_host(),
             #[cfg(target_os = "windows")]
             AudioHostId::Asio => cpal::host_from_id(cpal::HostId::Asio)
-                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
             #[cfg(target_os = "windows")]
             AudioHostId::Wasapi => cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
             #[cfg(target_os = "linux")]
             AudioHostId::Alsa => cpal::host_from_id(cpal::HostId::Alsa)
-                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
             #[cfg(target_os = "linux")]
             AudioHostId::Jack => cpal::host_from_id(cpal::HostId::Jack)
-                .map_err(|err| Error::AudioOutputError(Box::new(err)))?,
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
         };
 
         // Open the default output device.
@@ -123,7 +119,7 @@ impl CpalOutput {
     }
 }
 
-impl AudioOutput for CpalOutput {
+impl OutputDevice for CpalOutput {
     type Sink = CpalSink;
 
     fn sink(&self) -> Self::Sink {
@@ -157,7 +153,7 @@ impl CpalSink {
     }
 }
 
-impl AudioSink for CpalSink {
+impl OutputSink for CpalSink {
     fn channel_count(&self) -> usize {
         self.channel_count as usize
     }
@@ -178,7 +174,7 @@ impl AudioSink for CpalSink {
         self.send_to_callback(CallbackMsg::SetVolume(volume));
     }
 
-    fn play(&mut self, source: impl AudioSource) {
+    fn play(&mut self, source: impl Source) {
         // ensure source has our sample rate and channel layout
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
@@ -287,7 +283,7 @@ enum StreamMsg {
 }
 
 enum CallbackMsg {
-    PlaySource(Box<dyn AudioSource>),
+    PlaySource(Box<dyn Source>),
     SetVolume(f32),
     Pause,
     Resume,
@@ -301,7 +297,7 @@ enum CallbackState {
 struct StreamCallback {
     _stream_send: Sender<StreamMsg>,
     callback_recv: Receiver<CallbackMsg>,
-    source: Box<dyn AudioSource>,
+    source: Box<dyn Source>,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
     state: CallbackState,
@@ -330,7 +326,7 @@ impl StreamCallback {
 
         let written = if matches!(self.state, CallbackState::Playing) {
             // Write out as many samples as possible from the audio source to the output buffer.
-            let time = AudioSourceTime {
+            let time = SourceTime {
                 pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
                     / self.source.channel_count().max(1) as u64,
                 pos_instant: self.playback_pos_instant,
@@ -363,30 +359,30 @@ impl StreamCallback {
 
 impl From<cpal::DefaultStreamConfigError> for Error {
     fn from(err: cpal::DefaultStreamConfigError) -> Error {
-        Error::AudioOutputError(Box::new(err))
+        Error::OutputDeviceError(Box::new(err))
     }
 }
 
 impl From<cpal::SupportedStreamConfigsError> for Error {
     fn from(err: cpal::SupportedStreamConfigsError) -> Error {
-        Error::AudioOutputError(Box::new(err))
+        Error::OutputDeviceError(Box::new(err))
     }
 }
 
 impl From<cpal::BuildStreamError> for Error {
     fn from(err: cpal::BuildStreamError) -> Error {
-        Error::AudioOutputError(Box::new(err))
+        Error::OutputDeviceError(Box::new(err))
     }
 }
 
 impl From<cpal::PlayStreamError> for Error {
     fn from(err: cpal::PlayStreamError) -> Error {
-        Error::AudioOutputError(Box::new(err))
+        Error::OutputDeviceError(Box::new(err))
     }
 }
 
 impl From<cpal::PauseStreamError> for Error {
     fn from(err: cpal::PauseStreamError) -> Error {
-        Error::AudioOutputError(Box::new(err))
+        Error::OutputDeviceError(Box::new(err))
     }
 }

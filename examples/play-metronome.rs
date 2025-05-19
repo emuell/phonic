@@ -1,6 +1,6 @@
-use afplay::{
-    source::file::preloaded::PreloadedFileSource, utils::speed_from_note, AudioFilePlayer,
-    AudioOutput, DefaultAudioOutput, Error, FilePlaybackOptions,
+use phonic::{
+    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, Player,
+    PreloadedFileSource,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -13,14 +13,13 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 fn main() -> Result<(), Error> {
     // Setup audio output and player
-    let mut player = AudioFilePlayer::new(DefaultAudioOutput::open()?.sink(), None);
+    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
     let sample_rate = player.output_sample_rate();
 
     // Preload samples
     let metronome =
         PreloadedFileSource::new("assets/cowbell.wav", None, Default::default(), sample_rate)?;
-    let bass = 
-        PreloadedFileSource::new("assets/bass.wav", None, Default::default(), sample_rate)?;
+    let bass = PreloadedFileSource::new("assets/bass.wav", None, Default::default(), sample_rate)?;
 
     // Metronome parameters
     const BPM: f64 = 120.0;

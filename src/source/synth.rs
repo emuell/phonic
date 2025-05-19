@@ -1,29 +1,25 @@
-use std::{time::Duration, sync::Arc};
+use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
-    source::AudioSource,
+    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    source::Source,
     utils::db_to_linear,
     Error,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-#[cfg(any(feature = "dasp", feature = "fundsp"))]
 mod common;
 
 #[cfg(feature = "dasp")]
 pub mod dasp;
 
-#[cfg(feature = "fundsp")]
-pub mod fundsp;
-
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a SynthSource.
+/// Options to control playback of a [`SynthSource`].
 #[derive(Clone, Copy)]
 pub struct SynthPlaybackOptions {
     /// By default 1.0f32. Customize to lower or raise the volume of the synth tone.
@@ -39,7 +35,7 @@ pub struct SynthPlaybackOptions {
     /// stopped before it finished playing.
     pub fade_out_duration: Option<Duration>,
 
-    /// Wallclock time rate of playback pos events, emited via AudioFilePlaybackStatusEvent
+    /// Wallclock time rate of playback pos events, emited via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
@@ -109,18 +105,18 @@ pub enum SynthPlaybackMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which creates samples from a synthesized signal.
-pub trait SynthSource: AudioSource {
+pub trait SynthSource: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
-    fn playback_id(&self) -> AudioFilePlaybackId;
+    fn playback_id(&self) -> PlaybackId;
 
     /// Message queue to control this sources's playback.
     fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>>;
 
     /// Channel to receive file playback status from the synth.
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>>;
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>);
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>>;
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>);
 
     /// Optional context passed along with the playback status.
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext>;
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>);
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext>;
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>);
 }

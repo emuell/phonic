@@ -6,8 +6,8 @@ use sort::bubble_sort_cmp;
 
 use crate::{
     player::PlaybackMessageSender,
-    source::{AudioSource, AudioSourceTime},
-    AudioFilePlaybackId,
+    source::{Source, SourceTime},
+    PlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -15,9 +15,9 @@ use crate::{
 /// Mixer internal struct to keep track of currently playing sources.
 struct MixedPlayingSource {
     is_active: bool,
-    playback_id: AudioFilePlaybackId,
+    playback_id: PlaybackId,
     playback_message_queue: PlaybackMessageSender,
-    source: Owned<Box<dyn AudioSource>>,
+    source: Owned<Box<dyn Source>>,
     start_time: u64,
     stop_time: Option<u64>,
 }
@@ -27,22 +27,23 @@ struct MixedPlayingSource {
 /// Messages send from player to mixer to start or stop playing sources.
 pub enum MixedSourceMsg {
     AddSource {
-        playback_id: AudioFilePlaybackId,
+        playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageSender,
-        source: Owned<Box<dyn AudioSource>>,
+        source: Owned<Box<dyn Source>>,
         sample_time: u64,
     },
     StopSource {
-        playback_id: AudioFilePlaybackId,
+        playback_id: PlaybackId,
         sample_time: u64,
     },
+    #[allow(dead_code)]
     RemoveAllSources,
     RemoveAllPendingSources,
 }
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which converts and mixes other sources together.
+/// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<MixedPlayingSource>,
     event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
@@ -95,8 +96,8 @@ impl MixedSource {
     }
 }
 
-impl AudioSource for MixedSource {
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize {
+impl Source for MixedSource {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // process events
         let mut got_new_sources = false;
         while let Some(event) = self.event_queue.pop() {

@@ -1,13 +1,13 @@
 # Emscripten Demo
 
-This example crate shows how to build and serve a simple website which is using afplay via Emscripten.
+This example crate shows how to build and serve a simple website which is using phonic via Emscripten.
 
 It creates a webpage which plays a metronome sample file and allows playing a simple synth sound with the computer keyboard.
 
 
 ## Build Instructions
 
-To build afplay for the web with emscripten you need to install:
+To build phonic for the web with emscripten you need to install:
 
 ### Prerequisites
 

@@ -12,17 +12,17 @@ pub mod synth;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Timing info for `AudioSource` buffers.
+/// Timing info for [`Source`] impls.
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub struct AudioSourceTime {
+pub struct SourceTime {
     /// Buffer time in absolute sample frames since playback started.
     pub pos_in_frames: u64,
     /// Buffer pos in elapsed wallclock time units since playback started.
     pub pos_instant: Instant,
 }
 
-impl AudioSourceTime {
-    /// Create a new AudioSourceTime with default values.
+impl SourceTime {
+    /// Create a new SourceTime with default values.
     pub fn new() -> Self {
         Self {
             pos_in_frames: 0,
@@ -30,7 +30,7 @@ impl AudioSourceTime {
         }
     }
 
-    /// return a new AudioSourceTime with a frame time which is this times's frame time
+    /// return a new SourceTime with a frame time which is this times's frame time
     /// plus the given amount in frames.
     pub fn with_added_frames(&self, frames: u64) -> Self {
         let mut copy = *self;
@@ -44,7 +44,7 @@ impl AudioSourceTime {
     }
 }
 
-impl Default for AudioSourceTime {
+impl Default for SourceTime {
     fn default() -> Self {
         Self::new()
     }
@@ -52,7 +52,7 @@ impl Default for AudioSourceTime {
 
 // -------------------------------------------------------------------------------------------------
 
-/// AudioSource types produce audio samples in `f32` format and can be `Send` and `Sync`ed
+/// Source types produce audio samples in `f32` format and can be `Send` and `Sync`ed
 /// across threads.
 ///
 /// The output buffer is a raw interleaved buffer, which is going to be written by the source
@@ -60,7 +60,7 @@ impl Default for AudioSourceTime {
 /// so following sources don't have to adapt to new specs.
 ///
 /// `write` is called in the realtime audio thread, so it must not block!
-pub trait AudioSource: Send + Sync + 'static {
+pub trait Source: Send + Sync + 'static {
     /// The source's output sample rate.
     fn sample_rate(&self) -> u32;
     /// The source's output channel count.
@@ -71,8 +71,8 @@ pub trait AudioSource: Send + Sync + 'static {
     fn is_exhausted(&self) -> bool;
 
     /// Write at most of `output.len()` samples into the interleaved `output`
-    /// The given [`AudioSourceTime`] parameter specifies which absolute time this buffer in the
+    /// The given [`SourceTime`] parameter specifies which absolute time this buffer in the
     /// final output stream refers to. It can be used to schedule and apply real-time events.
     /// Returns the number of written **samples** (not frames).
-    fn write(&mut self, output: &mut [f32], time: &AudioSourceTime) -> usize;
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize;
 }

@@ -2,7 +2,7 @@ use std::{error, fmt, io};
 
 // -------------------------------------------------------------------------------------------------
 
-/// `Error` provides an enumeration of all possible errors reported by afplay.
+/// Provides an enumeration of all possible errors reported by phonic.
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
@@ -10,7 +10,7 @@ pub enum Error {
     MediaFileProbeError,
     MediaFileSeekError,
     AudioDecodingError(Box<dyn error::Error + Send + Sync>),
-    AudioOutputError(Box<dyn error::Error + Send + Sync>),
+    OutputDeviceError(Box<dyn error::Error + Send + Sync>),
     ResamplingError(Box<dyn error::Error + Send + Sync>),
     IoError(io::Error),
     ParameterError(String),
@@ -26,7 +26,7 @@ impl fmt::Display for Error {
             Self::MediaFileProbeError => write!(f, "Audio file failed to probe"),
             Self::MediaFileSeekError => write!(f, "Audio file failed to seek"),
             Self::AudioDecodingError(err)
-            | Self::AudioOutputError(err)
+            | Self::OutputDeviceError(err)
             | Self::ResamplingError(err) => err.fmt(f),
             Self::IoError(err) => err.fmt(f),
             Self::ParameterError(str) => write!(f, "Invalid parameter: {str}"),

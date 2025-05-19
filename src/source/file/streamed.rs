@@ -15,8 +15,8 @@ use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
 use crate::{
     error::Error,
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusContext, AudioFilePlaybackStatusEvent},
-    source::{resampled::ResamplingQuality, AudioSource, AudioSourceTime},
+    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    source::{resampled::ResamplingQuality, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
         buffer::TempBuffer,
@@ -43,7 +43,7 @@ pub enum StreamedFileSourceMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A source which streams & decodes an audio file asynchromiously in a worker thread.
+/// A [`FileSource`] which streams & decodes an audio file asynchromiously in a worker thread.
 pub struct StreamedFileSource {
     actor: ActorHandle<StreamedFileSourceMessage>,
     event_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
@@ -58,8 +58,8 @@ pub struct StreamedFileSource {
     resampler: Box<dyn AudioResampler>,
     resampler_input_buffer: TempBuffer,
     output_sample_rate: u32,
-    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    playback_status_context: Option<AudioFilePlaybackStatusContext>,
+    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_status_context: Option<PlaybackStatusContext>,
     playback_pos_report_instant: Instant,
     playback_pos_emit_rate: Option<Duration>,
     playback_finished: bool,
@@ -68,7 +68,7 @@ pub struct StreamedFileSource {
 impl StreamedFileSource {
     pub fn new(
         file_path: &str,
-        playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -81,7 +81,7 @@ impl StreamedFileSource {
         let signal_spec = decoder.signal_spec();
 
         // Create a ring-buffer for the decoded samples. Worker thread is producing,
-        // we are consuming in the `AudioSource` impl.
+        // we are consuming in the `Source` impl.
         let buffer = StreamedFileWorker::default_buffer();
         let consumer = buffer.consumer();
 
@@ -210,7 +210,7 @@ impl StreamedFileSource {
 }
 
 impl FileSource for StreamedFileSource {
-    fn playback_id(&self) -> AudioFilePlaybackId {
+    fn playback_id(&self) -> PlaybackId {
         self.file_id
     }
 
@@ -218,17 +218,17 @@ impl FileSource for StreamedFileSource {
         self.event_queue.clone()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
         self.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
         self.playback_status_send = sender;
     }
 
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> {
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
         self.playback_status_context.clone()
     }
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
         self.playback_status_context = context;
     }
 
@@ -246,8 +246,8 @@ impl FileSource for StreamedFileSource {
     }
 }
 
-impl AudioSource for StreamedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
+impl Source for StreamedFileSource {
+    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
         // consume playback messages
         while let Some(event) = self.event_queue.pop() {
             match event {
@@ -332,7 +332,7 @@ impl AudioSource for StreamedFileSource {
             if self.should_report_pos() {
                 self.playback_pos_report_instant = Instant::now();
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.file_id,
                     context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
@@ -350,7 +350,7 @@ impl AudioSource for StreamedFileSource {
         if !is_playing || is_exhausted || fadeout_completed {
             // we're reached end of file or got stopped: send stop message
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
                     id: self.file_id,
                     context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),

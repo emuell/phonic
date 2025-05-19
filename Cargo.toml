@@ -1,11 +1,13 @@
 [package]
-name = "afplay"
-version = "0.2.0"
+name = "phonic"
+version = "0.3.0"
 edition = "2018"
 description = "Audio playback library"
 authors = ["Eduard Müller <mail@emuell.net>"]
+repository = "https://github.com/emuell/phonic"
 exclude = ["assets", "examples"]
-categories = ["audio", "synth", "music", "gamedev"]
+categories = ["multimedia::audio"]
+keywords = ["audio", "playback", "dsp", "synth", "emscripten", "gamedev"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,7 +18,6 @@ log = { version = "^0.4", features = [
     "release_max_level_info",
 ] }
 lazy_static = { version = "^1.4" }
-cfg-if = { version = "^1.0" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^6.1" }
@@ -32,7 +33,6 @@ assert_no_alloc = { version = "^1.1", features = [
     "warn_debug",
 ], optional = true }
 dasp = { version = "^0.11", features = ["signal"], optional = true }
-fundsp = { version = "^0.20", optional = true }
 cpal = { version = "^0.15", optional = true, features = ["jack", "asio"] }
 sokol = { version="*", optional = true, git="https://github.com/floooh/sokol-rust.git" }
 
@@ -55,9 +55,8 @@ opt-level = 2
 cpal-output = ["cpal"]
 sokol-output = ["sokol"]
 dasp-synth = ["dasp"]
-fundsp-synth = ["fundsp"]
 assert-allocs = ["assert_no_alloc"]
-default = ["cpal-output", "dasp-synth", "fundsp-synth", "assert-allocs"]
+default = ["cpal-output", "dasp-synth", "assert-allocs"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -66,7 +65,7 @@ all-features = true
 name = "play-file"
 [[example]]
 name = "play-synth"
-required-features = ["dasp-synth", "fundsp-synth"]
+required-features = ["dasp-synth"]
 [[example]]
 name = "play-interactive"
 required-features = ["dasp-synth"]

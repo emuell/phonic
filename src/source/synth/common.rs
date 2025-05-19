@@ -1,12 +1,15 @@
-use std::{time::{Duration, Instant}, sync::Arc};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 use crate::{
-    player::{AudioFilePlaybackId, AudioFilePlaybackStatusEvent, AudioFilePlaybackStatusContext},
-    source::{AudioSource, AudioSourceTime},
+    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    source::{Source, SourceTime},
     utils::{
         fader::{FaderState, VolumeFader},
         unique_usize_id,
@@ -35,9 +38,9 @@ where
     sample_rate: u32,
     volume_fader: VolumeFader,
     playback_message_queue: Arc<ArrayQueue<SynthPlaybackMessage>>,
-    playback_status_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
-    playback_status_context: Option<AudioFilePlaybackStatusContext>,
-    playback_id: AudioFilePlaybackId,
+    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_status_context: Option<PlaybackStatusContext>,
+    playback_id: PlaybackId,
     playback_name: Arc<String>,
     playback_options: SynthPlaybackOptions,
     playback_pos: u64,
@@ -56,7 +59,7 @@ where
         generator_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,
-        event_send: Option<Sender<AudioFilePlaybackStatusEvent>>,
+        event_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
@@ -103,7 +106,7 @@ impl<Generator> SynthSource for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
-    fn playback_id(&self) -> AudioFilePlaybackId {
+    fn playback_id(&self) -> PlaybackId {
         self.playback_id
     }
 
@@ -111,26 +114,26 @@ where
         self.playback_message_queue.clone()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<AudioFilePlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
         self.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<AudioFilePlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
         self.playback_status_send = sender;
     }
 
-    fn playback_status_context(&self) -> Option<AudioFilePlaybackStatusContext> { 
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
         self.playback_status_context.clone()
     }
-    fn set_playback_status_context(&mut self, context: Option<AudioFilePlaybackStatusContext>) {
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
         self.playback_status_context = context;
     }
 }
 
-impl<Generator> AudioSource for SynthSourceImpl<Generator>
+impl<Generator> Source for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
-    fn write(&mut self, output: &mut [f32], _time: &AudioSourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
         if let Some(msg) = self.playback_message_queue.pop() {
@@ -174,7 +177,7 @@ where
         if self.should_report_pos() {
             if let Some(event_send) = &self.playback_status_send {
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Position {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.playback_id,
                     context: self.playback_status_context.clone(),
                     path: self.playback_name.clone(),
@@ -192,7 +195,7 @@ where
         if stop_playing || is_exhausted || fade_out_finished {
             self.playback_finished = true;
             if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(AudioFilePlaybackStatusEvent::Stopped {
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
                     id: self.playback_id,
                     context: self.playback_status_context.clone(),
                     path: self.playback_name.clone(),
