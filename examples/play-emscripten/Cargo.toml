@@ -1,0 +1,12 @@
+[package]
+name = "play_emscripten"
+version = "0.2.0"
+edition = "2018"
+description = "Emscripten WASM example for afplay"
+
+# see build.rs and build.sh for the emscripten config
+
+[dependencies]
+# NB: inportant to enable sokol output here, as cpal does not work with emscripten
+afplay = { path = "../..", default-features = false, features = ["sokol-output", "dasp-synth"]}
+dasp = { version = "^0.11", features = ["signal"] }
