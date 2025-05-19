@@ -1,22 +1,19 @@
 // Check feature, target dependencies
-#[cfg(not(any(not(feature = "cubeb"), all(feature = "cubeb", feature = "windows"))))]
-compile_error!("cubeb requires the windows feature to be enabled too");
-
-#[cfg(all(target_arch = "wasm32", feature = "cubeb"))]
-compile_error!("wasm32 builds are not compatible with cubeb. use cpal instead");
+#[cfg(all(target_arch = "wasm32", feature = "cpal"))]
+compile_error!("wasm32 builds are not compatible with cpal. use sokol instead");
 
 // Note: when cpal and cubeb features are enabled, we use cpal only
 #[cfg(feature = "cpal")]
 pub mod cpal;
-#[cfg(all(feature = "cubeb", not(feature = "cpal")))]
-pub mod cubeb;
+#[cfg(all(feature = "sokol", not(feature = "cpal")))]
+pub mod sokol;
 
 /// The enabled audio output type: cpal or cubeb
 #[cfg(feature = "cpal")]
 pub type DefaultAudioOutput = cpal::CpalOutput;
 
-#[cfg(all(feature = "cubeb", not(feature = "cpal")))]
-pub type DefaultAudioOutput = cubeb::CubebOutput;
+#[cfg(all(feature = "sokol", not(feature = "cpal")))]
+pub type DefaultAudioOutput = sokol::SokolOutput;
 
 /// Available audio hosts (platform specific)
 pub enum AudioHostId {
@@ -31,7 +28,7 @@ pub enum AudioHostId {
     Jack,
 }
 
-/// The enabled audio output sink type: cpal or cubeb
+/// The enabled audio output sink type: cpal or sokol
 pub type DefaultAudioSink = <DefaultAudioOutput as AudioOutput>::Sink;
 
 use super::source::AudioSource;
