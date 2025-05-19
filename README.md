@@ -16,12 +16,13 @@ app and related projects which are using the [Tauri](https://tauri.app) app fram
   (on-the-fly decoded) **audio files**.
 - Play, stop, mix and monitor playback of **custom synth tones** thanks to
   [dasp](https://github.com/RustAudio/dasp) (optional feature: disabled by default).
-- Play audio on Windows, macOS and Linux via [cpal](https://github.com/RustAudio/cpal) or
-  [cubeb](https://github.com/mozilla/cubeb) (cpal is enabled by default).
+- Play audio on Windows, macOS, Linux or the Web via [cpal](https://github.com/RustAudio/cpal) or
+  [sokol-audio](https://github.com/floooh/sokol-rust) (cpal is enabled by default).
 - Decodes and thus plays back most **common audio file formats**, thanks to
   [Symphonia](https://github.com/pdeljanov/Symphonia).
 - Files are automatically **resampled and channel mapped** to the audio output's signal specs,
   thanks to [libsamplerate](https://github.com/Prior99/libsamplerate-sys).
+- Compiles to **WASM** via [Emscripten](https://emscripten.org/) and [sokol](https://github.com/floooh/sokol-rust): see [play-emscripten](./examples/play-emscripten/)
 - Click free playback: when stopping sounds, a very short volume fade-out is applied to
   **avoid clicks**.
 - Sample precise playback scheduling, e.g. to play samples in a **sequencer**.
