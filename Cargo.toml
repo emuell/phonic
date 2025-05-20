@@ -39,6 +39,8 @@ cpal = { version = "^0.15", optional = true, features = ["jack", "asio"] }
 sokol = { version="^0.1", optional = true, git="https://github.com/floooh/sokol-rust.git" }
 
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
+hound = { version = "^3.5" }
+svg = { version = "^0.18" }
 device_query = { version = "^3.0" }
 ctrlc = { version = "^3.4" }
 

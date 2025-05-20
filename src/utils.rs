@@ -1,14 +1,24 @@
-//! Helper functions to e.g. convert musical units.
-#![allow(dead_code, unused_macros)]
+//! Helper functions to convert musical units and to generate audio waveforms for GUIs.
+
+use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// -------------------------------------------------------------------------------------------------
 
 pub(crate) mod actor;
 pub(crate) mod buffer;
 pub(crate) mod decoder;
 pub(crate) mod fader;
 pub(crate) mod resampler;
+pub(crate) mod wave;
 
-use lazy_static::lazy_static;
-use std::sync::atomic::{AtomicUsize, Ordering};
+/// Convert raw audio buffers to audio waveforms for GUIs.
+pub mod waveform {
+    pub use super::wave::{
+        mixed_down_waveform as mixed_down, multi_channel_waveform as multi_channel,
+        WaveformPoint as Point,
+    };
+}
 
 // -------------------------------------------------------------------------------------------------
 

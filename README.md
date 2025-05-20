@@ -16,8 +16,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   [sokol-audio](https://github.com/floooh/sokol-rust) (cpal is enabled by default).
 - Decodes and thus plays back most **common audio file formats**, thanks to
   [Symphonia](https://github.com/pdeljanov/Symphonia).
-- Files are automatically **resampled and channel mapped** to the audio output's signal specs,
-  thanks to [libsamplerate](https://github.com/Prior99/libsamplerate-sys).
+- Files are automatically **resampled and channel mapped** using a fast custom resampler or [rubato](https://github.com/HEnquist/rubato).
 - Runs on the **web** via [sokol](https://github.com/floooh/sokol-rust) thanks to [emscripten](https://emscripten.org/): see [play-emscripten](./examples/play-emscripten/) example.
 - Click free playback: when stopping sounds, a very short volume fade-out is applied to
   **avoid clicks**.

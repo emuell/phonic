@@ -30,17 +30,6 @@ impl ResamplingSpecs {
     pub fn output_ratio(&self) -> f64 {
         self.output_rate as f64 / self.input_rate as f64
     }
-
-    pub fn input_rate(&self) -> u32 {
-        self.input_rate
-    }
-    pub fn output_rate(&self) -> u32 {
-        self.output_rate
-    }
-
-    pub fn channel_count(&self) -> usize {
-        self.channel_count
-    }
 }
 
 // -------------------------------------------------------------------------------------------------
