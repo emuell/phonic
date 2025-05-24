@@ -269,7 +269,7 @@ impl SokolOutput {
         // Move playback pos
         state
             .playback_pos
-            .fetch_add(samples_written as u64, Ordering::Relaxed);
+            .fetch_add(output_samples as u64, Ordering::Relaxed);
     }
 }
 
