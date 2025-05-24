@@ -154,6 +154,10 @@ impl CpalSink {
 }
 
 impl OutputSink for CpalSink {
+    fn suspended(&self) -> bool {
+        false
+    }
+
     fn channel_count(&self) -> usize {
         self.channel_count as usize
     }

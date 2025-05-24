@@ -137,6 +137,11 @@ impl Player {
         }
     }
 
+    /// Our audio device's sustended state.
+    pub fn output_suspended(&self) -> bool {
+        self.sink.suspended()
+    }
+
     /// Our audio device's actual sample rate.
     pub fn output_sample_rate(&self) -> u32 {
         self.sink.sample_rate()

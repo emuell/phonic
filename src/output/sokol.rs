@@ -84,6 +84,10 @@ pub struct SokolSink {
 }
 
 impl OutputSink for SokolSink {
+    fn suspended(&self) -> bool {
+        saudio::suspended()
+    }
+
     fn channel_count(&self) -> usize {
         assert!(
             saudio::isvalid(),

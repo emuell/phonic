@@ -38,10 +38,15 @@ use super::source::Source;
 
 /// OutputDevice controller
 pub trait OutputSink {
-    /// Signal specs.
+    /// true when audio output is currently suspended by the system: only used in Sokol's
+    /// WebAudio backend, all other backends return false
+    fn suspended(&self) -> bool;
+
+    /// Actual device's output sample buffer channel count.
     fn channel_count(&self) -> usize;
+    /// Actual device's output sample rate.
     fn sample_rate(&self) -> u32;
-    /// Actual device's output playhead position in samples (NOT sample frames).
+    /// Actual device's output playhead position in **samples** (NOT frames).
     fn sample_position(&self) -> u64;
 
     /// Get actual output volume.
