@@ -26,6 +26,12 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+const PREFERRED_SAMPLE_RATE: i32 = 44100;
+const PREFERRED_CHANNELS: i32 = 2;
+const PREFERRED_BUFFER_SIZE: i32 = if cfg!(debug_assertions) { 4096 } else { 2048 };
+
+// -------------------------------------------------------------------------------------------------
+
 enum CallbackMessage {
     PlaySource(Box<dyn Source>),
     Pause,
@@ -188,9 +194,11 @@ impl SokolOutput {
 
     fn audio_init(context: *mut SokolContext) {
         saudio::setup(&saudio::Desc {
-            num_channels: 2,
             stream_userdata_cb: Some(Self::audio_callback),
             user_data: context as *mut ffi::c_void,
+            num_channels: PREFERRED_CHANNELS,
+            buffer_frames: PREFERRED_BUFFER_SIZE,
+            sample_rate: PREFERRED_SAMPLE_RATE,
             logger: saudio::Logger {
                 func: Some(slog::slog_func),
                 ..Default::default()
