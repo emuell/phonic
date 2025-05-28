@@ -94,12 +94,10 @@ impl MixedSource {
     fn remove_all_sources(&mut self) {
         self.playing_sources.clear();
     }
-}
 
-impl Source for MixedSource {
-    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
-        // process events
-        let mut got_new_sources = false;
+    /// Process pending mixer events
+    fn process_events(&mut self, time: &SourceTime) {
+        let mut sources_added = false;
         while let Some(event) = self.event_queue.pop() {
             match event {
                 MixedSourceMsg::AddSource {
@@ -118,7 +116,7 @@ impl Source for MixedSource {
                         self.sample_rate,
                         "adjust source's sample rate before adding it"
                     );
-                    got_new_sources = true;
+                    sources_added = true;
                     self.playing_sources.push(MixedPlayingSource {
                         is_active: true,
                         playback_id,
@@ -132,11 +130,12 @@ impl Source for MixedSource {
                     playback_id,
                     sample_time,
                 } => {
-                    for source in self.playing_sources.iter_mut() {
-                        if source.playback_id == playback_id {
-                            source.stop_time = Some(sample_time);
-                            break;
-                        }
+                    if let Some(source) = self
+                        .playing_sources
+                        .iter_mut()
+                        .find(|s| s.playback_id == playback_id)
+                    {
+                        source.stop_time = Some(sample_time);
                     }
                 }
                 MixedSourceMsg::RemoveAllPendingSources => {
@@ -148,29 +147,36 @@ impl Source for MixedSource {
                 }
             }
         }
-        // keep sources sorted by sample time: this makes batch processing easier
-        // NB: use "swap" based sorting here to avoid memory allocations
-        if got_new_sources {
+
+        // Sort sources by start time if any new sources were added
+        if sources_added {
+            // keep sources sorted by sample time: this makes batch processing easier
+            // NB: use "swap" based sorting here to avoid memory allocations
             bubble_sort_cmp(&mut self.playing_sources, |a, b| {
                 a.start_time.cmp(&b.start_time) as isize
             });
         }
+    }
+}
 
-        // return empty handed when we have no sources
-        let output_frame_count = output.len() / self.channel_count;
+impl Source for MixedSource {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        // Process all pending events
+        self.process_events(time);
+
+        // Return early if no active sources
         if self.playing_sources.is_empty() {
             return 0;
         }
         // clear entire output first, as we're only adding below
-        for o in output.iter_mut() {
-            *o = 0.0;
-        }
+        output.fill(0.0);
+
         // run and add all playing sources
-        let mut max_written = 0;
+        let output_frame_count = output.len() / self.channel_count;
         'all_sources: for playing_source in self.playing_sources.iter_mut() {
-            let source = &mut playing_source.source;
             let mut total_written = 0;
-            // check source's sample start time
+
+            // apply source's sample start time
             if playing_source.start_time > time.pos_in_frames {
                 let frames_until_source_starts =
                     (playing_source.start_time - time.pos_in_frames) as usize;
@@ -184,10 +190,13 @@ impl Source for MixedSource {
                     total_written += frames_until_source_starts * self.channel_count;
                 }
             }
+
             // run and mix down the source
+            let source = &mut playing_source.source;
             'source: while total_written < output.len() {
                 let source_time =
                     time.with_added_frames((total_written / self.channel_count) as u64);
+
                 // check if there's a pending stop command for the source
                 let mut samples_until_stop = u64::MAX;
                 if let Some(stop_time_in_frames) = playing_source.stop_time {
@@ -203,15 +212,12 @@ impl Source for MixedSource {
                     }
                     samples_until_stop = u64::MAX;
                 }
+
                 // run source on temp_out until we've filled up the whole final output
                 let remaining = (output.len() - total_written).min(samples_until_stop as usize);
                 let to_write = remaining.min(self.temp_out.len());
                 let written = source.write(&mut self.temp_out[..to_write], &source_time);
-                if source.is_exhausted() {
-                    // source no longer is playing: mark it as inactive
-                    playing_source.is_active = false;
-                    break 'source;
-                }
+
                 // add output of the source to the final output
                 let remaining_out = &mut output[total_written..];
                 let written_out = &self.temp_out[..written];
@@ -219,12 +225,19 @@ impl Source for MixedSource {
                     *o += *i;
                 }
                 total_written += written;
+
+                // stop processing sources which are now exhausted
+                if source.is_exhausted() {
+                    playing_source.is_active = false;
+                    break 'source;
+                }
             }
-            max_written = max_written.max(total_written);
         }
+
         // drop all sources which finished playing in this iteration
         self.remove_matching_sources(|s| !s.is_active);
-        // return modified output len: we've cleared the entire output
+
+        // return output len as we've cleared the entire output before processing
         output.len()
     }
 
