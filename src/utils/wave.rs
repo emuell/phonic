@@ -7,7 +7,7 @@
 //!
 //! ```rust no_run
 //! use svg::{node::element::{path::Data, Path}, Document};
-//! use phonic::utils::mixed_down_waveform;
+//! use phonic::utils::waveform::mixed_down;
 //!
 //! # fn main() { || -> Result<(), Box<dyn std::error::Error>> {
 //! #
@@ -25,7 +25,7 @@
 //!     .collect();
 //!
 //! // generate mixed-down, mono waveform data with WIDTH as resolution
-//! let waveform_data = mixed_down_waveform(
+//! let waveform_data = mixed_down(
 //!     &buffer,
 //!     specs.channels as usize,
 //!     specs.sample_rate,
