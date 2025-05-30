@@ -7,6 +7,7 @@ pub mod empty;
 pub mod file;
 pub mod mapped;
 pub mod mixed;
+pub mod panned;
 pub mod resampled;
 pub mod synth;
 

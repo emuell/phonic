@@ -21,6 +21,7 @@ use crate::{
         converted::ConvertedSource,
         file::{FilePlaybackMessage, FileSource},
         mixed::{MixedSource, MixedSourceMsg},
+        panned::PannedSource,
         resampled::ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
     },
@@ -200,24 +201,27 @@ impl Player {
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
+        let playback_panning = file_source.playback_options().panning;
         let playback_message_queue =
             PlaybackMessageSender::File(file_source.playback_message_queue());
         self.playing_sources
             .insert(playback_id, playback_message_queue.clone());
-        // convert file to mixer's rate and channel layout and apply optional pitch
+        // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             file_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
             ResamplingQuality::Default,
         );
-        // play the source by adding it to the mixer
+        // apply panning options
+        let panned_source = PannedSource::new(converted_source, playback_panning);
+        // send the source to the mixer
         if self
             .mixer_event_queue
             .push(MixedSourceMsg::AddSource {
                 playback_id,
                 playback_message_queue,
-                source: Owned::new(&self.collector_handle, Box::new(converted_source)),
+                source: Owned::new(&self.collector_handle, Box::new(panned_source)),
                 sample_time: start_time.unwrap_or(0),
             })
             .is_err()
@@ -253,24 +257,27 @@ impl Player {
         synth_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = synth_source.playback_id();
+        let playback_panning = synth_source.playback_options().panning;
         let playback_message_queue =
             PlaybackMessageSender::Synth(synth_source.playback_message_queue());
         self.playing_sources
             .insert(playback_id, playback_message_queue.clone());
         // convert file to mixer's rate and channel layout
-        let converted = ConvertedSource::new(
+        let converted_source = ConvertedSource::new(
             synth_source,
             self.sink.channel_count(),
             self.sink.sample_rate(),
             ResamplingQuality::Default, // usually unused
         );
-        // play the source
+        // apply panning options
+        let panned_source = PannedSource::new(converted_source, playback_panning);
+        // send the source to the mixer
         if self
             .mixer_event_queue
             .push(MixedSourceMsg::AddSource {
                 playback_id,
                 playback_message_queue,
-                source: Owned::new(&self.collector_handle, Box::new(converted)),
+                source: Owned::new(&self.collector_handle, Box::new(panned_source)),
                 sample_time: start_time.unwrap_or(0),
             })
             .is_err()
