@@ -24,6 +24,10 @@ pub mod dasp;
 pub struct SynthPlaybackOptions {
     /// By default 1.0f32. Customize to lower or raise the volume of the synth tone.
     pub volume: f32,
+
+    /// By default 0.0f32. Set in range -1.0..=1.0 to adjust panning position.
+    pub panning: f32,
+
     /// By default None: when set, the synth tone should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
@@ -44,7 +48,8 @@ pub struct SynthPlaybackOptions {
 impl Default for SynthPlaybackOptions {
     fn default() -> Self {
         Self {
-            volume: 1.0f32,
+            volume: 1.0,
+            panning: 0.0,
             start_time: None,
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
@@ -60,6 +65,11 @@ impl SynthPlaybackOptions {
     }
     pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn panning(mut self, panning: f32) -> Self {
+        self.panning = panning;
         self
     }
 
@@ -90,6 +100,12 @@ impl SynthPlaybackOptions {
                 self.volume
             )));
         }
+        if !(-1.0..=1.0).contains(&self.panning) || self.panning.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'panning' value is '{}'",
+                self.panning
+            )));
+        }
         Ok(())
     }
 }
@@ -108,6 +124,9 @@ pub enum SynthPlaybackMessage {
 pub trait SynthSource: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
     fn playback_id(&self) -> PlaybackId;
+
+    /// The synth source's playback options
+    fn playback_options(&self) -> &SynthPlaybackOptions;
 
     /// Message queue to control this sources's playback.
     fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>>;

@@ -26,6 +26,9 @@ pub struct FilePlaybackOptions {
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
     pub volume: f32,
 
+    /// By default 0.0f32. Set in range -1.0..=1.0 to adjust panning position.
+    pub panning: f32,
+
     /// By default 1.0f64. Customize to pitch the playback speed up or down.
     /// See also `resampling_quality` property.
     pub speed: f64,
@@ -62,6 +65,7 @@ impl Default for FilePlaybackOptions {
         Self {
             stream: false,
             volume: 1.0,
+            panning: 0.0,
             speed: 1.0,
             repeat: 0,
             start_time: None,
@@ -89,6 +93,11 @@ impl FilePlaybackOptions {
     }
     pub fn volume_db(mut self, volume_db: f32) -> Self {
         self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn panning(mut self, panning: f32) -> Self {
+        self.panning = panning;
         self
     }
 
@@ -138,6 +147,12 @@ impl FilePlaybackOptions {
                 self.volume
             )));
         }
+        if !(-1.0..=1.0).contains(&self.panning) || self.panning.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'panning' value is '{}'",
+                self.panning
+            )));
+        }
         if self.speed < 0.0 || self.speed.is_nan() || self.speed.is_infinite() {
             return Err(Error::ParameterError(format!(
                 "playback options 'speed' value is '{}'",
@@ -164,6 +179,9 @@ pub enum FilePlaybackMessage {
 pub trait FileSource: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> PlaybackId;
+
+    /// The file source's playback options
+    fn playback_options(&self) -> &FilePlaybackOptions;
 
     /// Message queue to control file playback.
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>>;
