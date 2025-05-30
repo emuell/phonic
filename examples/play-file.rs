@@ -34,22 +34,23 @@ fn main() -> Result<(), Error> {
     // create sound sources and memorize file ids for the playback status
     let mut playing_file_ids = vec![
         player
-            // files are by default not streamed but are preloaded and player buffered.
+            // files are by default not streamed but are preloaded and played buffered.
             .play_file(
                 "assets/altijd synth bit.wav",
                 FilePlaybackOptions::default(),
             )?,
         player
-            // this file is going to be streamed on the fly with a lowered volume.
-            // we're also lowering the volume and do loop the file 2 times
+            // this file is going to be streamed on the fly with a lowered volume
+            // and a fade out. also pan it a bit to the left and loop it 2 times.
             .play_file(
                 "assets/YuaiLoop.wav",
                 FilePlaybackOptions::default()
                     .streamed()
-                    .volume_db(-3.0)
+                    .volume_db(-2.0)
+                    .panning(-0.3)
                     .speed(speed_from_note(58))
                     .repeat(2)
-                    .fade_out(Duration::from_secs(4)),
+                    .fade_out(Duration::from_secs(3)),
             )?,
     ];
 
