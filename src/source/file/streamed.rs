@@ -264,7 +264,7 @@ impl FileSource for StreamedFileSource {
     }
 
     fn playback_options(&self) -> &FilePlaybackOptions {
-        & self.options
+        &self.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
