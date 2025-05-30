@@ -19,7 +19,10 @@ use crate::{
     error::Error,
     output::{AudioHostId, OutputDevice, OutputSink},
     source::{empty::EmptySource, Source, SourceTime},
-    utils::actor::{Act, Actor, ActorHandle},
+    utils::{
+        actor::{Act, Actor, ActorHandle},
+        buffer::clear_buffer,
+    },
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -355,7 +358,7 @@ impl StreamCallback {
         };
 
         // Mute any remaining samples.
-        output[written..].iter_mut().for_each(|s| *s = 0.0);
+        clear_buffer(&mut output[written..]);
     }
 }
 

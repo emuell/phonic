@@ -22,6 +22,7 @@ use crate::{
     error::Error,
     output::{OutputDevice, OutputSink},
     source::{empty::EmptySource, Source, SourceTime},
+    utils::buffer::clear_buffer,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -270,9 +271,7 @@ impl SokolOutput {
         }
 
         // Mute remaining samples, if any.
-        output[samples_written..].iter_mut().for_each(|s| {
-            *s = 0.0;
-        });
+        clear_buffer(&mut output[samples_written..]);
 
         // Move playback pos
         state

@@ -7,6 +7,7 @@ use sort::bubble_sort_cmp;
 use crate::{
     player::PlaybackMessageSender,
     source::{Source, SourceTime},
+    utils::buffer::{add_buffers, clear_buffer},
     PlaybackId,
 };
 
@@ -168,8 +169,9 @@ impl Source for MixedSource {
         if self.playing_sources.is_empty() {
             return 0;
         }
+
         // clear entire output first, as we're only adding below
-        output.fill(0.0);
+        clear_buffer(output);
 
         // run and add all playing sources
         let output_frame_count = output.len() / self.channel_count;
@@ -219,11 +221,9 @@ impl Source for MixedSource {
                 let written = source.write(&mut self.temp_out[..to_write], &source_time);
 
                 // add output of the source to the final output
-                let remaining_out = &mut output[total_written..];
+                let remaining_out = &mut output[total_written..total_written + written];
                 let written_out = &self.temp_out[..written];
-                for (o, i) in remaining_out.iter_mut().zip(written_out) {
-                    *o += *i;
-                }
+                add_buffers(remaining_out, written_out);
                 total_written += written;
 
                 // stop processing sources which are now exhausted

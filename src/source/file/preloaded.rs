@@ -16,7 +16,7 @@ use crate::{
         Source, SourceTime,
     },
     utils::{
-        buffer::TempBuffer,
+        buffer::{clear_buffer, scale_buffer, TempBuffer},
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
         resampler::{
@@ -357,9 +357,7 @@ impl Source for PreloadedFileSource {
                     self.resampler_input_buffer.reset_range();
                     self.resampler_input_buffer
                         .copy_from(remaining_input_buffer);
-                    for o in &mut self.resampler_input_buffer.get_mut()[remaining_input_len..] {
-                        *o = 0.0;
-                    }
+                    clear_buffer(&mut self.resampler_input_buffer.get_mut()[remaining_input_len..]);
                     let (_, output_written) = self
                         .resampler
                         .process(self.resampler_input_buffer.get(), remaining_target)
@@ -373,9 +371,7 @@ impl Source for PreloadedFileSource {
 
             // apply volume
             if (self.volume - 1.0).abs() > 0.0001 {
-                for o in remaining_target {
-                    *o *= self.volume;
-                }
+                scale_buffer(remaining_target, self.volume);
             }
 
             // apply volume fading

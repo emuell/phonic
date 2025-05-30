@@ -19,7 +19,7 @@ use crate::{
     source::{resampled::ResamplingQuality, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
-        buffer::TempBuffer,
+        buffer::{clear_buffer, scale_buffer, TempBuffer},
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
         resampler::{
@@ -328,9 +328,7 @@ impl Source for StreamedFileSource {
                         || !self.worker_state.end_of_file.load(Ordering::Relaxed))
                 {
                     self.resampler_input_buffer.set_range(0, required_input_len);
-                    for o in &mut self.resampler_input_buffer.get_mut()[read_samples..] {
-                        *o = 0.0;
-                    }
+                    clear_buffer(&mut self.resampler_input_buffer.get_mut()[read_samples..]);
                 }
             }
             let input = self.resampler_input_buffer.get();
@@ -352,9 +350,7 @@ impl Source for StreamedFileSource {
 
         // apply volume parameter
         if (1.0 - self.volume).abs() > 0.0001 {
-            for o in &mut output[0..written] {
-                *o *= self.volume;
-            }
+            scale_buffer(&mut output[0..written], self.volume);
         }
 
         // start fade-out when this got signaled in our worker state

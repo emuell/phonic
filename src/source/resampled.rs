@@ -1,7 +1,7 @@
 use super::{Source, SourceTime};
 
 use crate::utils::{
-    buffer::TempBuffer,
+    buffer::{clear_buffer, TempBuffer},
     resampler::{cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs},
 };
 
@@ -98,9 +98,7 @@ impl Source for ResampledSource {
                     if let Some(required_input_len) = self.resampler.required_input_buffer_size() {
                         if self.input_buffer.len() < required_input_len {
                             self.input_buffer.set_range(0, required_input_len);
-                            for o in &mut self.input_buffer.get_mut()[input_read..] {
-                                *o = 0.0;
-                            }
+                            clear_buffer(&mut self.input_buffer.get_mut()[input_read..]);
                         }
                     }
                 }

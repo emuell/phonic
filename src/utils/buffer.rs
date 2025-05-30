@@ -1,3 +1,5 @@
+use pulp::Simd;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Copy the given planar buffer into an interleaved one.
@@ -91,6 +93,72 @@ pub fn interleaved_to_planar(interleaved: &[f32], planar: &mut [Vec<f32>]) {
 
 // -------------------------------------------------------------------------------------------------
 
+#[pulp::with_simd(clear_buffer = pulp::Arch::new())]
+#[inline(always)]
+/// Dest = 0.0
+pub fn clear_buffer_with_simd<S: Simd>(simd: S, dest: &mut [f32]) {
+    let (head, tail) = S::as_mut_simd_f32s(dest);
+    let zero = simd.splat_f32s(0.0);
+    for x in head.iter_mut() {
+        *x = zero;
+    }
+    for x in tail.iter_mut() {
+        *x = 0.0;
+    }
+}
+
+#[pulp::with_simd(scale_buffer = pulp::Arch::new())]
+#[inline(always)]
+/// Dest *= Value
+pub fn scale_buffer_with_simd<S: Simd>(simd: S, dest: &mut [f32], value: f32) {
+    let (head, tail) = S::as_mut_simd_f32s(dest);
+    let valuef32 = simd.splat_f32s(value);
+    for x in head.iter_mut() {
+        *x = simd.mul_f32s(*x, valuef32);
+    }
+    for x in tail.iter_mut() {
+        *x *= value;
+    }
+}
+
+#[pulp::with_simd(add_buffers = pulp::Arch::new())]
+#[inline(always)]
+/// Dest += Source
+pub fn add_buffers_with_simd<'a, S: Simd>(simd: S, dest: &'a mut [f32], source: &'a [f32]) {
+    assert!(
+        dest.len() == source.len(),
+        "added buffers should have the same size"
+    );
+    let (head1, tail1) = S::as_mut_simd_f32s(dest);
+    let (head2, tail2) = S::as_simd_f32s(source);
+    for (x1, x2) in head1.iter_mut().zip(head2) {
+        *x1 = simd.add_f32s(*x1, *x2);
+    }
+    for (x1, x2) in tail1.iter_mut().zip(tail2) {
+        *x1 *= *x2;
+    }
+}
+
+#[pulp::with_simd(copy_buffers = pulp::Arch::new())]
+#[inline(always)]
+/// Dest = Source
+pub fn copy_buffers_with_simd<'a, S: Simd>(_simd: S, dest: &'a mut [f32], source: &'a [f32]) {
+    assert!(
+        dest.len() == source.len(),
+        "copied buffers should have the same size"
+    );
+    let (head1, tail1) = S::as_mut_simd_f32s(dest);
+    let (head2, tail2) = S::as_simd_f32s(source);
+    for (x1, x2) in head1.iter_mut().zip(head2) {
+        *x1 = *x2;
+    }
+    for (x1, x2) in tail1.iter_mut().zip(tail2) {
+        *x1 = *x2;
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// A preallocated buffer with persistent start/end positions and helper functions,
 /// which are useful for temporary interleaved sample buffers.
 #[derive(Clone, Debug)]
@@ -155,7 +223,7 @@ impl TempBuffer {
 
         let other_slice = &mut other[..copy_len];
         let this_slice = &self.get()[..copy_len];
-        other_slice.copy_from_slice(this_slice);
+        copy_buffers(other_slice, this_slice);
 
         copy_len
     }
@@ -165,7 +233,7 @@ impl TempBuffer {
 
         let this_slice = &mut self.get_mut()[..copy_len];
         let other_slice = &other[..copy_len];
-        this_slice.copy_from_slice(other_slice);
+        copy_buffers(this_slice, other_slice);
 
         copy_len
     }

@@ -29,6 +29,7 @@ audio_thread_priority = { version = "^0.33", default-features = false }
 rubato = { version = "^0.16" }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = ["aac", "alac", "mp3", "isomp4"] }
+pulp = { version = "^0.21", features = [ "macro" ] }
 
 # Optional dependencies
 assert_no_alloc = { version = "^1.1", features = [
