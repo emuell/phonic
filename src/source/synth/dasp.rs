@@ -94,6 +94,10 @@ where
         self.0.playback_id()
     }
 
+    fn playback_options(&self) -> &SynthPlaybackOptions {
+        self.0.playback_options()
+    }
+
     fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>> {
         self.0.playback_message_queue()
     }

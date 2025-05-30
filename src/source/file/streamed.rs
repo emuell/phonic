@@ -49,6 +49,7 @@ pub struct StreamedFileSource {
     event_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
     file_id: usize,
     file_path: Arc<String>,
+    options: FilePlaybackOptions,
     volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
@@ -161,6 +162,7 @@ impl StreamedFileSource {
             event_queue,
             file_id,
             file_path: Arc::new(file_path.into()),
+            options,
             volume,
             volume_fader,
             fade_out_duration,
@@ -207,11 +209,62 @@ impl StreamedFileSource {
         let seconds = frames as f64 / self.output_sample_rate as f64;
         Duration::from_secs_f64(seconds)
     }
+
+    fn process_messages(&mut self) {
+        while let Some(event) = self.event_queue.pop() {
+            match event {
+                FilePlaybackMessage::Seek(pos) => {
+                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Seek(pos)) {
+                        log::warn!("failed to send playback seek event: {}", err)
+                    }
+                }
+                FilePlaybackMessage::Stop => {
+                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Stop) {
+                        log::warn!("failed to send playback stop event: {}", err)
+                    }
+                }
+            };
+        }
+    }
+
+    fn send_playback_position_status(&mut self, position: u64) {
+        if let Some(event_send) = &self.playback_status_send {
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                    id: self.file_id,
+                    context: self.playback_status_context.clone(),
+                    path: self.file_path.clone(),
+                    position: self.samples_to_duration(position),
+                }) {
+                    log::warn!("failed to send playback event: {}", err)
+                }
+            }
+        }
+    }
+
+    fn send_playback_stopped_status(&mut self, is_exhausted: bool) {
+        if let Some(event_send) = &self.playback_status_send {
+            if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                id: self.file_id,
+                context: self.playback_status_context.clone(),
+                path: self.file_path.clone(),
+                exhausted: is_exhausted,
+            }) {
+                log::warn!("failed to send playback event: {}", err)
+            }
+        }
+    }
 }
 
 impl FileSource for StreamedFileSource {
     fn playback_id(&self) -> PlaybackId {
         self.file_id
+    }
+
+    fn playback_options(&self) -> &FilePlaybackOptions {
+        & self.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
@@ -249,20 +302,7 @@ impl FileSource for StreamedFileSource {
 impl Source for StreamedFileSource {
     fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
         // consume playback messages
-        while let Some(event) = self.event_queue.pop() {
-            match event {
-                FilePlaybackMessage::Seek(pos) => {
-                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Seek(pos)) {
-                        log::warn!("failed to send playback seek event: {}", err)
-                    }
-                }
-                FilePlaybackMessage::Stop => {
-                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Stop) {
-                        log::warn!("failed to send playback stop event: {}", err)
-                    }
-                }
-            };
-        }
+        self.process_messages();
 
         // return empty handed when playback finished
         if self.playback_finished {
@@ -312,7 +352,7 @@ impl Source for StreamedFileSource {
 
         // apply volume parameter
         if (1.0 - self.volume).abs() > 0.0001 {
-            for o in output[0..written].as_mut() {
+            for o in &mut output[0..written] {
                 *o *= self.volume;
             }
         }
@@ -328,37 +368,15 @@ impl Source for StreamedFileSource {
         self.volume_fader.process(&mut output[0..written]);
 
         // send position change events
-        if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
-                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    position: self.samples_to_duration(position),
-                }) {
-                    log::warn!("failed to send playback event: {}", err)
-                }
-            }
-        }
+        self.send_playback_position_status(position);
 
         // check if playback finished and send Stopped events
         let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);
         let is_exhausted = written == 0 && self.worker_state.end_of_file.load(Ordering::Relaxed);
         let fadeout_completed = is_fading_out && self.volume_fader.state() == FaderState::Finished;
         if !is_playing || is_exhausted || fadeout_completed {
-            // we're reached end of file or got stopped: send stop message
-            if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    exhausted: is_exhausted,
-                }) {
-                    log::warn!("failed to send playback event: {}", err)
-                }
-            }
+            // send stop message
+            self.send_playback_stopped_status(is_exhausted);
             // stop our worker
             self.worker_state.is_playing.store(false, Ordering::Relaxed);
             // and stop processing

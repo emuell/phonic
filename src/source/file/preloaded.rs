@@ -37,6 +37,7 @@ use crate::{
 pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: Arc<String>,
+    options: FilePlaybackOptions,
     volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
@@ -161,6 +162,7 @@ impl PreloadedFileSource {
         Ok(Self {
             file_id,
             file_path: Arc::new(file_path.into()),
+            options,
             volume,
             volume_fader,
             fade_out_duration,
@@ -233,11 +235,70 @@ impl PreloadedFileSource {
         let seconds = frames as f64 / self.output_sample_rate as f64;
         Duration::from_secs_f64(seconds)
     }
+
+    fn process_messages(&mut self) {
+        while let Some(msg) = self.playback_message_queue.pop() {
+            match msg {
+                FilePlaybackMessage::Seek(position) => {
+                    let buffer_pos = position.as_secs_f64()
+                        * self.buffer_sample_rate as f64
+                        * self.buffer_channel_count as f64;
+                    self.buffer_pos = (buffer_pos as usize).clamp(0, self.buffer.len());
+                    self.resampler.reset();
+                }
+                FilePlaybackMessage::Stop => {
+                    if let Some(duration) = self.fade_out_duration {
+                        if !duration.is_zero() {
+                            self.volume_fader.start_fade_out(duration);
+                        } else {
+                            self.playback_finished = true;
+                        }
+                    } else {
+                        self.playback_finished = true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn send_playback_position_status(&mut self) {
+        if let Some(event_send) = &self.playback_status_send {
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                    id: self.file_id,
+                    context: self.playback_status_context.clone(),
+                    path: self.file_path.clone(),
+                    position: self.samples_to_duration(self.buffer_pos),
+                }) {
+                    log::warn!("Failed to send playback event: {}", err)
+                }
+            }
+        }
+    }
+
+    fn send_playback_stopped_status(&mut self) {
+        if let Some(event_send) = &self.playback_status_send {
+            if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
+                id: self.file_id,
+                context: self.playback_status_context.clone(),
+                path: self.file_path.clone(),
+                exhausted: self.buffer_pos >= self.buffer.len(),
+            }) {
+                log::warn!("Failed to send playback event: {}", err)
+            }
+        }
+    }
 }
 
 impl FileSource for PreloadedFileSource {
     fn playback_id(&self) -> PlaybackId {
         self.file_id
+    }
+
+    fn playback_options(&self) -> &FilePlaybackOptions {
+        & self.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
@@ -274,28 +335,7 @@ impl FileSource for PreloadedFileSource {
 impl Source for PreloadedFileSource {
     fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
         // consume playback messages
-        while let Some(msg) = self.playback_message_queue.pop() {
-            match msg {
-                FilePlaybackMessage::Seek(position) => {
-                    let buffer_pos = position.as_secs_f64()
-                        * self.buffer_sample_rate as f64
-                        * self.buffer_channel_count as f64;
-                    self.buffer_pos = (buffer_pos as usize).clamp(0, self.buffer.len());
-                    self.resampler.reset();
-                }
-                FilePlaybackMessage::Stop => {
-                    if let Some(duration) = self.fade_out_duration {
-                        if !duration.is_zero() {
-                            self.volume_fader.start_fade_out(duration);
-                        } else {
-                            self.playback_finished = true;
-                        }
-                    } else {
-                        self.playback_finished = true;
-                    }
-                }
-            }
-        }
+        self.process_messages();
 
         // quickly bail out when we've finished playing
         if self.playback_finished {
@@ -333,7 +373,7 @@ impl Source for PreloadedFileSource {
 
             // apply volume
             if (self.volume - 1.0).abs() > 0.0001 {
-                for o in remaining_target.iter_mut() {
+                for o in remaining_target {
                     *o *= self.volume;
                 }
             }
@@ -360,37 +400,15 @@ impl Source for PreloadedFileSource {
             }
         }
 
-        // send Position change Event
-        if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
-                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    position: self.samples_to_duration(self.buffer_pos),
-                }) {
-                    log::warn!("Failed to send playback event: {}", err)
-                }
-            }
-        }
+        // send Position change events, if needed
+        self.send_playback_position_status();
 
         // check if we've finished playing and send Stopped events
         let end_of_file = self.buffer_pos >= self.buffer.len();
         let fade_out_completed = self.volume_fader.state() == FaderState::Finished
             && self.volume_fader.target_volume() == 0.0;
         if end_of_file || fade_out_completed {
-            if let Some(event_send) = &self.playback_status_send {
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    exhausted: self.buffer_pos >= self.buffer.len(),
-                }) {
-                    log::warn!("Failed to send playback event: {}", err)
-                }
-            }
+            self.send_playback_stopped_status();
             // mark playback as finished
             self.playback_finished = true;
         }

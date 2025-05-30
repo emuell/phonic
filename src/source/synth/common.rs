@@ -110,6 +110,10 @@ where
         self.playback_id
     }
 
+    fn playback_options(&self) -> &SynthPlaybackOptions {
+        &self.playback_options
+    }
+
     fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>> {
         self.playback_message_queue.clone()
     }
