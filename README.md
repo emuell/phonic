@@ -27,7 +27,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 
 See [/examples](https://github.com/emuell/phonic/tree/master/examples) directory for more examples.
 
-#### Simple Audio Playback
+#### Simple Playback
 
 Play and stop audio files on the system's default audio output device.
 
@@ -63,7 +63,7 @@ fn main() -> Result<(), Error> {
 }
 ```
 
-#### Advanced Audio Playback
+#### Advanced Playback
 
 Play, seek and stop audio files and synth sounds on the default audio output device.
 Monitor playback status of playing files and synth tones.
@@ -73,9 +73,6 @@ use phonic::{
     Player, OutputDevice, OutputSink, PlaybackStatusEvent, 
     DefaultOutputDevice, Error, FilePlaybackOptions, SynthPlaybackOptions 
 };
-
-#[cfg(feature = "dasp")]
-use dasp::Signal;
 
 fn main() -> Result<(), Error> {
     // Open the default audio device (cpal or sokol, depending on the enabled output feature)
@@ -109,25 +106,6 @@ fn main() -> Result<(), Error> {
             .speed(0.5)
             .repeat(2),
     )?;
-
-    // !! NB: optional `dasp-synth` feature needs to be enabled for the following to work !!
-    // Let's play a simple synth tone as well. You can play any dasp::Signal here. The 
-    // passed signal will be wrapped in a dasp::signal::UntilExhausted, so this can be used
-    // to create one-shots. The example below plays a sine wave for two secs at 440hz.
-    #[cfg(feature = "dasp")]
-    let sample_rate = player.output_sample_rate();
-    #[cfg(feature = "dasp")]
-    let dasp_signal = dasp::signal::from_iter(
-        dasp::signal::rate(sample_rate as f64)
-            .const_hz(440.0)
-            .sine()
-            .take(sample_rate as usize * 2),
-    );
-    #[cfg(feature = "dasp")]
-    let synth_id = player.play_dasp_synth(
-        dasp_signal,
-        "my_synth_sound",
-        SynthPlaybackOptions::default())?;
 
     // You can optionally track playback status events from the player:
     std::thread::spawn(move || {
@@ -165,10 +143,6 @@ fn main() -> Result<(), Error> {
     // Playing files can be seeked or stopped:
     player.seek_source(long_file_id, std::time::Duration::from_secs(5))?;
     player.stop_source(small_file_id)?;
-
-    // Synths can not be seeked, but they can be stopped.
-    #[cfg(feature = "dasp")]
-    player.stop_source(synth_id)?;
 
     // If you only want one file to play at the same time, simply stop all playing
     // sounds before starting a new one:
