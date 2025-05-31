@@ -69,18 +69,13 @@ pub fn db_to_linear(value: f32) -> f32 {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Convert a -1..=1 ranged pan factor to a constant power L/R channel volume factor pair
+/// Convert a -1..=1 ranged pan factor to a constant power L/R channel volume factors
 pub fn panning_factors(pan_factor: f32) -> (f32, f32) {
-    // Convert -1..1 range to 0..1 range
-    let normalized = ((pan_factor + 1.0) / 2.0).clamp(0.0, 1.0); // -1..=1 to 0..=1
-    let half_pi = std::f32::consts::PI / 2.0;
-    let r = std::f32::consts::SQRT_2 / 2.0;
-    let scaled = normalized * half_pi;
-    let angle = scaled / 2.0;
-    (
-        r * (angle.cos() - angle.sin()),
-        r * (angle.cos() + angle.sin()),
-    )
+    const POWER: f32 = std::f32::consts::FRAC_1_SQRT_2; // 1/√2
+    let normalized = (pan_factor.clamp(-1.0, 1.0) + 1.0) / 2.0;
+    let left = (1.0 - normalized).sqrt() / POWER;
+    let right = (normalized).sqrt() / POWER;
+    (left, right)
 }
 
 // -------------------------------------------------------------------------------------------------
