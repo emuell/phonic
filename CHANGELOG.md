@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.0 - 2025/05/31
+
+- add new `PannedSource` and use it to apply new `panning` file/synth playback properties
+- speed up basic buffer operations with simd via `pulp`
+
 ## v0.5.1 - 2025/05/28
 
 - fixed processing of exhausted sources in `MixedSource` and cleaned up its impl
