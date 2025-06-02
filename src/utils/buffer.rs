@@ -135,7 +135,7 @@ pub fn add_buffers_with_simd<'a, S: Simd>(simd: S, dest: &'a mut [f32], source: 
         *x1 = simd.add_f32s(*x1, *x2);
     }
     for (x1, x2) in tail1.iter_mut().zip(tail2) {
-        *x1 *= *x2;
+        *x1 += *x2;
     }
 }
 
