@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1 - 2025/06/02
+
+- fixed `add_buffers_with_simd` impls
+
 ## v0.6.0 - 2025/05/31
 
 - add new `PannedSource` and use it to apply new `panning` file/synth playback properties
