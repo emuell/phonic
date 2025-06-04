@@ -16,7 +16,7 @@ use crate::{
         Source, SourceTime,
     },
     utils::{
-        buffer::{clear_buffer, scale_buffer, TempBuffer},
+        buffer::{clear_buffer, TempBuffer},
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
         resampler::{
@@ -38,7 +38,6 @@ pub struct PreloadedFileSource {
     file_id: PlaybackId,
     file_path: Arc<String>,
     options: FilePlaybackOptions,
-    volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
     repeat: usize,
@@ -155,7 +154,6 @@ impl PreloadedFileSource {
         let file_id = unique_usize_id();
 
         // copy remaining options which are applied while playback
-        let volume = options.volume;
         let fade_out_duration = options.fade_out_duration;
         let playback_pos_emit_rate = options.playback_pos_emit_rate;
 
@@ -163,7 +161,6 @@ impl PreloadedFileSource {
             file_id,
             file_path: Arc::new(file_path.into()),
             options,
-            volume,
             volume_fader,
             fade_out_duration,
             repeat: options.repeat,
@@ -198,15 +195,6 @@ impl PreloadedFileSource {
             options,
             output_sample_rate,
         )
-    }
-
-    /// Access to the playback volume option
-    pub fn volume(&self) -> f32 {
-        self.volume
-    }
-    /// Set a new  playback volume option
-    pub fn set_volume(&mut self, volume: f32) {
-        self.volume = volume
     }
 
     /// Get sample rate of our raw preloaded file's buffer
@@ -368,11 +356,6 @@ impl Source for PreloadedFileSource {
                         .process(remaining_input_buffer, remaining_target)
                         .expect("PreloadedFile resampling failed")
                 };
-
-            // apply volume
-            if (self.volume - 1.0).abs() > 0.0001 {
-                scale_buffer(remaining_target, self.volume);
-            }
 
             // apply volume fading
             let written_target = &mut output[total_written..total_written + output_written];

@@ -77,7 +77,9 @@ fn main() -> Result<(), Error> {
         DaspSynthSource::new(
             chord,
             "dasp_chord",
-            SynthPlaybackOptions::default().fade_out(Duration::from_secs(2)),
+            SynthPlaybackOptions::default()
+                .volume_db(-6.0)
+                .fade_out(Duration::from_secs(2)),
             player.output_sample_rate(),
             Some(player.playback_status_sender()),
         )?,

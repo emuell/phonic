@@ -28,7 +28,6 @@ pub use source::{
         preloaded::PreloadedFileSource, streamed::StreamedFileSource, FilePlaybackOptions,
         FileSource,
     },
-    mixed::MixedSource,
     resampled::ResamplingQuality,
     synth::{SynthPlaybackOptions, SynthSource},
     Source, SourceTime,

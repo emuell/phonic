@@ -19,7 +19,7 @@ use crate::{
     source::{resampled::ResamplingQuality, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
-        buffer::{clear_buffer, scale_buffer, TempBuffer},
+        buffer::{clear_buffer, TempBuffer},
         decoder::AudioDecoder,
         fader::{FaderState, VolumeFader},
         resampler::{
@@ -50,7 +50,6 @@ pub struct StreamedFileSource {
     file_id: usize,
     file_path: Arc<String>,
     options: FilePlaybackOptions,
-    volume: f32,
     volume_fader: VolumeFader,
     fade_out_duration: Option<Duration>,
     consumer: Consumer<f32>,
@@ -153,7 +152,6 @@ impl StreamedFileSource {
         let playback_status_context = None;
 
         // copy remaining options which are applied while playback
-        let volume = options.volume;
         let fade_out_duration = options.fade_out_duration;
         let playback_pos_emit_rate = options.playback_pos_emit_rate;
 
@@ -163,7 +161,6 @@ impl StreamedFileSource {
             file_id,
             file_path: Arc::new(file_path.into()),
             options,
-            volume,
             volume_fader,
             fade_out_duration,
             consumer,
@@ -347,11 +344,6 @@ impl Source for StreamedFileSource {
 
         // update position counters
         let position = self.written_samples(written as u64);
-
-        // apply volume parameter
-        if (1.0 - self.volume).abs() > 0.0001 {
-            scale_buffer(&mut output[0..written], self.volume);
-        }
 
         // start fade-out when this got signaled in our worker state
         let is_fading_out = self.worker_state.is_fading_out.load(Ordering::Relaxed);

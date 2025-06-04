@@ -2,6 +2,7 @@ use std::time::Instant;
 
 // -------------------------------------------------------------------------------------------------
 
+pub mod amplified;
 pub mod converted;
 pub mod empty;
 pub mod file;

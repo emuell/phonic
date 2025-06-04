@@ -18,6 +18,7 @@ use crate::{
     error::Error,
     output::{DefaultOutputSink, OutputSink},
     source::{
+        amplified::AmplifiedSource,
         converted::ConvertedSource,
         file::{FilePlaybackMessage, FileSource},
         mixed::{MixedSource, MixedSourceMsg},
@@ -201,6 +202,7 @@ impl Player {
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
+        let playback_volume = file_source.playback_options().volume;
         let playback_panning = file_source.playback_options().panning;
         let playback_message_queue =
             PlaybackMessageSender::File(file_source.playback_message_queue());
@@ -213,8 +215,10 @@ impl Player {
             self.sink.sample_rate(),
             ResamplingQuality::Default,
         );
+        // apply volume options
+        let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
         // apply panning options
-        let panned_source = PannedSource::new(converted_source, playback_panning);
+        let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
         if self
             .mixer_event_queue
@@ -257,6 +261,7 @@ impl Player {
         synth_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = synth_source.playback_id();
+        let playback_volume = synth_source.playback_options().volume;
         let playback_panning = synth_source.playback_options().panning;
         let playback_message_queue =
             PlaybackMessageSender::Synth(synth_source.playback_message_queue());
@@ -269,8 +274,10 @@ impl Player {
             self.sink.sample_rate(),
             ResamplingQuality::Default, // usually unused
         );
+        // apply volume options
+        let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
         // apply panning options
-        let panned_source = PannedSource::new(converted_source, playback_panning);
+        let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
         if self
             .mixer_event_queue

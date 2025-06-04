@@ -15,8 +15,7 @@ impl PannedSource {
     where
         InputSource: Source,
     {
-        debug_assert!((-1.0..=1.0).contains(&panning));
-
+        debug_assert!((-1.0..=1.0).contains(&panning), "Invalid panning factor");
         Self {
             source: Box::new(source),
             panning,
@@ -28,7 +27,6 @@ impl Source for PannedSource {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // write input source
         let written = self.source.write(output, time);
-
         // apply panning
         let channel_count = self.source.channel_count();
         if self.panning.abs() > 0.001 {
