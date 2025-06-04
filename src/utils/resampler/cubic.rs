@@ -1,6 +1,8 @@
 use super::{AudioResampler, ResamplingSpecs};
 use crate::Error;
 
+use assume::assume;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Interpolate a single channel of interleaved audio with cubic interpolation.
@@ -40,6 +42,7 @@ impl CubicInterpolator {
     ) -> (usize, usize) {
         debug_assert!(input.len() % channel_count == 0);
         debug_assert!(output.len() % channel_count == 0);
+        debug_assert!(channel_index < channel_count);
 
         let num_in = input.len() / channel_count;
         let num_out = output.len() / channel_count;
@@ -54,62 +57,55 @@ impl CubicInterpolator {
             return (min, min);
         }
 
-        // preload our input buffer
-        if !self.is_initialized && input.len() >= 3 {
+        // Preload buffer
+        if !self.is_initialized && num_in >= 3 {
             self.is_initialized = true;
             for f in 0..3 {
-                unsafe {
-                    self.push_sample(*input.get_unchecked(f * channel_count + channel_index));
-                }
+                let index = f * channel_count + channel_index;
+                assume!(unsafe: index < input.len()); // eliminate bound checks
+                self.push_sample(input[index]);
                 num_consumed += 1;
             }
         }
 
-        // downsample
+        // Downsample
         if self.ratio < 1.0 {
             while num_produced < num_out {
                 if self.sub_pos >= 1.0 {
-                    if num_consumed == num_in {
+                    if num_consumed >= num_in {
                         break;
                     }
-                    unsafe {
-                        self.push_sample(
-                            *input.get_unchecked(num_consumed * channel_count + channel_index),
-                        );
-                    }
+                    let input_index = num_consumed * channel_count + channel_index;
+                    assume!(unsafe: input_index < input.len()); // eliminate bound checks
+                    self.push_sample(input[input_index]);
                     num_consumed += 1;
                     self.sub_pos -= 1.0;
                 }
 
-                unsafe {
-                    *output.get_unchecked_mut(num_produced * channel_count + channel_index) =
-                        self.interpolate(self.sub_pos);
-                }
+                let output_index = num_produced * channel_count + channel_index;
+                assume!(unsafe: output_index < output.len()); // eliminate bound checks
+                output[output_index] = self.interpolate(self.sub_pos);
                 num_produced += 1;
                 self.sub_pos += self.ratio;
             }
-        }
-        // upsample
-        else {
+        } else {
+            // Upsample
             'outer_loop: while num_produced < num_out {
                 while self.sub_pos < self.ratio {
-                    if num_consumed == num_in {
+                    if num_consumed >= num_in {
                         break 'outer_loop;
                     }
-                    unsafe {
-                        self.push_sample(
-                            *input.get_unchecked(num_consumed * channel_count + channel_index),
-                        );
-                    }
+                    let input_index = num_consumed * channel_count + channel_index;
+                    assume!(unsafe: input_index < input.len()); // eliminate bound checks
+                    self.push_sample(input[input_index]);
                     num_consumed += 1;
                     self.sub_pos += 1.0;
                 }
 
                 self.sub_pos -= self.ratio;
-                unsafe {
-                    *output.get_unchecked_mut(num_produced * channel_count + channel_index) =
-                        self.interpolate(1.0 - self.sub_pos);
-                }
+                let output_index = num_produced * channel_count + channel_index;
+                assume!(unsafe: output_index < output.len()); // eliminate bound checks
+                output[output_index] = self.interpolate(1.0 - self.sub_pos);
                 num_produced += 1;
             }
         }
@@ -117,7 +113,7 @@ impl CubicInterpolator {
         (num_consumed * channel_count, num_produced * channel_count)
     }
 
-    #[inline]
+    #[inline(always)]
     fn push_sample(&mut self, new_value: f32) {
         self.input[3] = self.input[2];
         self.input[2] = self.input[1];
@@ -125,7 +121,7 @@ impl CubicInterpolator {
         self.input[0] = new_value;
     }
 
-    #[inline]
+    #[inline(always)]
     fn interpolate(&self, fraction: f32) -> f32 {
         debug_assert!((0.0..=1.0).contains(&fraction));
 

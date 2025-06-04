@@ -14,19 +14,17 @@ pub fn planar_to_interleaved(planar: &[Vec<f32>], interleaved: &mut [f32]) {
     );
     match channel_count {
         1 => {
-            for (i, p) in interleaved.iter_mut().zip(planar[0].iter()) {
-                *i = *p;
-            }
+            copy_buffers(&mut interleaved[..frame_count], &planar[0]);
         }
         2 => {
-            for (i, (l, r)) in interleaved
-                .chunks_mut(2)
-                .zip(planar[0].iter().zip(planar[1].iter()))
+            let left = &planar[0];
+            let right = &planar[1];
+            for (chunk, (l, r)) in interleaved
+                .chunks_exact_mut(2)
+                .zip(left.iter().zip(right.iter()))
             {
-                unsafe {
-                    *i.get_unchecked_mut(0) = *l;
-                    *i.get_unchecked_mut(1) = *r;
-                }
+                chunk[0] = *l;
+                chunk[1] = *r;
             }
         }
         _ => {
@@ -35,9 +33,7 @@ pub fn planar_to_interleaved(planar: &[Vec<f32>], interleaved: &mut [f32]) {
                     .iter()
                     .zip(interleaved.chunks_exact_mut(channel_count))
                 {
-                    unsafe {
-                        *i.get_unchecked_mut(channel_index) = *p;
-                    }
+                    i[channel_index] = *p;
                 }
             }
         }
@@ -58,22 +54,16 @@ pub fn interleaved_to_planar(interleaved: &[f32], planar: &mut [Vec<f32>]) {
     );
     match channel_count {
         1 => {
-            for (p, i) in planar[0].iter_mut().zip(interleaved) {
-                *p = *i;
-            }
+            copy_buffers(&mut planar[0], &interleaved[..frame_count]);
         }
         2 => {
             let left = &mut planar[0];
             for (p, i) in left.iter_mut().zip(interleaved.chunks_exact(2)) {
-                unsafe {
-                    *p = *i.get_unchecked(0);
-                }
+                *p = i[0];
             }
             let right = &mut planar[1];
             for (p, i) in right.iter_mut().zip(interleaved.chunks_exact(2)) {
-                unsafe {
-                    *p = *i.get_unchecked(1);
-                }
+                *p = i[1];
             }
         }
         _ => {
@@ -82,9 +72,7 @@ pub fn interleaved_to_planar(interleaved: &[f32], planar: &mut [Vec<f32>]) {
                     .iter_mut()
                     .zip(interleaved.chunks_exact(channel_count))
                 {
-                    unsafe {
-                        *p = *i.get_unchecked(channel_index);
-                    }
+                    *p = i[channel_index];
                 }
             }
         }
