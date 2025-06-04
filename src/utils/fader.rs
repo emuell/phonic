@@ -77,8 +77,12 @@ impl VolumeFader {
             self.state = FaderState::IsRunning;
             self.current_volume = from;
             self.target_volume = to;
-            // HACK: this is a rough guess and should be calculated properly!
-            self.inertia = (1.0 / self.sample_rate as f32) * 4.0 / duration.as_secs_f32();
+            // Calculate innertia to reach 99% completion at the specified duration:
+            // 0.01 = e^(-duration/t) => t = -duration/ln(0.01) ≈ duration/ln(100)
+            // Per-sample inertia = 1 - e^(-1/(sample_rate * t))
+            const LN100: f32 = 4.605;
+            let samples_duration = self.sample_rate as f32 * duration.as_secs_f32() / LN100;
+            self.inertia = 1.0 - (-1.0 / samples_duration).exp();
         }
     }
 
