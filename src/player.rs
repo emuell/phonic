@@ -161,6 +161,16 @@ impl Player {
         self.output_sample_position() / self.output_channel_count() as u64
     }
 
+    /// Our output's global volume factor
+    pub fn output_volume(&self) -> f32 {
+        self.sink.volume()
+    }
+    /// Set a new global volume factor
+    pub fn set_output_volume(&mut self, volume: f32) {
+        assert!(volume >= 0.0);
+        self.sink.set_volume(volume);
+    }
+
     /// Get a copy of our playback status sender channel.
     /// Should be used by custom audio sources only.
     pub fn playback_status_sender(&self) -> Sender<PlaybackStatusEvent> {
