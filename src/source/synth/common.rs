@@ -20,7 +20,7 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 /// A generic sample generator for SynthSourceImpl.
-pub(crate) trait SynthSourceGenerator {
+pub trait SynthSourceGenerator {
     /// Fill passed output with generated samples and return samples generated.
     fn generate(&mut self, output: &mut [f32]) -> usize;
     /// returns true when output is silent oan no more generate calls are required.
@@ -30,7 +30,7 @@ pub(crate) trait SynthSourceGenerator {
 // -------------------------------------------------------------------------------------------------
 
 /// A synth source which runs an externally defined synth source generator.
-pub(crate) struct SynthSourceImpl<Generator>
+pub struct SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync,
 {
@@ -54,6 +54,7 @@ where
 {
     const CHANNEL_COUNT: usize = 1;
 
+    #[allow(dead_code)]
     pub fn new(
         generator: Generator,
         generator_name: &str,
