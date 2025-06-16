@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0 - 2025/06/16
+
+- add file blayback from raw encoded file buffers
+- add global `volume` factor setters to player
+- fixed volume `fade_in/out` duration calculation 
+
 ## v0.6.1 - 2025/06/02
 
 - fixed `add_buffers_with_simd` impls
