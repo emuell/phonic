@@ -1,4 +1,5 @@
 use std::{
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -57,7 +58,42 @@ pub struct PreloadedFileSource {
 }
 
 impl PreloadedFileSource {
-    pub fn new(
+    pub fn from_file<P: AsRef<Path>>(
+        path: P,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        options: FilePlaybackOptions,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error> {
+        // Memorize file path for progress
+        let file_path = path.as_ref().to_string_lossy().to_string();
+        Self::from_audio_decoder(
+            AudioDecoder::from_file(path)?,
+            &file_path,
+            playback_status_send,
+            options,
+            output_sample_rate,
+        )
+    }
+
+    /// Create a new preloaded file source with the given encoded file buffer.
+    pub fn from_file_buffer(
+        buffer: Vec<u8>,
+        file_path: &str,
+        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        options: FilePlaybackOptions,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error> {
+        Self::from_audio_decoder(
+            AudioDecoder::from_buffer(buffer)?,
+            file_path,
+            playback_status_send,
+            options,
+            output_sample_rate,
+        )
+    }
+
+    fn from_audio_decoder(
+        mut audio_decoder: AudioDecoder,
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
@@ -65,8 +101,8 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
-        // create decoder and get buffe rsignal specs
-        let mut audio_decoder = AudioDecoder::new(file_path.to_string())?;
+
+        // get buffer signal specs
         let buffer_sample_rate = audio_decoder.signal_spec().rate;
         let buffer_channel_count = audio_decoder.signal_spec().channels.count();
 
@@ -100,7 +136,7 @@ impl PreloadedFileSource {
             }
         }
 
-        Self::with_buffer(
+        Self::from_buffer(
             buffer,
             buffer_sample_rate,
             buffer_channel_count,
@@ -111,8 +147,9 @@ impl PreloadedFileSource {
         )
     }
 
-    /// Create a new preloaded file source with the given decoded and possibly shared file buffer.
-    pub fn with_buffer(
+    /// Create a new preloaded file source with the given decoded and buffer,
+    /// possibly a shared buffer from another PreloadedFileSource.
+    pub fn from_buffer(
         buffer: Arc<Vec<f32>>,
         buffer_sample_rate: u32,
         buffer_channel_count: usize,
@@ -123,6 +160,7 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
+
         // create a queue for playback messages
         let playback_message_queue = Arc::new(ArrayQueue::new(128));
 
@@ -152,6 +190,7 @@ impl PreloadedFileSource {
 
         // create new unique file id
         let file_id = unique_usize_id();
+        let file_path = Arc::new(file_path.to_string());
 
         // copy remaining options which are applied while playback
         let fade_out_duration = options.fade_out_duration;
@@ -159,7 +198,7 @@ impl PreloadedFileSource {
 
         Ok(Self {
             file_id,
-            file_path: Arc::new(file_path.into()),
+            file_path,
             options,
             volume_fader,
             fade_out_duration,
@@ -186,7 +225,7 @@ impl PreloadedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        Self::with_buffer(
+        Self::from_buffer(
             self.buffer(),
             self.buffer_sample_rate(),
             self.buffer_channel_count(),
@@ -420,7 +459,7 @@ mod tests {
         let buffer = Arc::new(vec![0.2, 1.0, 0.5, 0.0]);
 
         // Default
-        let preloaded = PreloadedFileSource::with_buffer(
+        let preloaded = PreloadedFileSource::from_buffer(
             buffer.clone(),
             44100,
             1,
@@ -438,7 +477,7 @@ mod tests {
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
 
         // Rubato
-        let preloaded = PreloadedFileSource::with_buffer(
+        let preloaded = PreloadedFileSource::from_buffer(
             buffer.clone(),
             44100,
             1,

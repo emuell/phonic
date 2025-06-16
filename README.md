@@ -65,8 +65,8 @@ fn main() -> Result<(), Error> {
 
 #### Advanced Playback
 
-Play, seek and stop audio files and synth sounds on the default audio output device.
-Monitor playback status of playing files and synth tones.
+Play, seek and stop audio files on the default audio output device.
+Monitor playback status of playing files.
 
 ```rust no_run
 use phonic::{
@@ -173,7 +173,7 @@ fn main() -> Result<(), Error> {
     let samples_per_beat = samples_per_sec as f64 * 60.0 / beats_per_min as f64;
 
     // preload a sample file
-    let sample = PreloadedFileSource::new(
+    let sample = PreloadedFileSource::from_file(
         "path/to_some_file.wav",
         None, // we don't need to track playback events here
         FilePlaybackOptions::default(),

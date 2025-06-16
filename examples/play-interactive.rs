@@ -285,7 +285,7 @@ fn create_sample_source(
 ) -> Result<PreloadedFileSource, Error> {
     // load and decode sample once - lazily
     lazy_static! {
-        static ref SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::new(
+        static ref SAMPLE_SOURCE: PreloadedFileSource = PreloadedFileSource::from_file(
             "assets/pad-ambient.wav",
             None,
             FilePlaybackOptions::default()

@@ -23,16 +23,24 @@ pub struct AudioDecoder {
 }
 
 impl AudioDecoder {
-    pub fn new(path: String) -> Result<Self, Error> {
-        // Create a media source. Note that the MediaSource trait is automatically implemented for File,
-        // among other types.
-        let file = Box::new(File::open(Path::new(&path))?);
+    /// Create a new decoder from the given file path.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = Box::new(File::open(path)?);
+        let source_stream = MediaSourceStream::new(file, Default::default());
+        Self::from_source_stream(source_stream)
+    }
 
-        // Create the media source stream using the boxed media source from above.
-        let mss = MediaSourceStream::new(file, Default::default());
+    /// Create a new decoder from the given buffer. The buffer unfortunately must get copied as
+    /// Symphonia does not allow reading non static buffer refs at the time being...
+    pub fn from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+        let cursor = Box::new(io::Cursor::new(buffer));
+        let source_stream = MediaSourceStream::new(cursor, Default::default());
+        Self::from_source_stream(source_stream)
+    }
 
-        // Create a hint to help the format registry guess what format reader is appropriate. In this
-        // example we'll leave it empty.
+    /// Create a new decoder from the given Symphonia MediaSourceStream
+    pub fn from_source_stream(source_stream: MediaSourceStream) -> Result<Self, Error> {
+        // Unused hint to help the format registry guess what format reader is appropriate.
         let hint = Hint::new();
 
         // Use the default options when reading and decoding.
@@ -42,7 +50,7 @@ impl AudioDecoder {
 
         // Probe the media source stream for a format.
         let probed = symphonia::default::get_probe()
-            .format(&hint, mss, &format_opts, &metadata_opts)
+            .format(&hint, source_stream, &format_opts, &metadata_opts)
             .map_err(|_| Error::MediaFileProbeError)?;
 
         // Get the format reader yielded by the probe operation.
@@ -55,6 +63,7 @@ impl AudioDecoder {
                 return Err(Error::MediaFileNotFound);
             }
         };
+        let track_id = track.id;
 
         // Create a decoder for the track.
         let decoder = symphonia::default::get_codecs()
@@ -62,7 +71,7 @@ impl AudioDecoder {
             .map_err(|err| Error::AudioDecodingError(Box::new(err)))?;
 
         Ok(Self {
-            track_id: track.id,
+            track_id,
             decoder,
             format,
         })

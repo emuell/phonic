@@ -17,9 +17,14 @@ fn main() -> Result<(), Error> {
     let sample_rate = player.output_sample_rate();
 
     // Preload samples
-    let metronome =
-        PreloadedFileSource::new("assets/cowbell.wav", None, Default::default(), sample_rate)?;
-    let bass = PreloadedFileSource::new("assets/bass.wav", None, Default::default(), sample_rate)?;
+    let cowbell = PreloadedFileSource::from_file(
+        "assets/cowbell.wav",
+        None,
+        Default::default(),
+        sample_rate,
+    )?;
+    let bass =
+        PreloadedFileSource::from_file("assets/bass.wav", None, Default::default(), sample_rate)?;
 
     // Metronome parameters
     const BPM: f64 = 120.0;
@@ -35,7 +40,7 @@ fn main() -> Result<(), Error> {
         let sample_time = output_start_time + beat as u64 * samples_per_beat;
         // Alternate between cowbell and bass every 2 bars
         let sample = if (beat / (2 * BEATS_PER_BAR)) % 2 == 0 {
-            &metronome
+            &cowbell
         } else {
             &bass
         };

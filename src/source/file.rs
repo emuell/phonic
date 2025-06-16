@@ -1,7 +1,7 @@
 pub mod preloaded;
 pub mod streamed;
 
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
@@ -10,7 +10,7 @@ use crate::{
     player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
     source::{resampled::ResamplingQuality, Source},
     utils::db_to_linear,
-    Error, Player,
+    Error, Player, PreloadedFileSource, StreamedFileSource,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -208,39 +208,72 @@ pub trait FileSource: Source {
 impl Player {
     /// Play a new file with the given file path and options. See [`FilePlaybackOptions`]
     /// for more info on which options can be applied.
-    pub fn play_file(
+    pub fn play_file<P: AsRef<Path>>(
         &mut self,
-        file_path: &str,
+        path: P,
         options: FilePlaybackOptions,
     ) -> Result<PlaybackId, Error> {
-        self.play_file_with_context(file_path, options, None)
+        self.play_file_with_context(path, options, None)
     }
 
     /// Play a new file with the given file path, options and context.
     /// See [`FilePlaybackOptions`] for more info on which options can be applied.
-    pub fn play_file_with_context(
+    pub fn play_file_with_context<P: AsRef<Path>>(
         &mut self,
-        file_path: &str,
+        path: P,
         options: FilePlaybackOptions,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
         // create a stremed or preloaded source, depending on the options and play it
         if options.stream {
-            let streamed_source = streamed::StreamedFileSource::new(
-                file_path,
+            let streamed_source = StreamedFileSource::from_file(
+                path,
                 Some(self.playback_status_sender()),
                 options,
                 self.output_sample_rate(),
             )?;
             self.play_file_source_with_context(streamed_source, options.start_time, context)
         } else {
-            let preloaded_source = preloaded::PreloadedFileSource::new(
-                file_path,
+            let preloaded_source = PreloadedFileSource::from_file(
+                path,
                 Some(self.playback_status_sender()),
                 options,
                 self.output_sample_rate(),
             )?;
             self.play_file_source_with_context(preloaded_source, options.start_time, context)
         }
+    }
+
+    /// Play a new file with the give raw encoded file buffer and display path and options.
+    /// Param file_path is used as path when reporting file playback status.
+    /// See [`FilePlaybackOptions`] for more info on which options can be applied.
+    pub fn play_file_buffer(
+        &mut self,
+        file_buffer: Vec<u8>,
+        file_path: &str,
+        options: FilePlaybackOptions,
+    ) -> Result<PlaybackId, Error> {
+        self.play_file_buffer_with_context(file_buffer, file_path, options, None)
+    }
+
+    /// Play a new file with the give raw encoded file buffer, display path, options and context.
+    /// Param file_path is used as path when reporting file playback status.
+    /// See [`FilePlaybackOptions`] for more info on which options can be applied.
+    pub fn play_file_buffer_with_context(
+        &mut self,
+        file_buffer: Vec<u8>,
+        file_path: &str,
+        options: FilePlaybackOptions,
+        context: Option<PlaybackStatusContext>,
+    ) -> Result<PlaybackId, Error> {
+        debug_assert!(!options.stream, "Streaming file buffers is not supported.");
+        let preloaded_source = PreloadedFileSource::from_file_buffer(
+            file_buffer,
+            file_path,
+            Some(self.playback_status_sender()),
+            options,
+            self.output_sample_rate(),
+        )?;
+        self.play_file_source_with_context(preloaded_source, options.start_time, context)
     }
 }

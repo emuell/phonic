@@ -1,5 +1,6 @@
 use std::{
     ops::Range,
+    path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -66,18 +67,22 @@ pub struct StreamedFileSource {
 }
 
 impl StreamedFileSource {
-    pub fn new(
-        file_path: &str,
+    pub fn from_file<P: AsRef<Path>>(
+        path: P,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
+
+        // Memorize file path for progress
+        let file_path = Arc::new(path.as_ref().to_string_lossy().to_string());
+
         // create decoder
-        let decoder = AudioDecoder::new(file_path.to_string())?;
-        // Gather the source signal parameters and compute how often we should report
-        // the play-head position.
+        let decoder = AudioDecoder::from_file(path)?;
+
+        // Gather the source signal specs
         let signal_spec = decoder.signal_spec();
 
         // Create a ring-buffer for the decoded samples. Worker thread is producing,
@@ -159,7 +164,7 @@ impl StreamedFileSource {
             actor,
             event_queue,
             file_id,
-            file_path: Arc::new(file_path.into()),
+            file_path,
             options,
             volume_fader,
             fade_out_duration,
