@@ -4,7 +4,7 @@ implementation.
 
 It serves as a general-purpose, low-latency audio playback engine for Rust-based music applications while also being suitable as an audio backend for game engines.
 
-Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app using the [Tauri](https://tauri.app) framework, phonic addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is also used as the default sample playback engine for the experimental algorithmic sequencer [afseq](https://github.com/emuell/afseq).
+Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app using the [Tauri](https://tauri.app) framework, phonic addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns).
 
 ### Features
 
