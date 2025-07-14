@@ -11,7 +11,7 @@ use assert_no_alloc::*;
 
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    StreamConfig,
+    Sample,
 };
 use crossbeam_channel::{bounded, Receiver, Sender};
 
@@ -21,7 +21,7 @@ use crate::{
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
-        buffer::clear_buffer,
+        buffer::{clear_buffer, scale_buffer},
     },
 };
 
@@ -83,12 +83,23 @@ impl CpalOutput {
         let (callback_send, callback_recv) = bounded(16);
 
         let handle = Stream::spawn_with_default_cap("audio_output", {
-            let config = StreamConfig {
+            let config = cpal::StreamConfig {
                 buffer_size: PREFERRED_BUFFER_SIZE,
                 ..supported.config()
             };
+            let sample_format = supported.sample_format();
             let playback_pos = Arc::clone(&playback_pos);
-            move |this| Stream::open(device, config, playback_pos, callback_recv, this).unwrap()
+            move |this| {
+                Stream::open(
+                    device,
+                    config,
+                    sample_format,
+                    playback_pos,
+                    callback_recv,
+                    this,
+                )
+                .expect("Failed to open audio stream")
+            }
         });
         let sink = CpalSink {
             channel_count: supported.channels(),
@@ -212,43 +223,109 @@ impl OutputSink for CpalSink {
 
 struct Stream {
     stream: cpal::Stream,
-    _device: cpal::Device,
+    // keep device alive with the stream
+    #[allow(dead_code)]
+    device: cpal::Device,
 }
 
 impl Stream {
     fn open(
         device: cpal::Device,
         config: cpal::StreamConfig,
+        sample_format: cpal::SampleFormat,
         playback_pos: Arc<AtomicU64>,
         callback_recv: Receiver<CallbackMsg>,
-        _stream_send: Sender<StreamMsg>,
+        stream_send: Sender<StreamMsg>,
     ) -> Result<Self, Error> {
         let mut callback = StreamCallback {
-            _stream_send,
+            stream_send,
             callback_recv,
             source: Box::new(EmptySource),
-            volume: 1.0,
             playback_pos,
             playback_pos_instant: Instant::now(),
+            temp_buffer: Vec::with_capacity(StreamCallback::required_buffer_size(
+                sample_format,
+                &config,
+            )),
             state: CallbackState::Paused,
+            volume: 1.0,
         };
+        log::info!("opening output stream: {:?}", &config);
+        let stream = match sample_format {
+            cpal::SampleFormat::I8 => {
+                Self::build_output_stream::<i8, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::I16 => {
+                Self::build_output_stream::<i16, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::I32 => {
+                Self::build_output_stream::<i32, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::I64 => {
+                Self::build_output_stream::<i64, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::U8 => {
+                Self::build_output_stream::<u8, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::U16 => {
+                Self::build_output_stream::<u16, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::U32 => {
+                Self::build_output_stream::<u32, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::U64 => {
+                Self::build_output_stream::<u64, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            cpal::SampleFormat::F32 => {
+                Self::build_output_stream::<f32, _>(&device, &config, move |output| {
+                    callback.write_samples_f32(output) // use specialized write function
+                })
+            }
+            cpal::SampleFormat::F64 => {
+                Self::build_output_stream::<f64, _>(&device, &config, move |output| {
+                    callback.write_samples(output)
+                })
+            }
+            sample_format => panic!("Unsupported/unexpected sample format '{sample_format}'"),
+        }?;
+        Ok(Self { device, stream })
+    }
 
-        log::info!("opening output stream: {:?}", config);
-        let stream = device.build_output_stream(
-            &config,
-            move |output, _| {
-                callback.write_samples(output);
+    pub fn build_output_stream<T, F>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        mut writer: F,
+    ) -> Result<cpal::Stream, cpal::BuildStreamError>
+    where
+        T: cpal::SizedSample,
+        F: FnMut(&mut [T]) + Send + 'static,
+    {
+        device.build_output_stream(
+            config,
+            move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
+                writer(output);
             },
             |err| {
                 log::error!("audio output error: {}", err);
             },
             None,
-        )?;
-
-        Ok(Self {
-            _device: device,
-            stream,
-        })
+        )
     }
 }
 
@@ -283,6 +360,7 @@ impl Actor for Stream {
 
 // -------------------------------------------------------------------------------------------------
 
+#[derive(PartialEq)]
 enum StreamMsg {
     Pause,
     Resume,
@@ -296,23 +374,73 @@ enum CallbackMsg {
     Resume,
 }
 
+#[derive(PartialEq)]
 enum CallbackState {
     Playing,
     Paused,
 }
 
 struct StreamCallback {
-    _stream_send: Sender<StreamMsg>,
+    #[allow(dead_code)]
+    stream_send: Sender<StreamMsg>,
     callback_recv: Receiver<CallbackMsg>,
     source: Box<dyn Source>,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
+    temp_buffer: Vec<f32>,
     state: CallbackState,
     volume: f32,
 }
 
 impl StreamCallback {
-    fn write_samples(&mut self, output: &mut [f32]) {
+    fn required_buffer_size(
+        sample_format: cpal::SampleFormat,
+        config: &cpal::StreamConfig,
+    ) -> usize {
+        if sample_format != cpal::SampleFormat::F32 {
+            let max_frames = match config.buffer_size {
+                cpal::BufferSize::Default => 2048,
+                cpal::BufferSize::Fixed(fixed) => fixed,
+            };
+            max_frames as usize * config.channels as usize
+        } else {
+            0 // no temp buffer needed with write_samples_f32
+        }
+    }
+
+    fn write_samples_f32(&mut self, output: &mut [f32]) {
+        // Handle messages
+        self.process_messages();
+        // Avoid temp buffers and write directly into the given buffer
+        let written = self.write_source(output);
+        // Clear remaining output
+        clear_buffer(&mut output[written..]);
+    }
+
+    fn write_samples<T>(&mut self, output: &mut [T])
+    where
+        T: cpal::SizedSample + cpal::FromSample<f32>,
+    {
+        // Handle messages
+        self.process_messages();
+        // Temporarily take ownership of the output buffer so we avoid borrowing self twice.
+        let mut temp_buffer = std::mem::take(&mut self.temp_buffer);
+        temp_buffer.resize(output.len(), 0.0);
+        // Write into the f32 temp buffer
+        let written = self.write_source(&mut temp_buffer);
+        // Convert from f32 to the target sample type
+        for (o, i) in output.iter_mut().zip(temp_buffer.iter()).take(written) {
+            *o = i.to_sample();
+        }
+        // Clear remaining output
+        for o in &mut output[written..] {
+            *o = T::EQUILIBRIUM;
+        }
+        // Give the temp buffer back to self.
+        self.temp_buffer = temp_buffer;
+    }
+
+    fn process_messages(&mut self) {
         // Process any pending data messages.
         while let Ok(msg) = self.callback_recv.try_recv() {
             match msg {
@@ -330,35 +458,33 @@ impl StreamCallback {
                 }
             }
         }
+    }
 
-        let written = if matches!(self.state, CallbackState::Playing) {
-            // Write out as many samples as possible from the audio source to the output buffer.
-            let time = SourceTime {
-                pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
-                    / self.source.channel_count().max(1) as u64,
-                pos_instant: self.playback_pos_instant,
-            };
-
-            #[cfg(not(feature = "assert_no_alloc"))]
-            let written = self.source.write(output, &time);
-            #[cfg(feature = "assert_no_alloc")]
-            let written = assert_no_alloc(|| self.source.write(output, &time));
-
-            // Apply the global volume level.
-            output[..written].iter_mut().for_each(|s| *s *= self.volume);
-
-            // Advance playback pos
-            self.playback_pos
-                .fetch_add(output.len() as u64, Ordering::Relaxed);
-
-            // return modified samples
-            written
-        } else {
-            0
+    fn write_source(&mut self, output: &mut [f32]) -> usize {
+        // Only run the source when playing
+        if self.state != CallbackState::Playing {
+            return 0;
+        }
+        // Calculate source time from playback position
+        let time = SourceTime {
+            pos_in_frames: self.playback_pos.load(Ordering::Relaxed)
+                / self.source.channel_count().max(1) as u64,
+            pos_instant: self.playback_pos_instant,
         };
-
-        // Mute any remaining samples.
-        clear_buffer(&mut output[written..]);
+        // Write out as many samples as possible from the audio source to the output buffer.
+        #[cfg(not(feature = "assert_no_alloc"))]
+        let written = self.source.write(output, &time);
+        #[cfg(feature = "assert_no_alloc")]
+        let written = assert_no_alloc(|| self.source.write(output, &time));
+        // Apply the global volume level.
+        if (1.0 - self.volume).abs() > 0.0001 {
+            scale_buffer(&mut output[..written], self.volume);
+        }
+        // Advance playback pos
+        self.playback_pos
+            .fetch_add(output.len() as u64, Ordering::Relaxed);
+        // return modified samples
+        written
     }
 }
 
