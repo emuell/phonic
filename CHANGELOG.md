@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.1 - 2025/07/16
+
+- fixed missing support for other cpal output formats than f32
+- update cpal to v0.16
+
 ## v0.7.0 - 2025/06/16
 
 - add file blayback from raw encoded file buffers
