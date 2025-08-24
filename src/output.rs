@@ -58,7 +58,7 @@ pub trait OutputSink {
     fn play(&mut self, source: impl Source);
     /// Drop actual source, replacing it with silence
     fn stop(&mut self);
-    /// Pause playback without dropping the ouput source.
+    /// Pause playback without dropping the output source.
     fn pause(&mut self);
     /// Resume from paused playback.
     fn resume(&mut self);

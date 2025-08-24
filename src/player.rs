@@ -139,7 +139,7 @@ impl Player {
         }
     }
 
-    /// Our audio device's sustended state.
+    /// Our audio device's suspended state.
     pub fn output_suspended(&self) -> bool {
         self.sink.suspended()
     }
@@ -307,7 +307,7 @@ impl Player {
     }
 
     /// Change playback position of the given played back source. This is only supported for files and thus
-    /// won't do anyththing for synths.
+    /// won't do anything for synths.
     pub fn seek_source(
         &mut self,
         playback_id: PlaybackId,
@@ -342,7 +342,7 @@ impl Player {
             None => false,
         };
         if stopped {
-            // we shortly will receive an Exhaused event which removes the source, but neverthless
+            // we shortly will receive an exhausted event which removes the source, but nevertheless
             // remove it now, to force all following attempts to stop this source to fail
             self.playing_sources.remove(&playback_id);
             Ok(())

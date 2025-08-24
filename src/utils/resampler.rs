@@ -36,8 +36,8 @@ impl ResamplingSpecs {
 
 /// Audio resampler interface.
 ///
-/// Depending on the implementation, there might be an contrain on the input buffer size which
-/// is fed into the resampler in order to process something. Ooutputs never sould have such
+/// Depending on the implementation, there might be an constrain on the input buffer size which
+/// is fed into the resampler in order to process something. Outputs never should have such
 /// constrains.
 pub trait AudioResampler: Send + Sync {
     /// required or suggested input buffer length in order to process some output.

@@ -39,7 +39,7 @@ pub struct SynthPlaybackOptions {
     /// stopped before it finished playing.
     pub fade_out_duration: Option<Duration>,
 
-    /// Wallclock time rate of playback pos events, emited via PlaybackStatusEvent
+    /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,

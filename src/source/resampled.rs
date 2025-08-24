@@ -41,7 +41,7 @@ impl ResampledSource {
     {
         Self::new_with_speed(source, output_sample_rate, 1.0, quality)
     }
-    /// Create a new resampled sources with the given sample rate and playback speed adjument.
+    /// Create a new resampled sources with the given sample rate and playback speed adjustment.
     pub fn new_with_speed<InputSource>(
         source: InputSource,
         output_sample_rate: u32,

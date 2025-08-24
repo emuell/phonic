@@ -44,7 +44,7 @@ pub enum StreamedFileSourceMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A [`FileSource`] which streams & decodes an audio file asynchromiously in a worker thread.
+/// A [`FileSource`] which streams & decodes an audio file asynchronously in a worker thread.
 pub struct StreamedFileSource {
     actor: ActorHandle<StreamedFileSourceMessage>,
     event_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
@@ -413,7 +413,7 @@ struct SharedFileWorkerState {
     is_playing: Arc<AtomicBool>,
     /// Did the worker thread played until the end of the file?
     end_of_file: Arc<AtomicBool>,
-    /// True when we need to fade-out instad of abruptly stopping.
+    /// True when we need to fade-out instead of abruptly stopping.
     fade_out_on_stop: Arc<AtomicBool>,
     /// True when a stop fadeout was requested.
     is_fading_out: Arc<AtomicBool>,

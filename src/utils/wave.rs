@@ -67,7 +67,7 @@ use std::time::Duration;
 
 /// A single point in a waveform view plot, which represents a condensed view of the audio data at
 /// the specified time as min/max values.
-/// The slice width is indirectly specified via the resultion parameter when generating the points.
+/// The slice width is indirectly specified via the resolution parameter when generating the points.
 #[derive(Default, Clone)]
 pub struct WaveformPoint {
     /// Start time this point refers to in the original sample buffer.

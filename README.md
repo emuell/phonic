@@ -118,10 +118,8 @@ fn main() -> Result<(), Error> {
                     position 
                 } => {
                     println!(
-                        "Playback pos of source #{} '{}': {}",
-                        id,
-                        path,
-                        position.as_secs_f32()
+                        "Playback pos of source #{id} '{path}': {pos}",
+                        pos = position.as_secs_f32()
                     );
                 }
                 PlaybackStatusEvent::Stopped {
@@ -131,9 +129,9 @@ fn main() -> Result<(), Error> {
                     exhausted,
                 } => {
                     if exhausted {
-                        println!("Playback of #{} '{}' finished", id, path);
+                        println!("Playback of #{id} '{path}' finished");
                     } else {
-                        println!("Playback of #{} '{}' was stopped", id, path);
+                        println!("Playback of #{id} '{path}' was stopped");
                     }
                 }
             }

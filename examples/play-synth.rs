@@ -102,10 +102,8 @@ fn main() -> Result<(), Error> {
                         position,
                     } => {
                         println!(
-                            "Playback pos of synth #{} '{}': {}",
-                            id,
-                            path,
-                            position.as_secs_f32()
+                            "Playback pos of synth #{id} '{path}': {pos}",
+                            pos = position.as_secs_f32()
                         );
                     }
                     PlaybackStatusEvent::Stopped {

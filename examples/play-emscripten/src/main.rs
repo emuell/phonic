@@ -228,7 +228,7 @@ fn main() {
     panic!("The main function is not exposed and should never be called");
 }
 
-/// Creats a new `EmscriptenPlayer`
+/// Creates a new `EmscriptenPlayer`
 /// Exported as `_start` function in the WASM.
 #[no_mangle]
 pub extern "C" fn start() {

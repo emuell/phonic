@@ -19,8 +19,8 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct FilePlaybackOptions {
     /// By default false: when true, the file will be decoded and streamed on the fly.
-    /// This should be enabled for very long files only, especiall when a lot of files are
-    /// going to be played at once.
+    /// This should be enabled for very long files only, especially when a lot of files
+    /// are going to be played at once.
     pub stream: bool,
 
     /// By default 1.0f32. Customize to lower or raise the volume of the file.
@@ -54,7 +54,7 @@ pub struct FilePlaybackOptions {
     /// or down.
     pub resampling_quality: ResamplingQuality,
 
-    /// Wallclock time rate of playback pos events, emited via PlaybackStatusEvent
+    /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
@@ -224,7 +224,7 @@ impl Player {
         options: FilePlaybackOptions,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
-        // create a stremed or preloaded source, depending on the options and play it
+        // create a streamed or preloaded source, depending on the options and play it
         if options.stream {
             let streamed_source = StreamedFileSource::from_file(
                 path,

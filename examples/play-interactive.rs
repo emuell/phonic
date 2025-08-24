@@ -34,7 +34,7 @@ fn main() -> Result<(), Error> {
     // create global playback state
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
-    let curent_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
+    let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
     let playing_synth_ids = Arc::new(Mutex::new(HashMap::<Keycode, usize>::new()));
 
     // start playing the background loop and memorize playback_id
@@ -113,22 +113,22 @@ fn main() -> Result<(), Error> {
                 }
             }
             Keycode::Left => {
-                let mut current = curent_loop_seek_start.lock().unwrap();
+                let mut current = current_loop_seek_start.lock().unwrap();
                 *current = Duration::from_secs_f32(0_f32.max(current.as_secs_f32() - 0.5));
                 let mut player = player.lock().unwrap();
                 player
                     .seek_source(loop_playback_id, *current)
                     .unwrap_or_default();
-                println!("Seeked loop to pos: {} sec", current.as_secs_f32());
+                println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32());
             }
             Keycode::Right => {
-                let mut current = curent_loop_seek_start.lock().unwrap();
+                let mut current = current_loop_seek_start.lock().unwrap();
                 *current = Duration::from_secs_f32(4_f32.min(current.as_secs_f32() + 0.5));
                 let mut player = player.lock().unwrap();
                 player
                     .seek_source(loop_playback_id, *current)
                     .unwrap_or_default();
-                println!("Seeked loop to pos: {} sec", current.as_secs_f32())
+                println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
             }
             keycode => {
                 if let Some(relative_note) = key_to_note(keycode) {
