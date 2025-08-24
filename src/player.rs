@@ -422,7 +422,7 @@ impl Player {
                     if let Some(sender) = &playback_sender {
                         // NB: send and not try_send: block until sender queue is free
                         if let Err(err) = sender.send(event) {
-                            log::warn!("failed to send file status message: {}", err);
+                            log::warn!("failed to send file status message: {err}");
                         }
                     }
                 } else {

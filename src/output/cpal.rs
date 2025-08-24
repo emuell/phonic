@@ -71,7 +71,7 @@ impl CpalOutput {
             .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?;
 
         if let Ok(name) = device.name() {
-            log::info!("using audio device: {}", name);
+            log::info!("using audio device: {name}");
         }
 
         // Get the default device config, so we know what sample format and sample rate
@@ -322,7 +322,7 @@ impl Stream {
                 writer(output);
             },
             |err| {
-                log::error!("audio output error: {}", err);
+                log::error!("audio output error: {err}");
             },
             None,
         )
@@ -338,14 +338,14 @@ impl Actor for Stream {
             StreamMsg::Pause => {
                 log::debug!("pausing audio output stream");
                 if let Err(err) = self.stream.pause() {
-                    log::error!("failed to stop stream: {}", err);
+                    log::error!("failed to stop stream: {err}");
                 }
                 Ok(Act::Continue)
             }
             StreamMsg::Resume => {
                 log::debug!("resuming audio output stream");
                 if let Err(err) = self.stream.play() {
-                    log::error!("failed to start stream: {}", err);
+                    log::error!("failed to start stream: {err}");
                 }
                 Ok(Act::Continue)
             }

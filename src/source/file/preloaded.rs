@@ -299,7 +299,7 @@ impl PreloadedFileSource {
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(self.buffer_pos),
                 }) {
-                    log::warn!("Failed to send playback event: {}", err)
+                    log::warn!("Failed to send playback event: {err}")
                 }
             }
         }
@@ -313,7 +313,7 @@ impl PreloadedFileSource {
                 path: self.file_path.clone(),
                 exhausted: self.buffer_pos >= self.buffer.len(),
             }) {
-                log::warn!("Failed to send playback event: {}", err)
+                log::warn!("Failed to send playback event: {err}")
             }
         }
     }

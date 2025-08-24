@@ -188,7 +188,7 @@ where
                     path: self.playback_name.clone(),
                     position: self.samples_to_duration(self.playback_pos),
                 }) {
-                    log::warn!("Failed to send playback event: {}", err)
+                    log::warn!("Failed to send playback event: {err}")
                 }
             }
         }
@@ -206,7 +206,7 @@ where
                     path: self.playback_name.clone(),
                     exhausted: self.playback_finished,
                 }) {
-                    log::warn!("failed to send synth playback status event: {}", err);
+                    log::warn!("failed to send synth playback status event: {err}");
                 }
             }
         }

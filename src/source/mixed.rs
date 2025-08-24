@@ -210,7 +210,7 @@ impl Source for MixedSource {
                 if samples_until_stop == 0 {
                     let sender = &playing_source.playback_message_queue;
                     if let Err(err) = sender.send_stop() {
-                        log::warn!("failed to send stop event: {}", err)
+                        log::warn!("failed to send stop event: {err}")
                     }
                     samples_until_stop = u64::MAX;
                 }

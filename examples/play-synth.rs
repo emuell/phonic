@@ -115,9 +115,9 @@ fn main() -> Result<(), Error> {
                         exhausted,
                     } => {
                         if exhausted {
-                            println!("Playback of synth #{} '{}' finished playback", id, path);
+                            println!("Playback of synth #{id} '{path}' finished playback");
                         } else {
-                            println!("Playback of synth #{} '{}' stopped", id, path);
+                            println!("Playback of synth #{id} '{path}' stopped");
                         }
                         playing_synth_ids.retain(|v| *v != id);
                         if playing_synth_ids.is_empty() {

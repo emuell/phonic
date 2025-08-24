@@ -86,9 +86,9 @@ fn main() -> Result<(), Error> {
                         exhausted,
                     } => {
                         if exhausted {
-                            println!("Playback of #{} '{}' finished playback", id, path);
+                            println!("Playback of #{id} '{path}' finished playback");
                         } else {
-                            println!("Playback of #{} '{}' was stopped", id, path);
+                            println!("Playback of #{id} '{path}' was stopped");
                         }
                         playing_file_ids.retain(|v| *v != id);
                         if playing_file_ids.is_empty() {

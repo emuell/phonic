@@ -270,7 +270,7 @@ fn create_synth_source(
     );
     DaspSynthSource::new(
         signal,
-        format!("Synth Note #{}", note).as_str(),
+        format!("Synth Note #{note}").as_str(),
         options,
         sample_rate,
         None,

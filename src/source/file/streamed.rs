@@ -217,12 +217,12 @@ impl StreamedFileSource {
             match event {
                 FilePlaybackMessage::Seek(pos) => {
                     if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Seek(pos)) {
-                        log::warn!("failed to send playback seek event: {}", err)
+                        log::warn!("failed to send playback seek event: {err}")
                     }
                 }
                 FilePlaybackMessage::Stop => {
                     if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Stop) {
-                        log::warn!("failed to send playback stop event: {}", err)
+                        log::warn!("failed to send playback stop event: {err}")
                     }
                 }
             };
@@ -240,7 +240,7 @@ impl StreamedFileSource {
                     path: self.file_path.clone(),
                     position: self.samples_to_duration(position),
                 }) {
-                    log::warn!("failed to send playback event: {}", err)
+                    log::warn!("failed to send playback event: {err}")
                 }
             }
         }
@@ -254,7 +254,7 @@ impl StreamedFileSource {
                 path: self.file_path.clone(),
                 exhausted: is_exhausted,
             }) {
-                log::warn!("failed to send playback event: {}", err)
+                log::warn!("failed to send playback event: {err}")
             }
         }
     }
@@ -470,10 +470,7 @@ impl StreamedFileWorker {
         if let Err(err) =
             audio_thread_priority::promote_current_thread_to_real_time(0, input.signal_spec().rate)
         {
-            log::warn!(
-                "failed to set file worker thread's priority to real-time: {}",
-                err
-            );
+            log::warn!("failed to set file worker thread's priority to real-time: {err}");
         }
 
         Self {
@@ -541,7 +538,7 @@ impl StreamedFileWorker {
                 self.output.clear();
             }
             Err(err) => {
-                log::error!("failed to seek: {}", err);
+                log::error!("failed to seek: {err}");
             }
         }
         Ok(Act::Continue)
