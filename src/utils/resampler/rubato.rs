@@ -128,6 +128,16 @@ impl AudioResampler for RubatoResampler {
         }
     }
 
+    fn update(&mut self, input_rate: u32, output_rate: u32) -> Result<(), Error> {
+        self.spec.input_rate = input_rate;
+        self.spec.output_rate = output_rate;
+        let new_ratio = self.spec.output_ratio();
+        let ramp = false;
+        self.resampler
+            .set_resample_ratio(new_ratio, ramp)
+            .map_err(|err| Error::ResamplingError(Box::new(err)))
+    }
+
     fn reset(&mut self) {
         // there's no reset functionality in rubato
     }

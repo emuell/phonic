@@ -181,6 +181,16 @@ impl AudioResampler for CubicResampler {
         Ok(result)
     }
 
+    fn update(&mut self, input_rate: u32, output_rate: u32) -> Result<(), Error> {
+        self.spec.input_rate = input_rate;
+        self.spec.output_rate = output_rate;
+        let new_ratio = self.spec.input_ratio() as f32;
+        for interpolator in self.interpolators.iter_mut() {
+            interpolator.ratio = new_ratio;
+        }
+        Ok(())
+    }
+
     fn reset(&mut self) {
         for interpolator in self.interpolators.iter_mut() {
             interpolator.reset();
