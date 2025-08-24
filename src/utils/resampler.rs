@@ -10,13 +10,14 @@ pub(crate) mod rubato;
 /// AudioResampler specs.
 #[derive(Copy, Clone)]
 pub struct ResamplingSpecs {
-    input_rate: u32,
-    output_rate: u32,
-    channel_count: usize,
+    pub input_rate: u32,
+    pub output_rate: u32,
+    pub channel_count: usize,
 }
 
 impl ResamplingSpecs {
     pub fn new(input_rate: u32, output_rate: u32, channel_count: usize) -> Self {
+        debug_assert!(output_rate > 0 && input_rate > 0);
         Self {
             input_rate,
             output_rate,
@@ -27,6 +28,7 @@ impl ResamplingSpecs {
     pub fn input_ratio(&self) -> f64 {
         self.input_rate as f64 / self.output_rate as f64
     }
+
     pub fn output_ratio(&self) -> f64 {
         self.output_rate as f64 / self.input_rate as f64
     }
@@ -51,6 +53,9 @@ pub trait AudioResampler: Send + Sync {
     /// pending buffered outputs - if any.
     /// returns ResamplerError or (input_consumed, output_written) on success.
     fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<(usize, usize), Error>;
+
+    /// Update resampler rates.
+    fn update(&mut self, input_rate: u32, output_rate: u32) -> Result<(), Error>;
 
     /// Reset internal resampler state. Make an existing resampler ready for a new source.
     fn reset(&mut self);
