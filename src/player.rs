@@ -329,6 +329,65 @@ impl Player {
         Err(Error::MediaFileNotFound)
     }
 
+    /// Set a playing file source's speed with the given optional glide rate in semitones per second.
+    /// This is only supported for files and thus won't do anything for synths.
+    pub fn set_source_speed(
+        &mut self,
+        playback_id: PlaybackId,
+        speed: f64,
+        glide: Option<f32>,
+    ) -> Result<(), Error> {
+        // check if the given playback id is still know (playing)
+        if let Some(source) = self.playing_sources.get(&playback_id) {
+            if let PlaybackMessageSender::File(queue) = &*source {
+                if queue
+                    .push(FilePlaybackMessage::SetSpeed(speed, glide))
+                    .is_err()
+                {
+                    Err(Error::SendError)
+                } else {
+                    Ok(())
+                }
+            } else {
+                Err(Error::MediaFileNotFound)
+            }
+        } else {
+            Err(Error::MediaFileNotFound)
+        }
+    }
+
+    /// Set a playing file source's speed at a given sample time in future with the given
+    /// optional glide rate in semitones per second.
+    /// This is only supported for files and thus won't do anything for synths.
+    pub fn set_source_speed_at_sample_time(
+        &mut self,
+        playback_id: PlaybackId,
+        speed: f64,
+        glide: Option<f32>,
+        sample_time: u64,
+    ) -> Result<(), Error> {
+        // check if the given playback id is still know (playing)
+        if self.playing_sources.contains_key(&playback_id) {
+            // pass event to mixer to schedule it
+            if self
+                .mixer_event_queue
+                .push(MixedSourceMsg::SetSpeed {
+                    playback_id,
+                    speed,
+                    glide,
+                    sample_time,
+                })
+                .is_err()
+            {
+                log::warn!("mixer's event queue is full. playback event got skipped!");
+                log::warn!("increase the mixer event queue to prevent this from happening...");
+            }
+            Ok(())
+        } else {
+            Err(Error::MediaFileNotFound)
+        }
+    }
+
     /// Immediately stop a playing file or synth source. NB: This will fade-out the source when a
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
