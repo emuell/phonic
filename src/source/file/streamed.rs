@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crossbeam_channel::Sender;
@@ -13,20 +13,17 @@ use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
 
-use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
+use super::{common::FileSourceImpl, FilePlaybackMessage, FilePlaybackOptions, FileSource};
+
 use crate::{
     error::Error,
     player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{resampled::ResamplingQuality, Source, SourceTime},
+    source::{Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
-        buffer::{clear_buffer, TempBuffer},
+        buffer::clear_buffer,
         decoder::AudioDecoder,
-        fader::{FaderState, VolumeFader},
-        resampler::{
-            cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
-        },
-        unique_usize_id,
+        fader::FaderState,
     },
 };
 
@@ -47,23 +44,10 @@ pub enum StreamedFileSourceMessage {
 /// A [`FileSource`] which streams & decodes an audio file asynchronously in a worker thread.
 pub struct StreamedFileSource {
     actor: ActorHandle<StreamedFileSourceMessage>,
-    event_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
-    file_id: usize,
-    file_path: Arc<String>,
-    options: FilePlaybackOptions,
-    volume_fader: VolumeFader,
-    fade_out_duration: Option<Duration>,
     consumer: Consumer<f32>,
     worker_state: SharedFileWorkerState,
     signal_spec: SignalSpec,
-    resampler: Box<dyn AudioResampler>,
-    resampler_input_buffer: TempBuffer,
-    output_sample_rate: u32,
-    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
-    playback_status_context: Option<PlaybackStatusContext>,
-    playback_pos_report_instant: Instant,
-    playback_pos_emit_rate: Option<Duration>,
-    playback_finished: bool,
+    file_source: FileSourceImpl,
 }
 
 impl StreamedFileSource {
@@ -123,62 +107,22 @@ impl StreamedFileSource {
         });
         actor.send(StreamedFileSourceMessage::Read)?;
 
-        // create event queue for the player
-        let event_queue = Arc::new(ArrayQueue::new(128));
-
-        // create volume fader
-        let mut volume_fader = VolumeFader::new(signal_spec.channels.count(), signal_spec.rate);
-        if let Some(duration) = options.fade_in_duration {
-            if !duration.is_zero() {
-                volume_fader.start_fade_in(duration);
-            }
-        }
-
-        // create resampler
-        let resampler_specs = ResamplingSpecs::new(
+        // create common data
+        let file_source = FileSourceImpl::new(
+            &file_path,
+            options,
             signal_spec.rate,
-            (output_sample_rate as f64 / options.speed) as u32,
             signal_spec.channels.count(),
-        );
-        let resampler: Box<dyn AudioResampler> = match options.resampling_quality {
-            ResamplingQuality::HighQuality => Box::new(RubatoResampler::new(resampler_specs)?),
-            ResamplingQuality::Default => Box::new(CubicResampler::new(resampler_specs)?),
-        };
-        const DEFAULT_CHUNK_SIZE: usize = 256;
-        let resample_input_buffer_size = resampler
-            .max_input_buffer_size()
-            .unwrap_or(DEFAULT_CHUNK_SIZE);
-        let resampler_input_buffer = TempBuffer::new(resample_input_buffer_size);
-
-        // create new unique file id
-        let file_id = unique_usize_id();
-
-        // create empty context
-        let playback_status_context = None;
-
-        // copy remaining options which are applied while playback
-        let fade_out_duration = options.fade_out_duration;
-        let playback_pos_emit_rate = options.playback_pos_emit_rate;
+            output_sample_rate,
+            playback_status_send,
+        )?;
 
         Ok(Self {
             actor,
-            event_queue,
-            file_id,
-            file_path,
-            options,
-            volume_fader,
-            fade_out_duration,
             consumer,
             signal_spec,
-            resampler,
-            resampler_input_buffer,
-            output_sample_rate,
             worker_state,
-            playback_status_send,
-            playback_status_context,
-            playback_pos_report_instant: Instant::now(),
-            playback_pos_emit_rate,
-            playback_finished: false,
+            file_source,
         })
     }
 
@@ -198,26 +142,23 @@ impl StreamedFileSource {
             + position
     }
 
-    fn should_report_pos(&self) -> bool {
-        if let Some(report_duration) = self.playback_pos_emit_rate {
-            self.playback_pos_report_instant.elapsed() >= report_duration
-        } else {
-            false
-        }
-    }
-
-    fn samples_to_duration(&self, samples: u64) -> Duration {
-        let frames = samples / self.signal_spec.channels.count() as u64;
-        let seconds = frames as f64 / self.output_sample_rate as f64;
-        Duration::from_secs_f64(seconds)
-    }
-
     fn process_messages(&mut self) {
-        while let Some(event) = self.event_queue.pop() {
-            match event {
-                FilePlaybackMessage::Seek(pos) => {
-                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Seek(pos)) {
+        while let Some(msg) = self.file_source.playback_message_queue.pop() {
+            match msg {
+                FilePlaybackMessage::Seek(position) => {
+                    if let Err(err) = self
+                        .actor
+                        .try_send(StreamedFileSourceMessage::Seek(position))
+                    {
                         log::warn!("failed to send playback seek event: {err}")
+                    }
+                }
+                FilePlaybackMessage::SetSpeed(speed, glide) => {
+                    self.file_source.target_speed = speed;
+                    self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
+                    if self.file_source.speed_glide_rate == 0.0 {
+                        self.file_source.current_speed = speed;
+                        self.file_source.update_speed(self.signal_spec.rate);
                     }
                 }
                 FilePlaybackMessage::Stop => {
@@ -225,66 +166,87 @@ impl StreamedFileSource {
                         log::warn!("failed to send playback stop event: {err}")
                     }
                 }
-            };
+            }
         }
     }
 
-    fn send_playback_position_status(&mut self, position: u64) {
-        if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
-                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    position: self.samples_to_duration(position),
-                }) {
-                    log::warn!("failed to send playback event: {err}")
+    fn write_buffer(&mut self, output: &mut [f32]) -> usize {
+        let mut written = 0;
+        while written < output.len() {
+            if self.file_source.resampler_input_buffer.is_empty() {
+                self.file_source.resampler_input_buffer.reset_range();
+                let read_samples = self
+                    .consumer
+                    .read(self.file_source.resampler_input_buffer.get_mut())
+                    .unwrap_or(0);
+                self.file_source
+                    .resampler_input_buffer
+                    .set_range(0, read_samples);
+
+                // pad with zeros if resampler has input size constrains
+                let required_input_len = self
+                    .file_source
+                    .resampler
+                    .required_input_buffer_size()
+                    .unwrap_or(0);
+                if self.file_source.resampler_input_buffer.len() < required_input_len
+                    // stop filling up empty input buffers when we've reached the end of file
+                    && (read_samples != 0
+                        || !self.worker_state.end_of_file.load(Ordering::Relaxed))
+                {
+                    self.file_source
+                        .resampler_input_buffer
+                        .set_range(0, required_input_len);
+                    clear_buffer(
+                        &mut self.file_source.resampler_input_buffer.get_mut()[read_samples..],
+                    );
                 }
             }
-        }
-    }
-
-    fn send_playback_stopped_status(&mut self, is_exhausted: bool) {
-        if let Some(event_send) = &self.playback_status_send {
-            if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
-                id: self.file_id,
-                context: self.playback_status_context.clone(),
-                path: self.file_path.clone(),
-                exhausted: is_exhausted,
-            }) {
-                log::warn!("failed to send playback event: {err}")
+            let input = self.file_source.resampler_input_buffer.get();
+            let target = &mut output[written..];
+            let (input_consumed, output_written) = self
+                .file_source
+                .resampler
+                .process(input, target)
+                .expect("StreamedFile resampling failed");
+            self.file_source
+                .resampler_input_buffer
+                .consume(input_consumed);
+            written += output_written;
+            if output_written == 0 {
+                // got no more output from file or resampler
+                break;
             }
         }
+        written
     }
 }
 
 impl FileSource for StreamedFileSource {
     fn playback_id(&self) -> PlaybackId {
-        self.file_id
+        self.file_source.file_id
     }
 
     fn playback_options(&self) -> &FilePlaybackOptions {
-        &self.options
+        &self.file_source.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
-        self.event_queue.clone()
+        Arc::clone(&self.file_source.playback_message_queue)
     }
 
     fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
-        self.playback_status_send.clone()
+        self.file_source.playback_status_send.clone()
     }
     fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
-        self.playback_status_send = sender;
+        self.file_source.playback_status_send = sender;
     }
 
     fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
-        self.playback_status_context.clone()
+        self.file_source.playback_status_context.clone()
     }
     fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
-        self.playback_status_context = context;
+        self.file_source.playback_status_context = context;
     }
 
     fn current_frame_position(&self) -> u64 {
@@ -297,7 +259,7 @@ impl FileSource for StreamedFileSource {
     }
 
     fn end_of_track(&self) -> bool {
-        self.playback_finished && self.worker_state.end_of_file.load(Ordering::Relaxed)
+        self.file_source.playback_finished && self.worker_state.end_of_file.load(Ordering::Relaxed)
     }
 }
 
@@ -306,78 +268,78 @@ impl Source for StreamedFileSource {
         // consume playback messages
         self.process_messages();
 
-        // return empty handed when playback finished
-        if self.playback_finished {
+        // quickly bail out when we've finished playing
+        if self.file_source.playback_finished {
             return 0;
         }
 
         // fetch input from our ring-buffer and resample it
-        let mut written = 0;
-        while written < output.len() {
-            if self.resampler_input_buffer.is_empty() {
-                self.resampler_input_buffer.reset_range();
-                let read_samples = self
-                    .consumer
-                    .read(self.resampler_input_buffer.get_mut())
-                    .unwrap_or(0);
-                self.resampler_input_buffer.set_range(0, read_samples);
+        let mut total_written = 0;
+        if self.file_source.current_speed != self.file_source.target_speed {
+            // update pitch slide in blocks of SPEED_UPDATE_CHUNK_SIZE
+            while total_written < output.len() {
+                if self.file_source.samples_to_next_speed_update == 0 {
+                    if self.file_source.current_speed != self.file_source.target_speed {
+                        self.file_source.update_speed(self.signal_spec.rate);
+                    }
+                    self.file_source.samples_to_next_speed_update =
+                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE;
+                }
+                let chunk_length = (output.len() - total_written)
+                    .min(self.file_source.samples_to_next_speed_update);
+                let output_chunk = &mut output[total_written..total_written + chunk_length];
+                let written = self.write_buffer(output_chunk);
 
-                // pad with zeros if resampler has input size constrains
-                let required_input_len = self.resampler.required_input_buffer_size().unwrap_or(0);
-                if self.resampler_input_buffer.len() < required_input_len
-                    // stop filling up empty input buffers when we've reached the end of file
-                    && (read_samples != 0
-                        || !self.worker_state.end_of_file.load(Ordering::Relaxed))
-                {
-                    self.resampler_input_buffer.set_range(0, required_input_len);
-                    clear_buffer(&mut self.resampler_input_buffer.get_mut()[read_samples..]);
+                self.file_source.samples_to_next_speed_update -= written;
+                total_written += written;
+
+                if written < output_chunk.len() {
+                    break; // input exhausted
                 }
             }
-            let input = self.resampler_input_buffer.get();
-            let target = &mut output[written..];
-            let (input_consumed, output_written) = self
-                .resampler
-                .process(input, target)
-                .expect("StreamedFile resampling failed");
-            self.resampler_input_buffer.consume(input_consumed);
-            written += output_written;
-            if output_written == 0 {
-                // got no more output from file or resampler
-                break;
-            }
+        } else {
+            // write into buffer without pitch changes
+            self.file_source.samples_to_next_speed_update = 0;
+            total_written = self.write_buffer(output);
         }
 
-        // update position counters
-        let position = self.written_samples(written as u64);
-
-        // start fade-out when this got signaled in our worker state
+        // start fade-out when we got signaled in our worker state to do so
         let is_fading_out = self.worker_state.is_fading_out.load(Ordering::Relaxed);
-        if is_fading_out && self.volume_fader.target_volume() != 0.0 {
-            self.volume_fader
-                .start_fade_out(self.fade_out_duration.unwrap_or(Duration::ZERO));
+        if is_fading_out && self.file_source.volume_fader.target_volume() != 0.0 {
+            self.file_source
+                .volume_fader
+                .start_fade_out(self.file_source.fade_out_duration.unwrap_or(Duration::ZERO));
         }
 
-        // apply fade-in or fade-out
-        self.volume_fader.process(&mut output[0..written]);
+        // apply volume fading
+        self.file_source
+            .volume_fader
+            .process(&mut output[..total_written]);
 
-        // send position change events
-        self.send_playback_position_status(position);
+        // send Position change events, if needed
+        let position = self.written_samples(total_written as u64);
+        let duration = self
+            .file_source
+            .samples_to_duration(position, self.channel_count());
+        self.file_source.send_playback_position_status(duration);
 
         // check if playback finished and send Stopped events
         let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);
-        let is_exhausted = written == 0 && self.worker_state.end_of_file.load(Ordering::Relaxed);
-        let fadeout_completed = is_fading_out && self.volume_fader.state() == FaderState::Finished;
+        let is_exhausted =
+            total_written == 0 && self.worker_state.end_of_file.load(Ordering::Relaxed);
+        let fadeout_completed =
+            is_fading_out && self.file_source.volume_fader.state() == FaderState::Finished;
         if !is_playing || is_exhausted || fadeout_completed {
             // send stop message
-            self.send_playback_stopped_status(is_exhausted);
+            self.file_source.send_playback_stopped_status(is_exhausted);
             // stop our worker
             self.worker_state.is_playing.store(false, Ordering::Relaxed);
             // and stop processing
-            self.playback_finished = true;
+            self.file_source.playback_finished = true;
         }
 
         // return dirty output len
-        written
+        total_written
     }
 
     fn channel_count(&self) -> usize {
@@ -385,18 +347,18 @@ impl Source for StreamedFileSource {
     }
 
     fn sample_rate(&self) -> u32 {
-        self.output_sample_rate
+        self.file_source.output_sample_rate
     }
 
     fn is_exhausted(&self) -> bool {
-        self.playback_finished
+        self.file_source.playback_finished
     }
 }
 
 impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
-        self.fade_out_duration = None;
+        self.file_source.fade_out_duration = None;
         let _ = self.actor.send(StreamedFileSourceMessage::Stop);
     }
 }

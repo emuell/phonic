@@ -1,3 +1,4 @@
+mod common;
 pub mod preloaded;
 pub mod streamed;
 
@@ -169,6 +170,9 @@ impl FilePlaybackOptions {
 pub enum FilePlaybackMessage {
     /// Seek the file source to a new position
     Seek(Duration),
+    /// Update the source's playback speed with the given
+    /// optional glide rate in semitones per second.
+    SetSpeed(f64, Option<f32>),
     /// Stop the source
     Stop,
 }
