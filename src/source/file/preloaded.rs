@@ -1,30 +1,18 @@
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use symphonia::core::audio::SampleBuffer;
 
-use super::{FilePlaybackMessage, FilePlaybackOptions, FileSource};
+use super::{common::FileSourceImpl, FilePlaybackMessage, FilePlaybackOptions, FileSource};
+
 use crate::{
     error::Error,
     source::{
         file::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-        resampled::ResamplingQuality,
         Source, SourceTime,
     },
-    utils::{
-        buffer::{clear_buffer, TempBuffer},
-        decoder::AudioDecoder,
-        fader::{FaderState, VolumeFader},
-        resampler::{
-            cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
-        },
-        unique_usize_id,
-    },
+    utils::{buffer::clear_buffer, decoder::AudioDecoder, fader::FaderState},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -36,25 +24,12 @@ use crate::{
 /// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
-    file_id: PlaybackId,
-    file_path: Arc<String>,
-    options: FilePlaybackOptions,
-    volume_fader: VolumeFader,
-    fade_out_duration: Option<Duration>,
     repeat: usize,
     buffer: Arc<Vec<f32>>,
     buffer_sample_rate: u32,
     buffer_channel_count: usize,
     buffer_pos: usize,
-    resampler: Box<dyn AudioResampler>,
-    resampler_input_buffer: TempBuffer,
-    output_sample_rate: u32,
-    playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
-    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
-    playback_status_context: Option<PlaybackStatusContext>,
-    playback_pos_report_instant: Instant,
-    playback_pos_emit_rate: Option<Duration>,
-    playback_finished: bool,
+    file_source: FileSourceImpl,
 }
 
 impl PreloadedFileSource {
@@ -161,61 +136,26 @@ impl PreloadedFileSource {
         // validate options
         options.validate()?;
 
-        // create a queue for playback messages
-        let playback_message_queue = Arc::new(ArrayQueue::new(128));
-
-        // create new volume fader
-        let mut volume_fader = VolumeFader::new(buffer_channel_count, buffer_sample_rate);
-        if let Some(duration) = options.fade_in_duration {
-            if !duration.is_zero() {
-                volume_fader.start_fade_in(duration);
-            }
-        }
-
-        // reset context
-        let playback_status_context = None;
-
-        // create resampler
-        let resampler_specs = ResamplingSpecs::new(
-            buffer_sample_rate,
-            (output_sample_rate as f64 / options.speed) as u32,
-            buffer_channel_count,
-        );
-        let resampler: Box<dyn AudioResampler> = match options.resampling_quality {
-            ResamplingQuality::HighQuality => Box::new(RubatoResampler::new(resampler_specs)?),
-            ResamplingQuality::Default => Box::new(CubicResampler::new(resampler_specs)?),
-        };
-        let resample_input_buffer_size = resampler.max_input_buffer_size().unwrap_or(0);
-        let resampler_input_buffer = TempBuffer::new(resample_input_buffer_size);
-
-        // create new unique file id
-        let file_id = unique_usize_id();
-        let file_path = Arc::new(file_path.to_string());
-
-        // copy remaining options which are applied while playback
-        let fade_out_duration = options.fade_out_duration;
-        let playback_pos_emit_rate = options.playback_pos_emit_rate;
-
-        Ok(Self {
-            file_id,
+        // create common data
+        let file_source = FileSourceImpl::new(
             file_path,
             options,
-            volume_fader,
-            fade_out_duration,
-            repeat: options.repeat,
+            buffer_sample_rate,
+            buffer_channel_count,
+            output_sample_rate,
+            playback_status_send,
+        )?;
+
+        let repeat = options.repeat;
+        let buffer_pos = 0;
+
+        Ok(Self {
+            repeat,
             buffer,
             buffer_sample_rate,
             buffer_channel_count,
-            buffer_pos: 0,
-            resampler,
-            resampler_input_buffer,
-            output_sample_rate,
-            playback_message_queue,
-            playback_status_send,
-            playback_status_context,
-            playback_pos_report_instant: Instant::now(),
-            playback_pos_emit_rate,
-            playback_finished: false,
+            buffer_pos,
+            file_source,
         })
     }
 
@@ -229,8 +169,8 @@ impl PreloadedFileSource {
             self.buffer(),
             self.buffer_sample_rate(),
             self.buffer_channel_count(),
-            &self.file_path,
-            self.playback_status_send.clone(),
+            &self.file_source.file_path,
+            self.file_source.playback_status_send.clone(),
             options,
             output_sample_rate,
         )
@@ -246,163 +186,86 @@ impl PreloadedFileSource {
     }
     /// Shared read-only access to the raw preloaded file's buffer
     pub fn buffer(&self) -> Arc<Vec<f32>> {
-        self.buffer.clone()
-    }
-
-    fn should_report_pos(&self) -> bool {
-        if let Some(report_duration) = self.playback_pos_emit_rate {
-            self.playback_pos_report_instant.elapsed() >= report_duration
-        } else {
-            false
-        }
-    }
-
-    fn samples_to_duration(&self, samples: usize) -> Duration {
-        let frames = samples / self.buffer_channel_count;
-        let seconds = frames as f64 / self.output_sample_rate as f64;
-        Duration::from_secs_f64(seconds)
+        Arc::clone(&self.buffer)
     }
 
     fn process_messages(&mut self) {
-        while let Some(msg) = self.playback_message_queue.pop() {
+        while let Some(msg) = self.file_source.playback_message_queue.pop() {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
                     let buffer_pos = position.as_secs_f64()
                         * self.buffer_sample_rate as f64
                         * self.buffer_channel_count as f64;
                     self.buffer_pos = (buffer_pos as usize).clamp(0, self.buffer.len());
-                    self.resampler.reset();
+                    self.file_source.resampler.reset();
+                }
+                FilePlaybackMessage::SetSpeed(speed, glide) => {
+                    self.file_source.samples_to_next_speed_update = 0;
+                    self.file_source.target_speed = speed;
+                    self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
+                    if self.file_source.speed_glide_rate == 0.0 {
+                        self.file_source.current_speed = speed;
+                        self.file_source.update_speed(self.buffer_sample_rate);
+                    }
                 }
                 FilePlaybackMessage::Stop => {
-                    if let Some(duration) = self.fade_out_duration {
+                    if let Some(duration) = self.file_source.fade_out_duration {
                         if !duration.is_zero() {
-                            self.volume_fader.start_fade_out(duration);
+                            self.file_source.volume_fader.start_fade_out(duration);
                         } else {
-                            self.playback_finished = true;
+                            self.file_source.playback_finished = true;
                         }
                     } else {
-                        self.playback_finished = true;
+                        self.file_source.playback_finished = true;
                     }
                 }
             }
         }
     }
 
-    fn send_playback_position_status(&mut self) {
-        if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
-                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
-                    id: self.file_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.file_path.clone(),
-                    position: self.samples_to_duration(self.buffer_pos),
-                }) {
-                    log::warn!("Failed to send playback event: {err}")
-                }
-            }
-        }
-    }
-
-    fn send_playback_stopped_status(&mut self) {
-        if let Some(event_send) = &self.playback_status_send {
-            if let Err(err) = event_send.try_send(PlaybackStatusEvent::Stopped {
-                id: self.file_id,
-                context: self.playback_status_context.clone(),
-                path: self.file_path.clone(),
-                exhausted: self.buffer_pos >= self.buffer.len(),
-            }) {
-                log::warn!("Failed to send playback event: {err}")
-            }
-        }
-    }
-}
-
-impl FileSource for PreloadedFileSource {
-    fn playback_id(&self) -> PlaybackId {
-        self.file_id
-    }
-
-    fn playback_options(&self) -> &FilePlaybackOptions {
-        &self.options
-    }
-
-    fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
-        self.playback_message_queue.clone()
-    }
-
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
-        self.playback_status_send.clone()
-    }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
-        self.playback_status_send = sender;
-    }
-
-    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
-        self.playback_status_context.clone()
-    }
-    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
-        self.playback_status_context = context;
-    }
-
-    fn total_frames(&self) -> Option<u64> {
-        Some(self.buffer.len() as u64 / self.channel_count() as u64)
-    }
-
-    fn current_frame_position(&self) -> u64 {
-        self.buffer_pos as u64 / self.channel_count() as u64
-    }
-
-    fn end_of_track(&self) -> bool {
-        self.playback_finished
-    }
-}
-
-impl Source for PreloadedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
-        // consume playback messages
-        self.process_messages();
-
-        // quickly bail out when we've finished playing
-        if self.playback_finished {
-            return 0;
-        }
-
-        // write from buffer at current position and apply volume, fadeout and repeats
-        let mut total_written = 0_usize;
-        while total_written < output.len() {
+    fn write_buffer(&mut self, output: &mut [f32]) -> usize {
+        let mut written = 0;
+        while written < output.len() {
             // write from resampled buffer into output and apply volume
             let remaining_input_len = self.buffer.len() - self.buffer_pos;
             let remaining_input_buffer =
                 &self.buffer[self.buffer_pos..self.buffer_pos + remaining_input_len];
-            let remaining_target = &mut output[total_written..];
+            let remaining_output = &mut output[written..];
             // pad input with zeros if resampler has input size constrains (should only happen in the last process calls)
-            let required_input_len = self.resampler.required_input_buffer_size().unwrap_or(0);
-            let (input_consumed, output_written) =
-                if remaining_input_buffer.len() < required_input_len {
-                    self.resampler_input_buffer.reset_range();
-                    self.resampler_input_buffer
-                        .copy_from(remaining_input_buffer);
-                    clear_buffer(&mut self.resampler_input_buffer.get_mut()[remaining_input_len..]);
-                    let (_, output_written) = self
-                        .resampler
-                        .process(self.resampler_input_buffer.get(), remaining_target)
-                        .expect("PreloadedFile resampling failed");
-                    (remaining_input_len, output_written)
-                } else {
-                    self.resampler
-                        .process(remaining_input_buffer, remaining_target)
-                        .expect("PreloadedFile resampling failed")
-                };
+            let required_input_len = self
+                .file_source
+                .resampler
+                .required_input_buffer_size()
+                .unwrap_or(0);
+            let (input_consumed, output_written) = if remaining_input_buffer.len()
+                < required_input_len
+            {
+                self.file_source.resampler_input_buffer.reset_range();
+                self.file_source
+                    .resampler_input_buffer
+                    .copy_from(remaining_input_buffer);
+                clear_buffer(
+                    &mut self.file_source.resampler_input_buffer.get_mut()[remaining_input_len..],
+                );
+                let (_, output_written) = self
+                    .file_source
+                    .resampler
+                    .process(
+                        self.file_source.resampler_input_buffer.get(),
+                        remaining_output,
+                    )
+                    .expect("PreloadedFile resampling failed");
+                (remaining_input_len, output_written)
+            } else {
+                self.file_source
+                    .resampler
+                    .process(remaining_input_buffer, remaining_output)
+                    .expect("PreloadedFile resampling failed")
+            };
 
-            // apply volume fading
-            let written_target = &mut output[total_written..total_written + output_written];
-            self.volume_fader.process(written_target);
-
-            // maintain buffer pos
+            // move buffer read pos
             self.buffer_pos += input_consumed;
-            total_written += output_written;
+            written += output_written;
 
             // loop or stop when reaching end of file
             let end_of_file = self.buffer_pos >= self.buffer.len();
@@ -416,19 +279,114 @@ impl Source for PreloadedFileSource {
                     break;
                 }
             }
+            if output_written == 0 {
+                // got no more output from file or resampler
+                break;
+            }
+        }
+        written
+    }
+}
+
+impl FileSource for PreloadedFileSource {
+    fn playback_id(&self) -> PlaybackId {
+        self.file_source.file_id
+    }
+
+    fn playback_options(&self) -> &FilePlaybackOptions {
+        &self.file_source.options
+    }
+
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>> {
+        Arc::clone(&self.file_source.playback_message_queue)
+    }
+
+    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
+        self.file_source.playback_status_send.clone()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
+        self.file_source.playback_status_send = sender;
+    }
+
+    fn playback_status_context(&self) -> Option<PlaybackStatusContext> {
+        self.file_source.playback_status_context.clone()
+    }
+    fn set_playback_status_context(&mut self, context: Option<PlaybackStatusContext>) {
+        self.file_source.playback_status_context = context;
+    }
+
+    fn total_frames(&self) -> Option<u64> {
+        Some(self.buffer.len() as u64 / self.channel_count() as u64)
+    }
+
+    fn current_frame_position(&self) -> u64 {
+        self.buffer_pos as u64 / self.channel_count() as u64
+    }
+
+    fn end_of_track(&self) -> bool {
+        self.file_source.playback_finished
+    }
+}
+
+impl Source for PreloadedFileSource {
+    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
+        // consume playback messages
+        self.process_messages();
+
+        // quickly bail out when we've finished playing
+        if self.file_source.playback_finished {
+            return 0;
         }
 
+        let mut total_written = 0_usize;
+        if self.file_source.current_speed != self.file_source.target_speed {
+            // update pitch slide in blocks of SPEED_UPDATE_CHUNK_SIZE
+            while total_written < output.len() {
+                if self.file_source.samples_to_next_speed_update == 0 {
+                    if self.file_source.current_speed != self.file_source.target_speed {
+                        self.file_source.update_speed(self.buffer_sample_rate);
+                    }
+                    self.file_source.samples_to_next_speed_update =
+                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE;
+                }
+                let chunk_length = (output.len() - total_written)
+                    .min(self.file_source.samples_to_next_speed_update);
+                let output_chunk = &mut output[total_written..total_written + chunk_length];
+                let written = self.write_buffer(output_chunk);
+
+                self.file_source.samples_to_next_speed_update -= written;
+                total_written += written;
+
+                if written < output_chunk.len() {
+                    break; // input exhausted
+                }
+            }
+        } else {
+            // write into buffer without pitch changes
+            self.file_source.samples_to_next_speed_update = 0;
+            total_written = self.write_buffer(output);
+        }
+
+        // apply volume fading
+        self.file_source
+            .volume_fader
+            .process(&mut output[..total_written]);
+
         // send Position change events, if needed
-        self.send_playback_position_status();
+        let position = self
+            .file_source
+            .samples_to_duration(self.buffer_pos as u64, self.buffer_channel_count);
+        self.file_source.send_playback_position_status(position);
 
         // check if we've finished playing and send Stopped events
         let end_of_file = self.buffer_pos >= self.buffer.len();
-        let fade_out_completed = self.volume_fader.state() == FaderState::Finished
-            && self.volume_fader.target_volume() == 0.0;
+        let fade_out_completed = self.file_source.volume_fader.state() == FaderState::Finished
+            && self.file_source.volume_fader.target_volume() == 0.0;
         if end_of_file || fade_out_completed {
-            self.send_playback_stopped_status();
+            self.file_source
+                .send_playback_stopped_status(self.buffer_pos >= self.buffer.len());
             // mark playback as finished
-            self.playback_finished = true;
+            self.file_source.playback_finished = true;
         }
 
         total_written
@@ -439,11 +397,11 @@ impl Source for PreloadedFileSource {
     }
 
     fn sample_rate(&self) -> u32 {
-        self.output_sample_rate
+        self.file_source.output_sample_rate
     }
 
     fn is_exhausted(&self) -> bool {
-        self.playback_finished
+        self.file_source.playback_finished
     }
 }
 
@@ -452,6 +410,8 @@ impl Source for PreloadedFileSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::source::resampled::ResamplingQuality;
 
     #[test]
     fn resampling() {
