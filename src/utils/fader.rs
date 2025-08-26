@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use super::buffer::scale_buffer;
+
 // -------------------------------------------------------------------------------------------------
 
 #[derive(PartialEq, Clone, Copy)]
@@ -86,24 +88,25 @@ impl VolumeFader {
         }
     }
 
-    // Process fader on the given interleaved output buffer. Returns the modified output range.
-    pub fn process(&mut self, output: &mut [f32]) -> usize {
-        // return empty handed when there's nothing to do
+    // Process fader on the given interleaved output buffer.
+    pub fn process(&mut self, output: &mut [f32]) {
         if self.state != FaderState::IsRunning {
-            return 0;
-        }
-        for f in output.chunks_exact_mut(self.channel_count) {
-            // ramp per frame
-            self.current_volume += (self.target_volume - self.current_volume) * self.inertia;
-            // apply per sample
-            for s in f.iter_mut() {
-                *s *= self.current_volume;
+            if self.target_volume != 1.0 {
+                scale_buffer(output, self.target_volume);
+            }
+        } else {
+            for f in output.chunks_exact_mut(self.channel_count) {
+                // ramp per frame
+                self.current_volume += (self.target_volume - self.current_volume) * self.inertia;
+                // apply per sample
+                for s in f.iter_mut() {
+                    *s *= self.current_volume;
+                }
+            }
+            // check if we've finished fading
+            if (self.current_volume - self.target_volume).abs() < 0.0001 {
+                self.state = FaderState::Finished;
             }
         }
-        // check if we've finished fading
-        if (self.current_volume - self.target_volume).abs() < 0.0001 {
-            self.state = FaderState::Finished;
-        }
-        output.len()
     }
 }
