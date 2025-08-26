@@ -36,11 +36,7 @@ impl RubatoResampler {
         ) {
             Err(err) => Err(Error::ResamplingError(Box::new(err))),
             Ok(resampler) => {
-                let mut input = resampler.input_buffer_allocate(true);
-                // buffers are only allocated with the needed capacity only, not len
-                for channel in input.iter_mut() {
-                    channel.resize(channel.capacity(), 0.0_f32);
-                }
+                let input = resampler.input_buffer_allocate(true);
                 let output = resampler.output_buffer_allocate(true);
                 let pending = TempBuffer::new(spec.channel_count * resampler.output_frames_max());
                 Ok(Self {
@@ -89,34 +85,46 @@ impl AudioResampler for RubatoResampler {
             return Ok((0, 0));
         }
 
-        // else convert inputs to planar, resample and convert and memorize outputs
+        // convert inputs to planar
         interleaved_to_planar(input, &mut self.input);
-        if let Err(err) = self
+        // reset outputs
+        for output_channel in self.output.iter_mut() {
+            output_channel.resize(output_channel.capacity(), 0.0);
+        }
+        // resample and convert and memorize outputs
+        match self
             .resampler
             .process_into_buffer(&self.input, &mut self.output, None)
         {
-            return Err(Error::ResamplingError(Box::new(err)));
-        }
+            Err(err) => Err(Error::ResamplingError(Box::new(err))),
+            Ok((consumed_input_frames, generated_output_frames)) => {
+                assert!(consumed_input_frames == self.input[0].len());
+                assert!(generated_output_frames <= self.output[0].len());
+                // resize output to apply the currently generated output frames
+                for output_channel in self.output.iter_mut() {
+                    output_channel.resize(generated_output_frames, 0.0);
+                }
+                if self.output.len() * self.output[0].len() > output.len() {
+                    // copy what fits to output, store rest into pending
+                    self.pending
+                        .set_range(0, self.output.len() * self.output[0].len());
+                    planar_to_interleaved(&self.output, self.pending.get_mut());
 
-        if self.output.len() * self.output[0].len() > output.len() {
-            // copy what fits to output, store rest into pending
-            self.pending
-                .set_range(0, self.output.len() * self.output[0].len());
-            planar_to_interleaved(&self.output, self.pending.get_mut());
+                    let input_consumed = self.input.len() * self.input[0].len();
+                    let output_written = self.pending.copy_to(output);
+                    self.pending.consume(output_written);
 
-            let input_consumed = self.input.len() * self.input[0].len();
-            let output_written = self.pending.copy_to(output);
-            self.pending.consume(output_written);
+                    Ok((input_consumed, output_written))
+                } else {
+                    // copy entire result to output
+                    planar_to_interleaved(&self.output, output);
 
-            Ok((input_consumed, output_written))
-        } else {
-            // copy entire result to output
-            planar_to_interleaved(&self.output, output);
+                    let input_consumed = self.input.len() * self.input[0].len();
+                    let output_written = self.output.len() * self.output[0].len();
 
-            let input_consumed = self.input.len() * self.input[0].len();
-            let output_written = self.output.len() * self.output[0].len();
-
-            Ok((input_consumed, output_written))
+                    Ok((input_consumed, output_written))
+                }
+            }
         }
     }
 
