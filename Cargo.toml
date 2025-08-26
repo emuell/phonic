@@ -26,7 +26,7 @@ dashmap = { version = "^6.1" }
 basedrop = { version = "^0.1" }
 sort = { version = "^0.8" }
 audio_thread_priority = { version = "^0.33", default-features = false }
-rubato = { version = "^0.16" }
+rubato = { version = "^0.16", default-features = false }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = ["aac", "alac", "mp3", "isomp4"] }
 pulp = { version = "^0.21", features = [ "macro" ] }
@@ -49,12 +49,8 @@ ctrlc = { version = "^3.4" }
 [profile.release]
 debug = 1 # debug info for profiling
 
-# enable optimization for a few DSP packages that are else extremely slow in debug builds
+# enable optimization for DSP packages that are extremely slow in debug builds
 [profile.dev.package.rubato]
-opt-level = 2
-[profile.dev.package.rustfft]
-opt-level = 2
-[profile.dev.package.realfft]
 opt-level = 2
 
 [features]
