@@ -30,6 +30,9 @@ rubato = { version = "^0.16", default-features = false }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = ["aac", "alac", "mp3", "isomp4"] }
 pulp = { version = "^0.21", features = [ "macro" ] }
+assume = { version = "^0.5" }
+riff = { version= "^2.0" }
+byteorder = { version = "^1.5" }
 
 # Optional dependencies
 assert_no_alloc = { version = "^1.1", features = [
@@ -37,8 +40,7 @@ assert_no_alloc = { version = "^1.1", features = [
 ], optional = true }
 dasp = { version = "^0.11", features = ["signal"], optional = true }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
-sokol = { version="^0.1", optional = true, git="https://github.com/emuell/sokol-rust" }
-assume = { version="^0.5" }
+sokol = { version ="^0.1", optional = true, git="https://github.com/emuell/sokol-rust" }
 
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 hound = { version = "^3.5" }
