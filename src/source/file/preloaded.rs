@@ -17,6 +17,27 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+/// Shared decoded audio file buffer
+struct FileBuffer {
+    buffer: Vec<f32>,
+    sample_rate: u32,
+    channel_count: usize,
+    loop_start: usize,
+    loop_end: usize,
+}
+
+impl FileBuffer {
+    fn validate(&self) -> Result<(), Error> {
+        if self.buffer.is_empty() {
+            return Err(Error::ParameterError("empty audio file".to_owned()));
+        }
+        if self.loop_start >= self.loop_end || self.loop_end > self.buffer.len() {
+            return Err(Error::ParameterError("invalid loop range".to_owned()));
+        }
+        Ok(())
+    }
+}
+
 /// A buffered, clonable [`FileSource`], which decodes the entire file into a buffer before its
 /// played back.
 ///
@@ -24,12 +45,11 @@ use crate::{
 /// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
-    repeat: usize,
-    buffer: Arc<Vec<f32>>,
-    buffer_sample_rate: u32,
-    buffer_channel_count: usize,
-    buffer_pos: usize,
+    file_buffer: Arc<FileBuffer>,
     file_source: FileSourceImpl,
+    playback_repeat: usize,
+    playback_pos: usize,
+    playback_pos_eof: bool,
 }
 
 impl PreloadedFileSource {
@@ -78,25 +98,24 @@ impl PreloadedFileSource {
         options.validate()?;
 
         // get buffer signal specs
-        let buffer_sample_rate = audio_decoder.signal_spec().rate;
-        let buffer_channel_count = audio_decoder.signal_spec().channels.count();
+        let sample_rate = audio_decoder.signal_spec().rate;
+        let channel_count = audio_decoder.signal_spec().channels.count();
 
         // prealloc entire buffer, when the decoder gives us a frame hint
         let buffer_capacity =
-            audio_decoder.codec_params().n_frames.unwrap_or(0) as usize * buffer_channel_count + 1;
-        let mut buffer = Arc::new(Vec::with_capacity(buffer_capacity));
+            audio_decoder.codec_params().n_frames.unwrap_or(0) as usize * channel_count + 1;
+        let mut buffer = Vec::with_capacity(buffer_capacity);
 
         // decode the entire file into our buffer in chunks of max_frames_per_packet sizes
         let decode_buffer_capacity = audio_decoder
             .codec_params()
             .max_frames_per_packet
-            .unwrap_or(16 * 1024 * buffer_channel_count as u64);
+            .unwrap_or(16 * 1024 * channel_count as u64);
         let mut decode_buffer =
             SampleBuffer::<f32>::new(decode_buffer_capacity, audio_decoder.signal_spec());
 
-        let mut_buffer = Arc::get_mut(&mut buffer).unwrap();
         while audio_decoder.read_packet(&mut decode_buffer).is_some() {
-            mut_buffer.append(&mut decode_buffer.samples().to_vec());
+            buffer.append(&mut decode_buffer.samples().to_vec());
         }
         if buffer.is_empty() {
             // TODO: should pass a proper error here
@@ -105,16 +124,31 @@ impl PreloadedFileSource {
             )));
         } else {
             // add one extra empty sample at the end for the cubic resamplers
-            let mut_buffer = Arc::get_mut(&mut buffer).unwrap();
-            for _ in 0..buffer_channel_count {
-                mut_buffer.push(0.0);
+            buffer.extend(std::iter::repeat_n(0.0, channel_count));
+        }
+
+        let mut loop_start = 0;
+        let mut loop_end = buffer.len();
+        if let Some(loop_info) = audio_decoder.loops().first() {
+            // TODO: for now we only support forward loops
+            let file_loop_start = (loop_info.start as usize * channel_count).min(buffer.len());
+            let file_loop_end = (loop_info.end as usize * channel_count).min(buffer.len());
+            if file_loop_end > file_loop_start {
+                loop_start = file_loop_start;
+                loop_end = file_loop_end;
             }
         }
 
-        Self::from_buffer(
+        let file_buffer = Arc::new(FileBuffer {
             buffer,
-            buffer_sample_rate,
-            buffer_channel_count,
+            sample_rate,
+            channel_count,
+            loop_start,
+            loop_end,
+        });
+
+        Self::from_shared_file_buffer(
+            file_buffer,
             file_path,
             playback_status_send,
             options,
@@ -122,17 +156,47 @@ impl PreloadedFileSource {
         )
     }
 
-    /// Create a new preloaded file source with the given decoded and buffer,
-    /// possibly a shared buffer from another PreloadedFileSource.
-    pub fn from_buffer(
-        buffer: Arc<Vec<f32>>,
-        buffer_sample_rate: u32,
-        buffer_channel_count: usize,
+    /// Create a new preloaded file source with the given decoded raw buffer.
+    #[cfg(test)]
+    fn from_raw_buffer(
+        buffer: Vec<f32>,
+        sample_rate: u32,
+        channel_count: usize,
+        options: FilePlaybackOptions,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error> {
+        let loop_start = 0;
+        let loop_end = buffer.len();
+
+        let file_buffer = Arc::new(FileBuffer {
+            buffer,
+            sample_rate,
+            channel_count,
+            loop_start,
+            loop_end,
+        });
+
+        let file_path = "buffer".to_owned();
+        let playback_status_send = None;
+
+        Self::from_shared_file_buffer(
+            file_buffer,
+            &file_path,
+            playback_status_send,
+            options,
+            output_sample_rate,
+        )
+    }
+
+    fn from_shared_file_buffer(
+        file_buffer: Arc<FileBuffer>,
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
+        // validate data
+        file_buffer.validate()?;
         // validate options
         options.validate()?;
 
@@ -140,22 +204,22 @@ impl PreloadedFileSource {
         let file_source = FileSourceImpl::new(
             file_path,
             options,
-            buffer_sample_rate,
-            buffer_channel_count,
+            file_buffer.sample_rate,
+            file_buffer.channel_count,
             output_sample_rate,
             playback_status_send,
         )?;
 
-        let repeat = options.repeat;
-        let buffer_pos = 0;
+        let playback_repeat = options.repeat;
+        let playback_pos = 0;
+        let playback_pos_eof = false;
 
         Ok(Self {
-            repeat,
-            buffer,
-            buffer_sample_rate,
-            buffer_channel_count,
-            buffer_pos,
+            file_buffer,
             file_source,
+            playback_repeat,
+            playback_pos,
+            playback_pos_eof,
         })
     }
 
@@ -165,28 +229,15 @@ impl PreloadedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        Self::from_buffer(
-            self.buffer(),
-            self.buffer_sample_rate(),
-            self.buffer_channel_count(),
+        let file_buffer = Arc::clone(&self.file_buffer);
+        let playback_status_send = self.file_source.playback_status_send.clone();
+        Self::from_shared_file_buffer(
+            file_buffer,
             &self.file_source.file_path,
-            self.file_source.playback_status_send.clone(),
+            playback_status_send,
             options,
             output_sample_rate,
         )
-    }
-
-    /// Get sample rate of our raw preloaded file's buffer
-    pub fn buffer_sample_rate(&self) -> u32 {
-        self.buffer_sample_rate
-    }
-    /// Get number of channels in our raw preloaded file's buffer
-    pub fn buffer_channel_count(&self) -> usize {
-        self.buffer_channel_count
-    }
-    /// Shared read-only access to the raw preloaded file's buffer
-    pub fn buffer(&self) -> Arc<Vec<f32>> {
-        Arc::clone(&self.buffer)
     }
 
     fn process_messages(&mut self) {
@@ -194,9 +245,10 @@ impl PreloadedFileSource {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
                     let buffer_pos = position.as_secs_f64()
-                        * self.buffer_sample_rate as f64
-                        * self.buffer_channel_count as f64;
-                    self.buffer_pos = (buffer_pos as usize).clamp(0, self.buffer.len());
+                        * self.file_buffer.sample_rate as f64
+                        * self.file_buffer.channel_count as f64;
+                    self.playback_pos =
+                        (buffer_pos as usize).clamp(0, self.file_buffer.buffer.len());
                     self.file_source.resampler.reset();
                 }
                 FilePlaybackMessage::SetSpeed(speed, glide) => {
@@ -205,7 +257,7 @@ impl PreloadedFileSource {
                     self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
                     if self.file_source.speed_glide_rate == 0.0 {
                         self.file_source.current_speed = speed;
-                        self.file_source.update_speed(self.buffer_sample_rate);
+                        self.file_source.update_speed(self.file_buffer.sample_rate);
                     }
                 }
                 FilePlaybackMessage::Stop => {
@@ -227,9 +279,16 @@ impl PreloadedFileSource {
         let mut written = 0;
         while written < output.len() {
             // write from resampled buffer into output and apply volume
-            let remaining_input_len = self.buffer.len() - self.buffer_pos;
-            let remaining_input_buffer =
-                &self.buffer[self.buffer_pos..self.buffer_pos + remaining_input_len];
+            let remaining_input_len = if self.playback_repeat > 0 {
+                self.file_buffer.loop_end.saturating_sub(self.playback_pos)
+            } else {
+                self.file_buffer
+                    .buffer
+                    .len()
+                    .saturating_sub(self.playback_pos)
+            };
+            let remaining_input_buffer = &self.file_buffer.buffer
+                [self.playback_pos..self.playback_pos + remaining_input_len];
             let remaining_output = &mut output[written..];
             // pad input with zeros if resampler has input size constrains (should only happen in the last process calls)
             let required_input_len = self
@@ -264,18 +323,18 @@ impl PreloadedFileSource {
             };
 
             // move buffer read pos
-            self.buffer_pos += input_consumed;
+            self.playback_pos += input_consumed;
             written += output_written;
 
-            // loop or stop when reaching end of file
-            let end_of_file = self.buffer_pos >= self.buffer.len();
-            if end_of_file {
-                if self.repeat > 0 {
-                    if self.repeat != usize::MAX {
-                        self.repeat -= 1;
+            // loop or stop when reaching end of file or end of loop
+            if self.playback_pos >= self.file_buffer.loop_end {
+                if self.playback_repeat > 0 {
+                    if self.playback_repeat != usize::MAX {
+                        self.playback_repeat -= 1;
                     }
-                    self.buffer_pos = 0;
+                    self.playback_pos = self.file_buffer.loop_start;
                 } else {
+                    self.playback_pos_eof = true;
                     break;
                 }
             }
@@ -316,11 +375,11 @@ impl FileSource for PreloadedFileSource {
     }
 
     fn total_frames(&self) -> Option<u64> {
-        Some(self.buffer.len() as u64 / self.channel_count() as u64)
+        Some(self.file_buffer.buffer.len() as u64 / self.channel_count() as u64)
     }
 
     fn current_frame_position(&self) -> u64 {
-        self.buffer_pos as u64 / self.channel_count() as u64
+        self.playback_pos as u64 / self.channel_count() as u64
     }
 
     fn end_of_track(&self) -> bool {
@@ -344,7 +403,7 @@ impl Source for PreloadedFileSource {
             while total_written < output.len() {
                 if self.file_source.samples_to_next_speed_update == 0 {
                     if self.file_source.current_speed != self.file_source.target_speed {
-                        self.file_source.update_speed(self.buffer_sample_rate);
+                        self.file_source.update_speed(self.file_buffer.sample_rate);
                     }
                     self.file_source.samples_to_next_speed_update =
                         FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE;
@@ -375,16 +434,15 @@ impl Source for PreloadedFileSource {
         // send Position change events, if needed
         let position = self
             .file_source
-            .samples_to_duration(self.buffer_pos as u64, self.buffer_channel_count);
+            .samples_to_duration(self.playback_pos as u64, self.file_buffer.channel_count);
         self.file_source.send_playback_position_status(position);
 
         // check if we've finished playing and send Stopped events
-        let end_of_file = self.buffer_pos >= self.buffer.len();
         let fade_out_completed = self.file_source.volume_fader.state() == FaderState::Finished
             && self.file_source.volume_fader.target_volume() == 0.0;
-        if end_of_file || fade_out_completed {
+        if self.playback_pos_eof || fade_out_completed {
             self.file_source
-                .send_playback_stopped_status(self.buffer_pos >= self.buffer.len());
+                .send_playback_stopped_status(self.playback_pos >= self.file_buffer.buffer.len());
             // mark playback as finished
             self.file_source.playback_finished = true;
         }
@@ -393,7 +451,7 @@ impl Source for PreloadedFileSource {
     }
 
     fn channel_count(&self) -> usize {
-        self.buffer_channel_count
+        self.file_buffer.channel_count
     }
 
     fn sample_rate(&self) -> u32 {
@@ -416,15 +474,13 @@ mod tests {
     #[test]
     fn resampling() {
         // add one extra zero sample for cubic resampling
-        let buffer = Arc::new(vec![0.2, 1.0, 0.5, 0.0]);
+        let buffer = vec![0.2, 1.0, 0.5, 0.0];
 
         // Default
-        let preloaded = PreloadedFileSource::from_buffer(
+        let preloaded = PreloadedFileSource::from_raw_buffer(
             buffer.clone(),
             44100,
             1,
-            "temp_file",
-            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::Default),
             48000,
         );
@@ -437,12 +493,10 @@ mod tests {
         assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
 
         // Rubato
-        let preloaded = PreloadedFileSource::from_buffer(
+        let preloaded = PreloadedFileSource::from_raw_buffer(
             buffer.clone(),
             44100,
             1,
-            "temp_file",
-            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::HighQuality),
             48000,
         );

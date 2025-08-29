@@ -35,6 +35,8 @@ pub struct FilePlaybackOptions {
     pub speed: f64,
 
     /// By default 0: when > 0 the number of times the file should be looped.
+    /// When supported by the file reader, embedded file loop points are used for
+    /// repeating, else the entire sample is repeated.
     /// Set to usize::MAX to repeat forever.
     pub repeat: usize,
 
