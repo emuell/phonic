@@ -53,7 +53,7 @@ impl AudioDecoder {
     /// Create a new decoder from the given file path.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let mut file = File::open(path.as_ref())?;
-        let loops = Self::parse_riff_loops(&mut file).unwrap_or_default();
+        let loops = Self::parse_loop_metadata(&mut file).unwrap_or_default();
         file.seek(io::SeekFrom::Start(0))?;
 
         let file = Box::new(file);
@@ -68,7 +68,7 @@ impl AudioDecoder {
     /// Symphonia does not allow reading non static buffer refs at the time being...
     pub fn from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
         let mut cursor = io::Cursor::new(buffer);
-        let loops = Self::parse_riff_loops(&mut cursor).unwrap_or_default();
+        let loops = Self::parse_loop_metadata(&mut cursor).unwrap_or_default();
         cursor.seek(io::SeekFrom::Start(0))?;
 
         let cursor = Box::new(cursor);
@@ -151,6 +151,25 @@ impl AudioDecoder {
         Ok(seeked_to.actual_ts)
     }
 
+    /// Detect file container and parse loop metadata accordingly.
+    fn parse_loop_metadata<R: io::Read + io::Seek>(
+        reader: &mut R,
+    ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+        let mut magic = [0u8; 4];
+        let read = reader
+            .read(&mut magic)
+            .map_err(|_| Error::MediaFileProbeError)?;
+        reader.seek(io::SeekFrom::Start(0))?;
+        if read < 4 {
+            return Ok(vec![]);
+        }
+        match &magic {
+            b"RIFF" => Self::parse_riff_loops(reader),
+            b"fLaC" => Self::parse_flac_loops(reader),
+            _ => Ok(vec![]),
+        }
+    }
+
     fn parse_riff_loops<R: io::Read + io::Seek>(
         reader: &mut R,
     ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
@@ -171,42 +190,123 @@ impl AudioDecoder {
         let children = chunk.iter(reader).flatten().collect::<Vec<_>>();
         if let Some(child) = children.iter().find(|c| c.id() == SMPL_ID) {
             if let Ok(data) = child.read_contents(reader) {
-                if data.len() < 36 {
-                    // The smpl chunk header must be >= 36 bytes long.
-                    return Err(Error::MediaFileProbeError);
-                }
-                let num_loops = LittleEndian::read_u32(&data[28..32]);
-                let mut loops = Vec::with_capacity(num_loops as usize);
-                let mut loop_data_start = 36;
-
-                for _ in 0..num_loops {
-                    if loop_data_start + 24 > data.len() {
-                        break; // No more loops preset
-                    }
-                    let loop_slice = &data[loop_data_start..loop_data_start + 24];
-                    let loop_type = LittleEndian::read_u32(&loop_slice[4..8]);
-                    let loop_mode = match loop_type {
-                        0 => AudioDecoderLoopMode::Forward,
-                        1 => AudioDecoderLoopMode::Alternating,
-                        2 => AudioDecoderLoopMode::Backward,
-                        _ => AudioDecoderLoopMode::Unknown,
-                    };
-                    let loop_start = LittleEndian::read_u32(&loop_slice[8..12]);
-                    let loop_end = LittleEndian::read_u32(&loop_slice[12..16]);
-                    loops.push(AudioDecoderLoopInfo {
-                        mode: loop_mode,
-                        start: loop_start,
-                        end: loop_end,
-                    });
-
-                    loop_data_start += 24;
-                }
-
-                return Ok(loops);
+                return Self::parse_smpl_body(&data);
             }
         }
 
         Err(Error::MediaFileProbeError) // No smpl chunk found
+    }
+
+    /// Minimal FLAC metadata parser that scans Application blocks for embedded RIFF "smpl" data.
+    fn parse_flac_loops<R: io::Read + io::Seek>(
+        reader: &mut R,
+    ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+        // Expect "fLaC" marker at start.
+        let mut marker = [0u8; 4];
+        reader
+            .read_exact(&mut marker)
+            .map_err(|_| Error::MediaFileProbeError)?;
+        if &marker != b"fLaC" {
+            return Err(Error::MediaFileProbeError);
+        }
+
+        // Iterate metadata blocks.
+        let mut loops: Vec<AudioDecoderLoopInfo> = Vec::new();
+        loop {
+            // METADATA_BLOCK_HEADER:
+            // 1 byte: [is_last(1 bit) | block_type(7 bits)]
+            // 3 bytes: length (24-bit big endian)
+            let mut header = [0u8; 4];
+            reader
+                .read_exact(&mut header)
+                .map_err(|_| Error::MediaFileProbeError)?;
+            let is_last = (header[0] & 0x80) != 0;
+            let block_type = header[0] & 0x7F;
+            let length: usize =
+                ((header[1] as usize) << 16) | ((header[2] as usize) << 8) | (header[3] as usize);
+            // Application block type is 2.
+            if block_type == 2 {
+                if length < 4 {
+                    // Malformed application block; skip payload if any.
+                    let mut sink = vec![0u8; length];
+                    reader
+                        .read_exact(&mut sink)
+                        .map_err(|_| Error::MediaFileProbeError)?;
+                } else {
+                    // Read 4-byte application ID then payload.
+                    let mut app_id = [0u8; 4];
+                    reader
+                        .read_exact(&mut app_id)
+                        .map_err(|_| Error::MediaFileProbeError)?;
+                    let payload_len = length - 4;
+                    let mut payload = vec![0u8; payload_len];
+                    reader
+                        .read_exact(&mut payload)
+                        .map_err(|_| Error::MediaFileProbeError)?;
+                    // Try to parse the payload as an smpl chunk.
+                    if payload.len() >= 8 && &payload[0..4] == b"smpl" {
+                        // Ensure we don't read beyond payload.
+                        let size = LittleEndian::read_u32(&payload[4..8]) as usize;
+                        let max_len = payload.len().saturating_sub(8);
+                        let body_len = size.min(max_len);
+                        let body = &payload[8..8 + body_len];
+                        if let Ok(mut new_loops) = Self::parse_smpl_body(body) {
+                            loops.append(&mut new_loops);
+                        }
+                    }
+                }
+            } else {
+                // Skip payload of this block.
+                let mut sink = vec![0u8; length];
+                reader
+                    .read_exact(&mut sink)
+                    .map_err(|_| Error::MediaFileProbeError)?;
+            }
+
+            if is_last {
+                break;
+            }
+        }
+        Ok(loops)
+    }
+
+    /// Parse the contents of a RIFF "smpl" chunk body (without the 8-byte RIFF chunk header).
+    fn parse_smpl_body(data: &[u8]) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+        // The smpl chunk header must be >= 36 bytes long.
+        if data.len() < 36 {
+            return Err(Error::MediaFileProbeError);
+        }
+        // number of loops is at offset 28..32 (little endian)
+        let num_loops = LittleEndian::read_u32(&data[28..32]) as usize;
+        let mut loops = Vec::with_capacity(num_loops);
+        let mut loop_data_start = 36;
+
+        for _ in 0..num_loops {
+            if loop_data_start + 24 > data.len() {
+                break; // No more complete loop entries present.
+            }
+            let loop_slice = &data[loop_data_start..loop_data_start + 24];
+
+            let loop_type = LittleEndian::read_u32(&loop_slice[4..8]);
+            let loop_mode = match loop_type {
+                0 => AudioDecoderLoopMode::Forward,
+                1 => AudioDecoderLoopMode::Alternating,
+                2 => AudioDecoderLoopMode::Backward,
+                _ => AudioDecoderLoopMode::Unknown,
+            };
+            let loop_start = LittleEndian::read_u32(&loop_slice[8..12]);
+            let loop_end = LittleEndian::read_u32(&loop_slice[12..16]);
+
+            loops.push(AudioDecoderLoopInfo {
+                mode: loop_mode,
+                start: loop_start,
+                end: loop_end,
+            });
+
+            loop_data_start += 24;
+        }
+
+        Ok(loops)
     }
 
     /// Read a next packet of audio from this decoder.  Returns `None` in case
