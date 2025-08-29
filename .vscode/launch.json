@@ -42,6 +42,23 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Debug example 'play-glide'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-glide",
+        ],
+        "filter": {
+          "name": "play-glide",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Debug example 'play-interactive'",
       "cargo": {
         "args": [
