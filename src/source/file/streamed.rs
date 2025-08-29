@@ -251,12 +251,13 @@ impl FileSource for StreamedFileSource {
     }
 
     fn current_frame_position(&self) -> u64 {
-        self.worker_state.position.load(Ordering::Relaxed) / self.channel_count() as u64
+        self.worker_state.position.load(Ordering::Relaxed)
+            / self.signal_spec.channels.count() as u64
     }
 
     fn total_frames(&self) -> Option<u64> {
         self.total_samples()
-            .map(|samples| samples / self.channel_count() as u64)
+            .map(|samples| samples / self.signal_spec.channels.count() as u64)
     }
 
     fn end_of_track(&self) -> bool {
@@ -284,7 +285,8 @@ impl Source for StreamedFileSource {
                         self.file_source.update_speed(self.signal_spec.rate);
                     }
                     self.file_source.samples_to_next_speed_update =
-                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE;
+                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE
+                            * self.file_source.output_channel_count;
                 }
                 let chunk_length = (output.len() - total_written)
                     .min(self.file_source.samples_to_next_speed_update);
@@ -344,7 +346,7 @@ impl Source for StreamedFileSource {
     }
 
     fn channel_count(&self) -> usize {
-        self.signal_spec.channels.count()
+        self.file_source.output_channel_count
     }
 
     fn sample_rate(&self) -> u32 {

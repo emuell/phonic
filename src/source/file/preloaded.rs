@@ -20,8 +20,8 @@ use crate::{
 /// Shared decoded audio file buffer
 struct FileBuffer {
     buffer: Vec<f32>,
-    sample_rate: u32,
     channel_count: usize,
+    sample_rate: u32,
     loop_start: usize,
     loop_end: usize,
 }
@@ -375,11 +375,11 @@ impl FileSource for PreloadedFileSource {
     }
 
     fn total_frames(&self) -> Option<u64> {
-        Some(self.file_buffer.buffer.len() as u64 / self.channel_count() as u64)
+        Some(self.file_buffer.buffer.len() as u64 / self.file_buffer.channel_count as u64)
     }
 
     fn current_frame_position(&self) -> u64 {
-        self.playback_pos as u64 / self.channel_count() as u64
+        self.playback_pos as u64 / self.file_source.output_channel_count as u64
     }
 
     fn end_of_track(&self) -> bool {
@@ -406,7 +406,8 @@ impl Source for PreloadedFileSource {
                         self.file_source.update_speed(self.file_buffer.sample_rate);
                     }
                     self.file_source.samples_to_next_speed_update =
-                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE;
+                        FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE
+                            * self.file_source.output_channel_count;
                 }
                 let chunk_length = (output.len() - total_written)
                     .min(self.file_source.samples_to_next_speed_update);
@@ -451,7 +452,7 @@ impl Source for PreloadedFileSource {
     }
 
     fn channel_count(&self) -> usize {
-        self.file_buffer.channel_count
+        self.file_source.output_channel_count
     }
 
     fn sample_rate(&self) -> u32 {
