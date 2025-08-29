@@ -55,7 +55,7 @@ impl FileSourceImpl {
         file_path: &str,
         options: FilePlaybackOptions,
         input_sample_rate: u32,
-        output_channel_count: usize,
+        input_channel_count: usize,
         output_sample_rate: u32,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
@@ -63,7 +63,7 @@ impl FileSourceImpl {
         let playback_message_queue = Arc::new(ArrayQueue::new(128));
 
         // create new volume fader
-        let mut volume_fader = VolumeFader::new(output_channel_count, output_sample_rate);
+        let mut volume_fader = VolumeFader::new(input_channel_count, output_sample_rate);
         if let Some(duration) = options.fade_in_duration {
             if !duration.is_zero() {
                 volume_fader.start_fade_in(duration);
@@ -74,7 +74,7 @@ impl FileSourceImpl {
         let resampler_specs = ResamplingSpecs::new(
             input_sample_rate,
             (output_sample_rate as f64 / options.speed) as u32,
-            output_channel_count,
+            input_channel_count,
         );
         let resampler: Box<dyn AudioResampler> = match options.resampling_quality {
             ResamplingQuality::HighQuality => Box::new(RubatoResampler::new(resampler_specs)?),

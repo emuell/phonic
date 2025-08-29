@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use audio_thread_priority::promote_current_thread_to_real_time;
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
@@ -400,12 +401,19 @@ struct StreamedFileWorker {
     shared_state: SharedFileWorkerState,
     /// Range of samples in `resampled` that are awaiting flush into `output`.
     samples_to_write: Range<usize>,
+    /// Number of samples that should be ignore when reading packages to compensate
+    /// package quantized seeking
+    samples_to_skip: u64,
     /// Number of samples written into the output channel.
     samples_written: u64,
     /// Are we in the middle of automatic read loop?
     is_reading: bool,
     /// Number of times we should repeat the source
     repeat: usize,
+    /// Loop start in samples
+    loop_start: u64,
+    /// Loop end in samples
+    loop_end: u64,
 }
 
 impl StreamedFileWorker {
@@ -428,25 +436,50 @@ impl StreamedFileWorker {
             .max_frames_per_packet
             .unwrap_or(DEFAULT_MAX_FRAMES);
 
+        let output_producer = output.producer();
+        let input_packet = SampleBuffer::new(max_input_frames, input.signal_spec());
+
+        let input_spec = input.signal_spec();
+        let channel_count = input_spec.channels.count() as u64;
+
+        let mut loop_start = 0;
+        let mut loop_end = u64::MAX;
+        if let Some(loop_info) = input.loops().first() {
+            // TODO: for now we only support forward loops
+            let file_loop_start = loop_info.start as u64 * channel_count;
+            let file_loop_end = loop_info.end as u64 * channel_count;
+            if file_loop_end > file_loop_start {
+                loop_start = file_loop_start;
+                loop_end = file_loop_end;
+            }
+        }
+
+        let samples_written = 0;
+        let samples_to_write = 0..0;
+        let samples_to_skip = 0;
+
+        let is_reading = false;
+
         // Promote the worker thread to audio priority to prevent buffer under-runs on high CPU usage.
-        if let Err(err) =
-            audio_thread_priority::promote_current_thread_to_real_time(0, input.signal_spec().rate)
-        {
+        if let Err(err) = promote_current_thread_to_real_time(0, input.signal_spec().rate) {
             log::warn!("failed to set file worker thread's priority to real-time: {err}");
         }
 
         Self {
-            output_producer: output.producer(),
-            input_packet: SampleBuffer::new(max_input_frames, input.signal_spec()),
-            input_spec: input.signal_spec(),
+            output_producer,
+            input_packet,
+            input_spec,
             input,
             this,
             output,
             shared_state,
-            samples_written: 0,
-            samples_to_write: 0..0,
-            is_reading: false,
+            samples_written,
+            samples_to_write,
+            samples_to_skip,
+            is_reading,
             repeat,
+            loop_start,
+            loop_end,
         }
     }
 }
@@ -511,59 +544,124 @@ impl StreamedFileWorker {
         if !self.shared_state.is_playing.load(Ordering::Relaxed) {
             return Ok(Act::Shutdown);
         }
+
         // check if we need to fetch more input samples
-        if !self.samples_to_write.is_empty() {
-            let input = &self.input_packet.samples()[self.samples_to_write.clone()];
-            // TODO: self.output_fader.process(&mut input_mut.borrow_mut());
-            if let Ok(written) = self.output_producer.write(input) {
-                self.samples_written += written as u64;
-                self.samples_to_write.start += written;
-                self.is_reading = true;
-                self.this.send(StreamedFileSourceMessage::Read)?;
-                Ok(Act::Continue)
-            } else {
-                // Buffer is full.  Wait a bit a try again.  We also have to indicate that the
-                // read loop is not running at the moment (if we receive a `Seek` while waiting,
-                // we need it to explicitly kickstart reading again).
-                self.is_reading = false;
-                Ok(Act::WaitOr {
-                    timeout: Duration::from_millis(500),
-                    timeout_msg: StreamedFileSourceMessage::Read,
-                })
-            }
-        } else {
-            // fetch more input samples
+        if self.samples_to_write.is_empty() {
             match self.input.read_packet(&mut self.input_packet) {
                 Some(_) => {
-                    // continue reading
                     self.samples_to_write = 0..self.input_packet.samples().len();
-                    self.is_reading = true;
-                    self.this.send(StreamedFileSourceMessage::Read)?;
+                    // shift playhead to the exact seek position if needed
+                    if self.samples_to_skip > 0 {
+                        let skip_now = self.samples_to_skip.min(self.samples_to_write.len() as u64);
+                        self.samples_to_skip -= skip_now;
+                        self.samples_to_write.start += skip_now as usize;
+                    }
                 }
                 None => {
                     // reached EOF
-                    if self.repeat > 0 {
-                        if self.repeat != usize::MAX {
-                            self.repeat -= 1;
-                        }
-                        // seek to start and continue reading
-                        self.input.seek(Duration::ZERO)?;
-                        self.samples_written = 0;
-                        self.samples_to_write = 0..0;
-                        self.shared_state.position.store(0, Ordering::Relaxed);
+                    if self.loop_end == u64::MAX {
+                        self.loop_end = self.samples_written;
+                    }
+                    // apply loops
+                    if self.continue_on_loop_boundary() {
+                        // continue playing from loop start
                         self.is_reading = true;
                         self.this.send(StreamedFileSourceMessage::Read)?;
+                        return Ok(Act::Continue);
                     } else {
-                        // stop reading and mark as exhausted
-                        self.is_reading = false;
-                        self.shared_state.end_of_file.store(true, Ordering::Relaxed);
-                        self.shared_state
-                            .total_samples
-                            .store(self.samples_written, Ordering::Relaxed);
+                        // handle end of file
+                        return Ok(Act::Continue);
                     }
                 }
             }
+        }
+
+        if self.samples_to_write.is_empty() {
+            // This can happen if a new packet was empty. try next packet...
+            self.is_reading = true;
+            self.this.send(StreamedFileSourceMessage::Read)?;
+            return Ok(Act::Continue);
+        }
+
+        // We have samples to write.
+        let samples_in_packet = &self.input_packet.samples()[self.samples_to_write.clone()];
+        let mut samples_to_write_now = samples_in_packet;
+
+        // Don't write past the loop end
+        if self.loop_end != u64::MAX {
+            let remaining_samples_in_loop =
+                self.loop_end.saturating_sub(self.samples_written) as usize;
+            if samples_to_write_now.len() > remaining_samples_in_loop {
+                samples_to_write_now = &samples_to_write_now[..remaining_samples_in_loop];
+            }
+        }
+
+        if let Ok(written) = self.output_producer.write(samples_to_write_now) {
+            self.samples_written += written as u64;
+            self.samples_to_write.start += written;
+
+            if self.loop_end != u64::MAX && self.samples_written >= self.loop_end {
+                if self.continue_on_loop_boundary() {
+                    // continue playing from loop start
+                } else {
+                    // reached end of file
+                    return Ok(Act::Continue);
+                }
+            }
+            self.is_reading = true;
+            self.this.send(StreamedFileSourceMessage::Read)?;
             Ok(Act::Continue)
+        } else {
+            // Buffer is full. Wait a bit a try again. We also have to indicate that the
+            // read loop is not running at the moment (if we receive a `Seek` while waiting,
+            // we need it to explicitly kickstart reading again).
+            self.is_reading = false;
+            Ok(Act::WaitOr {
+                timeout: Duration::from_millis(500),
+                timeout_msg: StreamedFileSourceMessage::Read,
+            })
+        }
+    }
+
+    fn continue_on_loop_boundary(&mut self) -> bool {
+        if self.repeat > 0 {
+            // continue reading at the loop start
+            if self.repeat != usize::MAX {
+                self.repeat -= 1;
+            }
+            // seek to loop_start
+            let seek_frames = self.loop_start / self.input_spec.channels.count() as u64;
+            let seek_secs = seek_frames as f64 / self.input_spec.rate as f64;
+            match self.input.seek(Duration::from_secs_f64(seek_secs)) {
+                Ok(actual_frame_time) => {
+                    // seeking may move to previous packet boundaries:
+                    // compensate by skipping samples until we reach the desired exact time
+                    if actual_frame_time < seek_frames {
+                        self.samples_to_skip = (seek_frames - actual_frame_time)
+                            * self.input_spec.channels.count() as u64;
+                    } else {
+                        self.samples_to_skip = 0;
+                    }
+                }
+                Err(err) => {
+                    log::error!("failed to seek: {err}");
+                    return false;
+                }
+            }
+            self.samples_written = self.loop_start;
+            self.samples_to_write = 0..0;
+            self.shared_state
+                .position
+                .store(self.loop_start, Ordering::Relaxed);
+            true
+        } else {
+            // stop reading and mark as exhausted
+            self.is_reading = false;
+            self.shared_state.end_of_file.store(true, Ordering::Relaxed);
+            self.shared_state
+                .total_samples
+                .store(self.samples_written, Ordering::Relaxed);
+            false
         }
     }
 }
