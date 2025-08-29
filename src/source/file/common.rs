@@ -35,6 +35,7 @@ pub struct FileSourceImpl {
     pub resampler_input_buffer: TempBuffer,
     pub fade_out_duration: Option<Duration>,
     pub output_sample_rate: u32,
+    pub output_channel_count: usize,
     pub playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
     pub playback_status_send: Option<Sender<PlaybackStatusEvent>>,
     pub playback_status_context: Option<PlaybackStatusContext>,
@@ -100,6 +101,8 @@ impl FileSourceImpl {
 
         let fade_out_duration = options.fade_out_duration;
 
+        let output_channel_count = input_channel_count;
+
         let samples_to_next_speed_update = 0;
         let current_speed = options.speed;
         let target_speed = options.speed;
@@ -114,6 +117,7 @@ impl FileSourceImpl {
             resampler_input_buffer,
             fade_out_duration,
             output_sample_rate,
+            output_channel_count,
             playback_message_queue,
             playback_status_send,
             playback_status_context,
@@ -128,17 +132,17 @@ impl FileSourceImpl {
     }
 
     pub fn update_speed(&mut self, input_sample_rate: u32) {
+        // ramp current speed to target
         let speed_diff = self.target_speed - self.current_speed;
         if self.speed_glide_rate > 0.0 && speed_diff.abs() > 0.0001 {
             let semitone_diff = (12.0 * (self.target_speed / self.current_speed).log2()).abs();
             let duration_secs = semitone_diff as f32 / self.speed_glide_rate;
-
             if duration_secs > 0.0 {
-                let duration_samples = duration_secs * self.output_sample_rate as f32;
-                let speed_step_per_sample =
-                    (self.target_speed - self.current_speed) / duration_samples as f64;
+                let duration_frames = duration_secs * self.output_sample_rate as f32;
+                let speed_step_per_frame =
+                    (self.target_speed - self.current_speed) / duration_frames as f64;
                 let speed_change_this_call =
-                    speed_step_per_sample * Self::SPEED_UPDATE_CHUNK_SIZE as f64;
+                    speed_step_per_frame * Self::SPEED_UPDATE_CHUNK_SIZE as f64;
                 if (self.target_speed - self.current_speed).abs() < speed_change_this_call.abs() {
                     self.current_speed = self.target_speed;
                 } else {
@@ -150,7 +154,6 @@ impl FileSourceImpl {
         } else {
             self.current_speed = self.target_speed;
         }
-
         // update resampler with new speed
         let new_output_rate = (self.output_sample_rate as f64 / self.current_speed) as u32;
         self.resampler
