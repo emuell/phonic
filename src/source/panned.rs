@@ -1,4 +1,6 @@
-use crate::utils::panning_factors;
+use crate::utils::{
+    apply_smoothed_panning, smoothed::ExponentialSmoothedValue, smoothed::SmoothedValue,
+};
 
 use super::{Source, SourceTime};
 
@@ -7,7 +9,7 @@ use super::{Source, SourceTime};
 /// A source which applies a pan factor to some other source's output
 pub struct PannedSource {
     source: Box<dyn Source>,
-    panning: f32,
+    panning: ExponentialSmoothedValue,
 }
 
 impl PannedSource {
@@ -16,10 +18,19 @@ impl PannedSource {
         InputSource: Source,
     {
         debug_assert!((-1.0..=1.0).contains(&panning), "Invalid panning factor");
+        let sample_rate = source.sample_rate();
+        let mut pan = ExponentialSmoothedValue::new(sample_rate);
+        pan.init(panning);
         Self {
             source: Box::new(source),
-            panning,
+            panning: pan,
         }
+    }
+
+    /// Update panning value
+    #[allow(unused)]
+    pub fn set_panning(&mut self, panning: f32) {
+        self.panning.set_target(panning);
     }
 }
 
@@ -29,28 +40,7 @@ impl Source for PannedSource {
         let written = self.source.write(output, time);
         // apply panning
         let channel_count = self.source.channel_count();
-        if self.panning.abs() > 0.001 {
-            let written_out = &mut output[0..written];
-            let (pan_l, pan_r) = panning_factors(self.panning);
-            match channel_count {
-                1 => {
-                    // can't apply panning on mono sources
-                }
-                2 => {
-                    for o in written_out.chunks_exact_mut(2) {
-                        o[0] *= pan_l; // left
-                        o[1] *= pan_r; // right
-                    }
-                }
-                _ => {
-                    for o in written_out.chunks_exact_mut(channel_count) {
-                        // TODO: handle multi channel layouts
-                        o[0] *= pan_l; // left
-                        o[1] *= pan_r; // right
-                    }
-                }
-            }
-        }
+        apply_smoothed_panning(&mut output[..written], channel_count, &mut self.panning);
         written
     }
 
