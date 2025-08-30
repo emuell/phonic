@@ -21,7 +21,8 @@ use crate::{
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
-        buffer::{clear_buffer, scale_buffer},
+        buffer::clear_buffer,
+        smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
     },
 };
 
@@ -237,6 +238,9 @@ impl Stream {
         callback_recv: Receiver<CallbackMsg>,
         stream_send: Sender<StreamMsg>,
     ) -> Result<Self, Error> {
+        let mut volume = ExponentialSmoothedValue::new(config.sample_rate.0);
+        volume.init(1.0);
+
         let mut callback = StreamCallback {
             stream_send,
             callback_recv,
@@ -248,8 +252,9 @@ impl Stream {
                 &config,
             )),
             state: CallbackState::Paused,
-            volume: 1.0,
+            volume,
         };
+
         log::info!("opening output stream: {:?}", &config);
         let stream = match sample_format {
             cpal::SampleFormat::I8 => {
@@ -389,7 +394,7 @@ struct StreamCallback {
     playback_pos_instant: Instant,
     temp_buffer: Vec<f32>,
     state: CallbackState,
-    volume: f32,
+    volume: ExponentialSmoothedValue,
 }
 
 impl StreamCallback {
@@ -448,7 +453,7 @@ impl StreamCallback {
                     self.source = src;
                 }
                 CallbackMsg::SetVolume(volume) => {
-                    self.volume = volume;
+                    self.volume.set_target(volume);
                 }
                 CallbackMsg::Pause => {
                     self.state = CallbackState::Paused;
@@ -476,10 +481,8 @@ impl StreamCallback {
         let written = self.source.write(output, &time);
         #[cfg(feature = "assert_no_alloc")]
         let written = assert_no_alloc(|| self.source.write(output, &time));
-        // Apply the global volume level.
-        if (1.0 - self.volume).abs() > 0.0001 {
-            scale_buffer(&mut output[..written], self.volume);
-        }
+        // Apply the global volume level
+        apply_smoothed_gain(&mut output[..written], &mut self.volume, );
         // Advance playback pos
         self.playback_pos
             .fetch_add(output.len() as u64, Ordering::Relaxed);

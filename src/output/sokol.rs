@@ -22,7 +22,10 @@ use crate::{
     error::Error,
     output::{OutputDevice, OutputSink},
     source::{empty::EmptySource, Source, SourceTime},
-    utils::buffer::clear_buffer,
+    utils::{
+        buffer::clear_buffer,
+        smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
+    },
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -51,7 +54,7 @@ struct SokolContext {
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
-    volume: f32,
+    volume: ExponentialSmoothedValue,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -170,13 +173,16 @@ impl SokolOutput {
 
         let playback_pos = Arc::new(AtomicU64::new(0));
 
+        let mut volume = ExponentialSmoothedValue::new(PREFERRED_SAMPLE_RATE as u32);
+        volume.init(1.0);
+
         let context = Box::new(SokolContext {
             callback_recv,
             source: Box::new(EmptySource),
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
-            volume: 1.0,
+            volume,
         });
 
         let context_ref = Rc::new(SokolContextRef::new(context));
@@ -235,7 +241,7 @@ impl SokolOutput {
                     state.state = CallbackState::Playing;
                 }
                 CallbackMessage::SetVolume(volume) => {
-                    state.volume = volume;
+                    state.volume.set_target(volume);
                 }
             }
         }
@@ -264,11 +270,7 @@ impl SokolOutput {
         };
 
         // Apply volume if needed
-        if state.volume != 1.0 {
-            output[..samples_written].iter_mut().for_each(|s| {
-                *s *= state.volume;
-            });
-        }
+        apply_smoothed_gain(&mut output[..samples_written], &mut state.volume);
 
         // Mute remaining samples, if any.
         clear_buffer(&mut output[samples_written..]);

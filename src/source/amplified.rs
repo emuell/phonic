@@ -1,4 +1,4 @@
-use crate::utils::buffer::scale_buffer;
+use crate::utils::smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue};
 
 use super::{Source, SourceTime};
 
@@ -7,7 +7,7 @@ use super::{Source, SourceTime};
 /// A source which applies a volume factor to some other source's output
 pub struct AmplifiedSource {
     source: Box<dyn Source>,
-    volume: f32,
+    volume: ExponentialSmoothedValue,
 }
 
 impl AmplifiedSource {
@@ -16,9 +16,11 @@ impl AmplifiedSource {
         InputSource: Source,
     {
         debug_assert!(volume >= 0.0, "Invalid volume factor");
+        let mut vol = ExponentialSmoothedValue::new(source.sample_rate());
+        vol.init(volume);
         Self {
             source: Box::new(source),
-            volume,
+            volume: vol,
         }
     }
 }
@@ -27,11 +29,9 @@ impl Source for AmplifiedSource {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // write input source
         let written = self.source.write(output, time);
-        // apply volume
-        if (1.0 - self.volume).abs() > 0.001 {
-            let written_out = &mut output[0..written];
-            scale_buffer(written_out, self.volume);
-        }
+        // apply volume using helper
+        let written_out = &mut output[0..written];
+        apply_smoothed_gain(written_out, &mut self.volume);
         written
     }
 
