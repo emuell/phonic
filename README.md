@@ -4,7 +4,7 @@ implementation.
 
 It serves as a general-purpose, low-latency audio playback engine for Rust-based music applications while also being suitable as an audio backend for game engines.
 
-Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app using the [Tauri](https://tauri.app) framework, phonic addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns).
+Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns).
 
 ### Features
 
@@ -16,12 +16,13 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   [sokol-audio](https://github.com/floooh/sokol-rust) (cpal is enabled by default).
 - Decodes and thus plays back most **common audio file formats**, thanks to
   [Symphonia](https://github.com/pdeljanov/Symphonia).
-- Files are automatically **resampled and channel mapped** using a fast custom resampler or [rubato](https://github.com/HEnquist/rubato).
+- Reads and applies loop points of WAV and FLAC files for **seamless loop playback**. 
+- Files are automatically **resampled and channel mapped** using a fast custom cubic resampler or [rubato](https://github.com/HEnquist/rubato).
 - Runs on the **web** via [sokol](https://github.com/floooh/sokol-rust) thanks to [emscripten](https://emscripten.org/): see [play-emscripten](./examples/play-emscripten/) example.
-- Click free playback: when stopping sounds, a very short volume fade-out is applied to
-  **avoid clicks**.
-- Sample precise playback scheduling, e.g. to play back sounds in a **sequencer**.
-- Monitor **playback positions** and status of all played back files for GUIs. 
+- When stopping sounds, by default a very short volume fade-out is applied to **avoid clicks**.
+- Sample pitch can be gradually changed, to apply **portamento** alike note gliding in samples. 
+- Allows sample precise playback scheduling, e.g. to play back sounds in a **sequencer**.
+- Monitor **playback positions** and status of all played back files in e.g. GUIs. 
 
 ### Examples
 
@@ -44,13 +45,13 @@ fn main() -> Result<(), Error> {
 
     // Play back a file with the default playback options.
     player.play_file(
-    "PATH_TO/some_file.wav",
+        "PATH_TO/some_file.wav",
         FilePlaybackOptions::default())?;
     // Play back another file on top with custom playback options.
     player.play_file(
         "PATH_TO/some_long_file.mp3",
         FilePlaybackOptions::default()
-            .streamed() // decodes the file on-the-fly
+            .streamed() // decode the file on-the-fly
             .volume_db(-6.0) // lower the volume a bit
             .speed(0.5) // play file at half the speed
             .repeat(2), // repeat, loop it 2 times
