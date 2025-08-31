@@ -58,14 +58,21 @@ impl StreamedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        // validate options
+        // Validate options
         options.validate()?;
 
         // Memorize file path for progress
         let file_path = Arc::new(path.as_ref().to_string_lossy().to_string());
 
-        // create decoder
+        // Create decoder
         let decoder = AudioDecoder::from_file(path)?;
+
+        // Get repeat option
+        let repeat = options.repeat.unwrap_or(if !decoder.loops().is_empty() {
+            usize::MAX
+        } else {
+            0
+        });
 
         // Gather the source signal specs
         let signal_spec = decoder.signal_spec();
@@ -103,7 +110,6 @@ impl StreamedFileSource {
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
         let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
             let shared_state = worker_state.clone();
-            let repeat = options.repeat;
             move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
         });
         actor.send(StreamedFileSourceMessage::Read)?;
@@ -412,10 +418,8 @@ struct StreamedFileWorker {
     is_reading: bool,
     /// Number of times we should repeat the source
     repeat: usize,
-    /// Loop start in samples
-    loop_start: u64,
-    /// Loop end in samples
-    loop_end: u64,
+    /// Loop range in samples
+    loop_range: Option<Range<u64>>,
 }
 
 impl StreamedFileWorker {
@@ -444,15 +448,13 @@ impl StreamedFileWorker {
         let input_spec = input.signal_spec();
         let channel_count = input_spec.channels.count() as u64;
 
-        let mut loop_start = 0;
-        let mut loop_end = u64::MAX;
+        let mut loop_range = None;
         if let Some(loop_info) = input.loops().first() {
             // TODO: for now we only support forward loops
-            let file_loop_start = loop_info.start as u64 * channel_count;
-            let file_loop_end = loop_info.end as u64 * channel_count;
-            if file_loop_end > file_loop_start {
-                loop_start = file_loop_start;
-                loop_end = file_loop_end;
+            let loop_start = loop_info.start as u64 * channel_count;
+            let loop_end = loop_info.end as u64 * channel_count;
+            if loop_end > loop_start {
+                loop_range = Some(loop_start..loop_end);
             }
         }
 
@@ -480,8 +482,7 @@ impl StreamedFileWorker {
             samples_to_skip,
             is_reading,
             repeat,
-            loop_start,
-            loop_end,
+            loop_range,
         }
     }
 }
@@ -560,11 +561,7 @@ impl StreamedFileWorker {
                     }
                 }
                 None => {
-                    // reached EOF
-                    if self.loop_end == u64::MAX {
-                        self.loop_end = self.samples_written;
-                    }
-                    // apply loops
+                    // reached EOF:  apply repeat or stop
                     if self.continue_on_loop_boundary() {
                         // continue playing from loop start
                         self.is_reading = true;
@@ -590,9 +587,9 @@ impl StreamedFileWorker {
         let mut samples_to_write_now = samples_in_packet;
 
         // Don't write past the loop end
-        if self.loop_end != u64::MAX {
+        if let Some(loop_range) = &self.loop_range {
             let remaining_samples_in_loop =
-                self.loop_end.saturating_sub(self.samples_written) as usize;
+                loop_range.end.saturating_sub(self.samples_written) as usize;
             if samples_to_write_now.len() > remaining_samples_in_loop {
                 samples_to_write_now = &samples_to_write_now[..remaining_samples_in_loop];
             }
@@ -602,12 +599,14 @@ impl StreamedFileWorker {
             self.samples_written += written as u64;
             self.samples_to_write.start += written;
 
-            if self.loop_end != u64::MAX && self.samples_written >= self.loop_end {
-                if self.continue_on_loop_boundary() {
-                    // continue playing from loop start
-                } else {
-                    // reached end of file
-                    return Ok(Act::Continue);
+            if let Some(loop_range) = &self.loop_range {
+                if self.samples_written >= loop_range.end {
+                    if self.continue_on_loop_boundary() {
+                        // continue playing from loop start
+                    } else {
+                        // reached end of file
+                        return Ok(Act::Continue);
+                    }
                 }
             }
             self.is_reading = true;
@@ -632,7 +631,8 @@ impl StreamedFileWorker {
                 self.repeat -= 1;
             }
             // seek to loop_start
-            let seek_frames = self.loop_start / self.input_spec.channels.count() as u64;
+            let loop_start = self.loop_range.as_ref().map(|r| r.start).unwrap_or(0);
+            let seek_frames = loop_start / self.input_spec.channels.count() as u64;
             let seek_secs = seek_frames as f64 / self.input_spec.rate as f64;
             match self.input.seek(Duration::from_secs_f64(seek_secs)) {
                 Ok(actual_frame_time) => {
@@ -650,11 +650,11 @@ impl StreamedFileWorker {
                     return false;
                 }
             }
-            self.samples_written = self.loop_start;
+            self.samples_written = loop_start;
             self.samples_to_write = 0..0;
             self.shared_state
                 .position
-                .store(self.loop_start, Ordering::Relaxed);
+                .store(loop_start, Ordering::Relaxed);
             true
         } else {
             // stop reading and mark as exhausted

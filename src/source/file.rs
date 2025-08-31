@@ -34,11 +34,12 @@ pub struct FilePlaybackOptions {
     /// See also `resampling_quality` property.
     pub speed: f64,
 
-    /// By default 0: when > 0 the number of times the file should be looped.
-    /// When supported by the file reader, embedded file loop points are used for
-    /// repeating, else the entire sample is repeated.
-    /// Set to usize::MAX to repeat forever.
-    pub repeat: usize,
+    /// By default `None`: When `Some(> 0)`, this is the number of times the file should
+    /// be looped. When supported by the file reader, embedded file loop points are used,
+    /// else the entire sample range is repeated.
+    /// When loop points are present and repeat is `None`, repeating is enabled by default,
+    /// except when explicitly disabled via `Some(0)`.
+    pub repeat: Option<usize>,
 
     /// By default None: when set, the source should start playing at the given
     /// sample frame time in the audio output stream.
@@ -70,7 +71,7 @@ impl Default for FilePlaybackOptions {
             volume: 1.0,
             panning: 0.0,
             speed: 1.0,
-            repeat: 0,
+            repeat: None,
             start_time: None,
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
@@ -119,11 +120,11 @@ impl FilePlaybackOptions {
     }
 
     pub fn repeat(mut self, count: usize) -> Self {
-        self.repeat = count;
+        self.repeat = Some(count);
         self
     }
     pub fn repeat_forever(mut self) -> Self {
-        self.repeat = usize::MAX;
+        self.repeat = Some(usize::MAX);
         self
     }
 

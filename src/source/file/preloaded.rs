@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{ops::Range, path::Path, sync::Arc};
 
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
@@ -22,8 +22,7 @@ struct FileBuffer {
     buffer: Vec<f32>,
     channel_count: usize,
     sample_rate: u32,
-    loop_start: usize,
-    loop_end: usize,
+    loop_range: Option<Range<usize>>,
 }
 
 impl FileBuffer {
@@ -31,8 +30,10 @@ impl FileBuffer {
         if self.buffer.is_empty() {
             return Err(Error::ParameterError("empty audio file".to_owned()));
         }
-        if self.loop_start >= self.loop_end || self.loop_end > self.buffer.len() {
-            return Err(Error::ParameterError("invalid loop range".to_owned()));
+        if let Some(loop_range) = &self.loop_range {
+            if loop_range.start >= loop_range.end || loop_range.end > self.buffer.len() {
+                return Err(Error::ParameterError("invalid loop range".to_owned()));
+            }
         }
         Ok(())
     }
@@ -127,15 +128,13 @@ impl PreloadedFileSource {
             buffer.extend(std::iter::repeat_n(0.0, channel_count));
         }
 
-        let mut loop_start = 0;
-        let mut loop_end = buffer.len();
+        let mut loop_range = None;
         if let Some(loop_info) = audio_decoder.loops().first() {
             // TODO: for now we only support forward loops
-            let file_loop_start = (loop_info.start as usize * channel_count).min(buffer.len());
-            let file_loop_end = (loop_info.end as usize * channel_count).min(buffer.len());
-            if file_loop_end > file_loop_start {
-                loop_start = file_loop_start;
-                loop_end = file_loop_end;
+            let loop_start = (loop_info.start as usize * channel_count).min(buffer.len());
+            let loop_end = (loop_info.end as usize * channel_count).min(buffer.len());
+            if loop_end > loop_start {
+                loop_range = Some(loop_start..loop_end);
             }
         }
 
@@ -143,8 +142,7 @@ impl PreloadedFileSource {
             buffer,
             sample_rate,
             channel_count,
-            loop_start,
-            loop_end,
+            loop_range,
         });
 
         Self::from_shared_file_buffer(
@@ -165,15 +163,13 @@ impl PreloadedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        let loop_start = 0;
-        let loop_end = buffer.len();
+        let loop_range = None;
 
         let file_buffer = Arc::new(FileBuffer {
             buffer,
             sample_rate,
             channel_count,
-            loop_start,
-            loop_end,
+            loop_range,
         });
 
         let file_path = "buffer".to_owned();
@@ -210,7 +206,13 @@ impl PreloadedFileSource {
             playback_status_send,
         )?;
 
-        let playback_repeat = options.repeat;
+        let playback_repeat = options
+            .repeat
+            .unwrap_or(if file_buffer.loop_range.is_some() {
+                usize::MAX
+            } else {
+                0
+            });
         let playback_pos = 0;
         let playback_pos_eof = false;
 
@@ -277,10 +279,15 @@ impl PreloadedFileSource {
 
     fn write_buffer(&mut self, output: &mut [f32]) -> usize {
         let mut written = 0;
+        let loop_range = self
+            .file_buffer
+            .loop_range
+            .clone()
+            .unwrap_or(0..self.file_buffer.buffer.len());
         while written < output.len() {
             // write from resampled buffer into output and apply volume
             let remaining_input_len = if self.playback_repeat > 0 {
-                self.file_buffer.loop_end.saturating_sub(self.playback_pos)
+                loop_range.end.saturating_sub(self.playback_pos)
             } else {
                 self.file_buffer
                     .buffer
@@ -327,12 +334,12 @@ impl PreloadedFileSource {
             written += output_written;
 
             // loop or stop when reaching end of file or end of loop
-            if self.playback_pos >= self.file_buffer.loop_end {
+            if self.playback_pos >= loop_range.end {
                 if self.playback_repeat > 0 {
                     if self.playback_repeat != usize::MAX {
                         self.playback_repeat -= 1;
                     }
-                    self.playback_pos = self.file_buffer.loop_start;
+                    self.playback_pos = loop_range.start;
                 } else {
                     self.playback_pos_eof = true;
                     break;

@@ -42,7 +42,7 @@ fn main() -> Result<(), Error> {
         "assets/YuaiLoop.wav",
         FilePlaybackOptions::default()
             .streamed()
-            .repeat(usize::MAX)
+            .repeat_forever()
             .volume_db(-3.0)
             .speed(0.9)
             .resampling_quality(ResamplingQuality::HighQuality),
@@ -224,7 +224,6 @@ fn handle_note_on(player: &mut Player, note: u8, playmode: PlayMode) -> Playback
                     FilePlaybackOptions::default()
                         .volume_db(-6.0)
                         .speed(speed_from_note(note))
-                        .repeat_forever()
                         .fade_out(Duration::from_secs(3)),
                     player.output_sample_rate(),
                 )
