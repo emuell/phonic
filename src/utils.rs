@@ -1,4 +1,5 @@
-//! Helper functions to convert musical units and to generate audio waveforms for GUIs.
+//! Audio and DSP helper functions to e.g. convert musical units, apply smoothed value changes
+//! and to generate audio waveforms for GUIs.
 
 use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicUsize, Ordering};

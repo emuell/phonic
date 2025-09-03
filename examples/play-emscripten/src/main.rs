@@ -2,8 +2,8 @@ use std::{cell::RefCell, collections::HashMap, ffi};
 
 use phonic::{
     utils::{pitch_from_note, speed_from_note},
-    OutputDevice, PlaybackId, Player, DaspSynthSource, DefaultOutputDevice, Error,
-    FilePlaybackOptions, PreloadedFileSource, SynthPlaybackOptions,
+    DaspSynthSource, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, PlaybackId,
+    Player, PreloadedFileSource, SynthPlaybackOptions,
 };
 
 use dasp::{signal, Frame, Signal};
@@ -94,7 +94,7 @@ impl EmscriptenPlayer {
     fn create_synth_source(
         &self,
         note: u8,
-    ) -> Result<DaspSynthSource<impl signal::Signal<Frame = f64>>, Error> {
+    ) -> Result<DaspSynthSource<impl Signal<Frame = f64>>, Error> {
         let sample_rate = self.player.output_sample_rate();
         let pitch = pitch_from_note(note);
         let duration_in_ms = 1000;

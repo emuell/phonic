@@ -1,11 +1,12 @@
-use dasp::{signal, Frame, Signal};
-use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
-use lazy_static::lazy_static;
 use std::{
     collections::HashMap,
     sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
+
+use dasp::{signal, Signal};
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
+use lazy_static::lazy_static;
 
 use phonic::{
     utils::{pitch_from_note, speed_from_note},
@@ -245,7 +246,7 @@ fn create_synth_source(
     note: u8,
     options: SynthPlaybackOptions,
     sample_rate: u32,
-) -> Result<DaspSynthSource<impl signal::Signal<Frame = f64>>, Error> {
+) -> Result<DaspSynthSource<impl Signal<Frame = f64>>, Error> {
     let pitch = pitch_from_note(note);
     let duration_in_ms = 1000;
     let duration_in_samples = (sample_rate as f64 / duration_in_ms as f64 * 1000.0) as usize;
@@ -265,7 +266,7 @@ fn create_synth_source(
             .zip(0..duration_in_samples)
             .map(move |(s, index)| {
                 let env: f64 = (1.0 - (index as f64) / (duration_in_samples as f64)).powf(2.0);
-                (s * env).to_float_frame()
+                s * env
             }),
     );
     DaspSynthSource::new(

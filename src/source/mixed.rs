@@ -36,7 +36,7 @@ struct MixedSourceEvent {
 // -------------------------------------------------------------------------------------------------
 
 /// Messages send from player to mixer to start or stop playing sources.
-pub enum MixedSourceMsg {
+pub(crate) enum MixedSourceMsg {
     AddSource {
         playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageSender,

@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dasp::{signal, Frame, Signal};
+use dasp::{signal, Signal};
 
 use phonic::{
     DaspSynthSource, DefaultOutputDevice, Error, OutputDevice, PlaybackStatusEvent, Player,
@@ -50,7 +50,7 @@ fn main() -> Result<(), Error> {
                 .zip(0..duration)
                 .map(move |(s, index)| {
                     let env: f64 = (1.0 - (index as f64) / (duration as f64)).powf(2.0);
-                    (s * env).to_float_frame()
+                    s * env
                 }),
         )
     };
