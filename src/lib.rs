@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 // private mods (will be partly re-exported)
+mod effect;
 mod error;
 #[cfg(any(feature = "cpal", feature = "sokol", doc))]
 mod output;
@@ -18,7 +19,7 @@ pub use output::AudioHostId;
 #[cfg(any(feature = "cpal", feature = "sokol", doc))]
 pub use output::{DefaultOutputDevice, DefaultOutputSink, OutputDevice, OutputSink};
 
-pub use player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player};
+pub use player::{EffectId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player};
 
 #[cfg(feature = "dasp")]
 pub use source::synth::dasp::DaspSynthSource;
@@ -32,4 +33,8 @@ pub use source::{
     resampled::ResamplingQuality,
     synth::{SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
+};
+
+pub use effect::{
+    Effect,
 };
