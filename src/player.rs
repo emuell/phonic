@@ -15,23 +15,28 @@ use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
 
 use crate::{
+    effect::{Effect, EffectMessage},
     error::Error,
     output::{DefaultOutputSink, OutputSink},
     source::{
         amplified::AmplifiedSource,
         converted::ConvertedSource,
         file::{FilePlaybackMessage, FileSource},
-        mixed::{MixedSource, MixedSourceMsg},
+        mixed::{MixedSource, MixerSourceMessage},
         panned::PannedSource,
         resampled::ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
     },
+    utils::unique_usize_id,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// A unique ID for a newly created File or Synth Sources.
 pub type PlaybackId = usize;
+
+/// A unique ID for a newly created effect.
+pub type EffectId = usize;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -100,7 +105,7 @@ pub struct Player {
     playback_status_sender: Sender<PlaybackStatusEvent>,
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
-    mixer_event_queue: Arc<ArrayQueue<MixedSourceMsg>>,
+    mixer_event_queue: Arc<ArrayQueue<MixerSourceMessage>>,
 }
 
 impl Player {
@@ -108,12 +113,12 @@ impl Player {
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
     pub fn new(
-        sink: DefaultOutputSink,
+        mut sink: DefaultOutputSink,
         playback_status_sender: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(DashMap::with_capacity(1024));
-        let playback_status_sender_proxy =
+        let playback_status_sender =
             Self::handle_playback_events(playback_status_sender, playing_sources.clone());
 
         // Create audio garbage collector and thread
@@ -122,17 +127,18 @@ impl Player {
         let collector_running = Arc::new(AtomicBool::new(true));
         Self::handle_drop_collects(collector, collector_running.clone());
 
-        // Create a mixer source, add it to the audio sink and start running
+        // Create a mixer source and add it to the audio sink
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
-        let mixer_event_queue = mixer_source.event_queue();
-        let mut sink = sink;
+        let mixer_event_queue = mixer_source.message_queue();
+
+        // start running
         sink.play(mixer_source);
         sink.resume();
 
         Self {
             sink,
             playing_sources,
-            playback_status_sender: playback_status_sender_proxy,
+            playback_status_sender,
             collector_handle,
             collector_running,
             mixer_event_queue,
@@ -232,7 +238,7 @@ impl Player {
         // send the source to the mixer
         if self
             .mixer_event_queue
-            .push(MixedSourceMsg::AddSource {
+            .push(MixerSourceMessage::AddSource {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
@@ -291,7 +297,7 @@ impl Player {
         // send the source to the mixer
         if self
             .mixer_event_queue
-            .push(MixedSourceMsg::AddSource {
+            .push(MixerSourceMessage::AddSource {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
@@ -306,8 +312,62 @@ impl Player {
         Ok(playback_id)
     }
 
-    /// Change playback position of the given played back source. This is only supported for files and thus
-    /// won't do anything for synths.
+    /// Add an effect to the mixer's output.
+    pub fn add_effect(&mut self, mut effect: Box<dyn Effect>) -> Result<EffectId, Error> {
+        // The mixer uses a temp buffer of this size. This should probably be configurable.
+        let channel_count = self.output_channel_count();
+        let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
+
+        effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
+
+        let id = unique_usize_id();
+        if self
+            .mixer_event_queue
+            .push(MixerSourceMessage::AddEffect { id, effect })
+            .is_err()
+        {
+            log::warn!("mixer's event queue is full. add effect event got skipped!");
+            log::warn!("increase the mixer event queue to prevent this from happening...");
+        }
+        Ok(id)
+    }
+
+    /// Send a message to an effect.
+    pub fn send_effect_message(
+        &mut self,
+        effect_id: EffectId,
+        message: Box<EffectMessage>,
+    ) -> Result<(), Error> {
+        let sample_time = 0;
+        self.send_effect_message_at_sample_time(effect_id, message, sample_time)
+    }
+
+    /// Send a message to an effect at a specific sample time.
+    pub fn send_effect_message_at_sample_time(
+        &mut self,
+        effect_id: EffectId,
+        message: Box<EffectMessage>,
+        sample_time: u64,
+    ) -> Result<(), Error> {
+        if self
+            .mixer_event_queue
+            .push(MixerSourceMessage::ProcessEffectMessage {
+                effect_id,
+                message,
+                sample_time,
+            })
+            .is_err()
+        {
+            log::warn!("mixer's event queue is full. effect message got skipped!");
+            log::warn!("increase the mixer event queue to prevent this from happening...");
+            Err(Error::SendError)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Change playback position of the given played back source.
+    /// This is only supported for files and thus won't do anything for synths.
     pub fn seek_source(
         &mut self,
         playback_id: PlaybackId,
@@ -337,23 +397,8 @@ impl Player {
         speed: f64,
         glide: Option<f32>,
     ) -> Result<(), Error> {
-        // check if the given playback id is still know (playing)
-        if let Some(source) = self.playing_sources.get(&playback_id) {
-            if let PlaybackMessageSender::File(queue) = &*source {
-                if queue
-                    .push(FilePlaybackMessage::SetSpeed(speed, glide))
-                    .is_err()
-                {
-                    Err(Error::SendError)
-                } else {
-                    Ok(())
-                }
-            } else {
-                Err(Error::MediaFileNotFound)
-            }
-        } else {
-            Err(Error::MediaFileNotFound)
-        }
+        let sample_time = 0;
+        self.set_source_speed_at_sample_time(playback_id, speed, glide, sample_time)
     }
 
     /// Set a playing file source's speed at a given sample time in future with the given
@@ -371,7 +416,7 @@ impl Player {
             // pass event to mixer to schedule it
             if self
                 .mixer_event_queue
-                .push(MixedSourceMsg::SetSpeed {
+                .push(MixerSourceMessage::SetSpeed {
                     playback_id,
                     speed,
                     glide,
@@ -420,7 +465,7 @@ impl Player {
         if self.playing_sources.contains_key(&playback_id) {
             // pass stop request to mixer (force push stop events!)
             self.mixer_event_queue
-                .force_push(MixedSourceMsg::StopSource {
+                .force_push(MixerSourceMessage::StopSource {
                     playback_id,
                     sample_time: stop_time,
                 });
@@ -445,7 +490,7 @@ impl Player {
         }
         // remove all upcoming, scheduled sources in the mixer too (force push stop events!)
         self.mixer_event_queue
-            .force_push(MixedSourceMsg::RemoveAllPendingSources);
+            .force_push(MixerSourceMessage::RemoveAllPendingSources);
         Ok(())
     }
 }
