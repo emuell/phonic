@@ -14,7 +14,12 @@ pub(crate) mod resampler;
 pub(crate) mod smoothed;
 pub(crate) mod wave;
 
-/// Re-export as public
+/// Interleaved buffer helpers.
+pub use buffer::{
+    ChannelIter, ChannelIterMut, Channels, ChannelsMut, InterleavedBuffer, InterleavedBufferMut,
+};
+
+/// Volume and generic value smoothing helpers.
 pub use fader::VolumeFader;
 pub use smoothed::{
     apply_smoothed_gain, apply_smoothed_panning, ExponentialSmoothedValue, LinearSmoothedValue,
