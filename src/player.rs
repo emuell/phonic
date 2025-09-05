@@ -38,6 +38,9 @@ pub type PlaybackId = usize;
 /// A unique ID for a newly created effect.
 pub type EffectId = usize;
 
+/// A unique ID for a newly created mixer.
+pub type MixerId = usize;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Custom context type for playback status events.
@@ -81,10 +84,10 @@ impl PlaybackMessageSender {
         match self {
             PlaybackMessageSender::File(sender) => sender
                 .push(FilePlaybackMessage::Stop)
-                .map_err(|_err| Error::SendError),
+                .map_err(|_msg| Error::SendError),
             PlaybackMessageSender::Synth(sender) => sender
                 .push(SynthPlaybackMessage::Stop)
-                .map_err(|_err| Error::SendError),
+                .map_err(|_msg| Error::SendError),
         }
     }
 }
@@ -101,14 +104,18 @@ impl PlaybackMessageSender {
 /// NB: For playback of [`SynthSource`]s, the `dasp-synth` feature needs to be enabled.
 pub struct Player {
     sink: DefaultOutputSink,
-    playing_sources: Arc<DashMap<PlaybackId, PlaybackMessageSender>>,
+    playing_sources: Arc<DashMap<PlaybackId, (PlaybackMessageSender, MixerId)>>,
     playback_status_sender: Sender<PlaybackStatusEvent>,
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
-    mixer_event_queue: Arc<ArrayQueue<MixerSourceMessage>>,
+    mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerSourceMessage>>>>,
+    mixer_effects: Arc<DashMap<EffectId, MixerId>>,
 }
 
 impl Player {
+    /// The ID of the main mixer, which is always present.
+    const MAIN_MIXER_ID: MixerId = 0;
+
     /// Create a new Player for the given DefaultOutputSink.
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
@@ -130,6 +137,10 @@ impl Player {
         // Create a mixer source and add it to the audio sink
         let mixer_source = MixedSource::new(sink.channel_count(), sink.sample_rate());
         let mixer_event_queue = mixer_source.message_queue();
+        let mixer_event_queues = Arc::new(DashMap::new());
+        mixer_event_queues.insert(Self::MAIN_MIXER_ID, mixer_event_queue);
+
+        let mixer_effects = Arc::new(DashMap::new());
 
         // start running
         sink.play(mixer_source);
@@ -141,7 +152,8 @@ impl Player {
             playback_status_sender,
             collector_handle,
             collector_running,
-            mixer_event_queue,
+            mixer_event_queues,
+            mixer_effects,
         }
     }
 
@@ -209,6 +221,15 @@ impl Player {
         start_time: Option<u64>,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
+        let mixer_id = file_source
+            .playback_options()
+            .target_mixer
+            .unwrap_or(Self::MAIN_MIXER_ID);
+        let mixer_event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .clone();
         // make sure the source has a valid playback status channel
         let mut file_source = file_source;
         if file_source.playback_status_sender().is_none() {
@@ -223,7 +244,7 @@ impl Player {
         let playback_message_queue =
             PlaybackMessageSender::File(file_source.playback_message_queue());
         self.playing_sources
-            .insert(playback_id, playback_message_queue.clone());
+            .insert(playback_id, (playback_message_queue.clone(), mixer_id));
         // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             file_source,
@@ -236,8 +257,7 @@ impl Player {
         // apply panning options
         let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
-        if self
-            .mixer_event_queue
+        if mixer_event_queue
             .push(MixerSourceMessage::AddSource {
                 playback_id,
                 playback_message_queue,
@@ -269,6 +289,15 @@ impl Player {
         start_time: Option<u64>,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
+        let mixer_id = synth_source
+            .playback_options()
+            .target_mixer
+            .unwrap_or(Self::MAIN_MIXER_ID);
+        let mixer_event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .clone();
         // make sure the source has a valid playback status channel
         let mut synth_source = synth_source;
         if synth_source.playback_status_sender().is_none() {
@@ -282,7 +311,7 @@ impl Player {
         let playback_message_queue =
             PlaybackMessageSender::Synth(synth_source.playback_message_queue());
         self.playing_sources
-            .insert(playback_id, playback_message_queue.clone());
+            .insert(playback_id, (playback_message_queue.clone(), mixer_id));
         // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             synth_source,
@@ -295,8 +324,7 @@ impl Player {
         // apply panning options
         let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
-        if self
-            .mixer_event_queue
+        if mixer_event_queue
             .push(MixerSourceMessage::AddSource {
                 playback_id,
                 playback_message_queue,
@@ -312,8 +340,56 @@ impl Player {
         Ok(playback_id)
     }
 
-    /// Add an effect to the mixer's output.
-    pub fn add_effect(&mut self, mut effect: Box<dyn Effect>) -> Result<EffectId, Error> {
+    /// Add a new mixer to an existing mixer.
+    /// Use None as mixer id to add it to the main mixer.
+    pub fn add_mixer(&mut self, parent_mixer_id: Option<MixerId>) -> Result<MixerId, Error> {
+        let parent_mixer_id = parent_mixer_id.unwrap_or(Self::MAIN_MIXER_ID);
+        let parent_mixer_event_queue = self
+            .mixer_event_queues
+            .get(&parent_mixer_id)
+            .ok_or(Error::MixerNotFoundError(parent_mixer_id))?
+            .clone();
+
+        let new_mixer = Box::new(MixedSource::new(
+            self.output_channel_count(),
+            self.output_sample_rate(),
+        ));
+        let new_mixer_queue = new_mixer.message_queue();
+        let new_mixer_id = unique_usize_id();
+
+        // Send message to parent mixer
+        if parent_mixer_event_queue
+            .push(MixerSourceMessage::AddMixer {
+                id: new_mixer_id,
+                mixer: new_mixer,
+            })
+            .is_err()
+        {
+            log::warn!("mixer's event queue is full. add mixer event got skipped!");
+            log::warn!("increase the mixer event queue to prevent this from happening...");
+        }
+
+        self.mixer_event_queues
+            .insert(new_mixer_id, new_mixer_queue);
+        self.mixer_effects.insert(new_mixer_id, parent_mixer_id);
+
+        Ok(new_mixer_id)
+    }
+
+    /// Add an effect to the given mixer's output.
+    /// Use None as mixer_id to add the effect to the main mixer.
+    pub fn add_effect(
+        &mut self,
+        mut effect: Box<dyn Effect>,
+        mixer_id: Option<MixerId>,
+    ) -> Result<EffectId, Error> {
+        let mixer_id = mixer_id.unwrap_or(Self::MAIN_MIXER_ID);
+        let mixer_event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .clone();
+
         // The mixer uses a temp buffer of this size. This should probably be configurable.
         let channel_count = self.output_channel_count();
         let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
@@ -321,14 +397,14 @@ impl Player {
         effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
 
         let id = unique_usize_id();
-        if self
-            .mixer_event_queue
+        if mixer_event_queue
             .push(MixerSourceMessage::AddEffect { id, effect })
             .is_err()
         {
             log::warn!("mixer's event queue is full. add effect event got skipped!");
             log::warn!("increase the mixer event queue to prevent this from happening...");
         }
+        self.mixer_effects.insert(id, mixer_id);
         Ok(id)
     }
 
@@ -349,8 +425,17 @@ impl Player {
         message: Box<EffectMessage>,
         sample_time: u64,
     ) -> Result<(), Error> {
-        if self
-            .mixer_event_queue
+        let message = Owned::new(&self.collector_handle, message);
+        let mixer_id = *self
+            .mixer_effects
+            .get(&effect_id)
+            .ok_or(Error::EffectNotFoundError(effect_id))?;
+        let mixer_event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .clone();
+        if mixer_event_queue
             .push(MixerSourceMessage::ProcessEffectMessage {
                 effect_id,
                 message,
@@ -373,8 +458,9 @@ impl Player {
         playback_id: PlaybackId,
         position: Duration,
     ) -> Result<(), Error> {
-        if let Some(msg_sender) = self.playing_sources.get(&playback_id) {
-            if let PlaybackMessageSender::File(queue) = msg_sender.value() {
+        if let Some(entry) = self.playing_sources.get(&playback_id) {
+            let (msg_sender, _) = entry.value();
+            if let PlaybackMessageSender::File(queue) = msg_sender {
                 if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
                     log::warn!("failed to send seek command to file");
                     return Err(Error::SendError);
@@ -412,10 +498,15 @@ impl Player {
         sample_time: u64,
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
-        if self.playing_sources.contains_key(&playback_id) {
+        if let Some(entry) = self.playing_sources.get(&playback_id) {
+            let (_, mixer_id) = entry.value();
+            let mixer_queue = self
+                .mixer_event_queues
+                .get(mixer_id)
+                .ok_or(Error::MixerNotFoundError(*mixer_id))?
+                .clone();
             // pass event to mixer to schedule it
-            if self
-                .mixer_event_queue
+            if mixer_queue
                 .push(MixerSourceMessage::SetSpeed {
                     playback_id,
                     speed,
@@ -437,8 +528,9 @@ impl Player {
     /// stop_fade_out_duration option was set in the playback options it got started with.
     pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
         let stopped = match self.playing_sources.get(&playback_id) {
-            Some(msg_queue) => {
-                if msg_queue.value().send_stop().is_err() {
+            Some(entry) => {
+                let (msg_queue, _) = entry.value();
+                if msg_queue.send_stop().is_err() {
                     return Err(Error::SendError);
                 }
                 true
@@ -462,13 +554,18 @@ impl Player {
         stop_time: u64,
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
-        if self.playing_sources.contains_key(&playback_id) {
+        if let Some(entry) = self.playing_sources.get(&playback_id) {
+            let (_, mixer_id) = entry.value();
+            let mixer_queue = self
+                .mixer_event_queues
+                .get(mixer_id)
+                .ok_or(Error::MixerNotFoundError(*mixer_id))?
+                .clone();
             // pass stop request to mixer (force push stop events!)
-            self.mixer_event_queue
-                .force_push(MixerSourceMessage::StopSource {
-                    playback_id,
-                    sample_time: stop_time,
-                });
+            mixer_queue.force_push(MixerSourceMessage::StopSource {
+                playback_id,
+                sample_time: stop_time,
+            });
             // NB: do not remove from playing_sources, as the event may apply in a long time in future.
             Ok(())
         } else {
@@ -488,9 +585,12 @@ impl Player {
         for source_id in playing_source_ids {
             self.stop_source(source_id)?;
         }
-        // remove all upcoming, scheduled sources in the mixer too (force push stop events!)
-        self.mixer_event_queue
-            .force_push(MixerSourceMessage::RemoveAllPendingSources);
+        // remove all upcoming, scheduled sources in all mixers too (force push stop events!)
+        for queue in self.mixer_event_queues.iter() {
+            queue
+                .value()
+                .force_push(MixerSourceMessage::RemoveAllPendingSources);
+        }
         Ok(())
     }
 }
@@ -499,7 +599,7 @@ impl Player {
 impl Player {
     fn handle_playback_events(
         playback_sender: Option<Sender<PlaybackStatusEvent>>,
-        playing_sources: Arc<DashMap<PlaybackId, PlaybackMessageSender>>,
+        playing_sources: Arc<DashMap<PlaybackId, (PlaybackMessageSender, MixerId)>>,
     ) -> Sender<PlaybackStatusEvent> {
         let (playback_send_proxy, playback_recv_proxy) = {
             // use same capacity in proxy as original one

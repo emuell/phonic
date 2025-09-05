@@ -4,7 +4,7 @@ use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    player::{MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
     source::Source,
     utils::db_to_linear,
     Error,
@@ -43,6 +43,10 @@ pub struct SynthPlaybackOptions {
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
+
+    /// By default None, which means play on the main mixer. When set to some specific id,
+    /// the source will be played on the given mixer instead of the default one.
+    pub target_mixer: Option<MixerId>,
 }
 
 impl Default for SynthPlaybackOptions {
@@ -54,6 +58,7 @@ impl Default for SynthPlaybackOptions {
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
+            target_mixer: None,
         }
     }
 }
@@ -89,6 +94,11 @@ impl SynthPlaybackOptions {
 
     pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
         self.playback_pos_emit_rate = Some(duration);
+        self
+    }
+
+    pub fn target_mixer(mut self, mixer_id: MixerId) -> Self {
+        self.target_mixer = Some(mixer_id);
         self
     }
 
