@@ -15,6 +15,9 @@ version = "0.8.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+assume = { version = "^0.5" }
+byteorder = { version = "^1.5" }
+rand = { version = "0.9" }
 log = { version = "^0.4", features = [
     "max_level_debug",
     "release_max_level_info",
@@ -23,16 +26,14 @@ lazy_static = { version = "^1.4" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^6.1" }
-basedrop = { version = "^0.1" }
+pulp = { version = "^0.21", features = ["macro"] }
 sort = { version = "^0.8" }
+basedrop = { version = "^0.1" }
 audio_thread_priority = { version = "^0.34", default-features = false }
 rubato = { version = "^0.16", default-features = false }
 rb = { version = "^0.4" }
 symphonia = { version = "^0.5", features = ["aac", "alac", "mp3", "isomp4"] }
-pulp = { version = "^0.21", features = ["macro"] }
-assume = { version = "^0.5" }
 riff = { version = "^2.0" }
-byteorder = { version = "^1.5" }
 
 # Optional dependencies
 assert_no_alloc = { version = "^1.1", features = [
