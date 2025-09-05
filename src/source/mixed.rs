@@ -36,7 +36,7 @@ enum MixerEvent {
     },
     ProcessEffectMessage {
         effect_id: EffectId,
-        message: Box<EffectMessage>,
+        message: Owned<Box<EffectMessage>>,
         sample_time: u64,
     },
 }
@@ -64,9 +64,13 @@ pub(crate) enum MixerSourceMessage {
         id: EffectId,
         effect: Box<dyn Effect>,
     },
+    AddMixer {
+        id: EffectId,
+        mixer: Box<MixedSource>,
+    },
     ProcessEffectMessage {
         effect_id: EffectId,
-        message: Box<EffectMessage>,
+        message: Owned<Box<EffectMessage>>,
         sample_time: u64,
     },
     SetSpeed {
@@ -89,6 +93,7 @@ pub(crate) enum MixerSourceMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: Vec<PlayingSource>,
+    mixers: Vec<(EffectId, Box<MixedSource>)>,
     effects: Vec<(EffectId, Box<dyn Effect>)>,
     message_queue: Arc<ArrayQueue<MixerSourceMessage>>,
     events: VecDeque<MixerEvent>,
@@ -104,9 +109,11 @@ impl MixedSource {
 
     /// Create a new mixer source with the given signal specs.
     pub fn new(channel_count: usize, sample_rate: u32) -> Self {
-        // prealloc source and effect lists
+        // prealloc playing source, sub mixer and effect lists
         const PLAYING_EVENTS_CAPACITY: usize = 1024;
         let playing_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
+        const MIXERS_CAPACITY: usize = 16;
+        let mixers = Vec::with_capacity(MIXERS_CAPACITY);
         const EFFECTS_CAPACITY: usize = 16;
         let effects = Vec::with_capacity(EFFECTS_CAPACITY);
 
@@ -121,6 +128,7 @@ impl MixedSource {
 
         Self {
             playing_sources,
+            mixers,
             events,
             effects,
             message_queue,
@@ -192,6 +200,9 @@ impl MixedSource {
                 }
                 MixerSourceMessage::AddEffect { id, effect } => {
                     self.effects.push((id, effect));
+                }
+                MixerSourceMessage::AddMixer { id, mixer } => {
+                    self.mixers.push((id, mixer));
                 }
                 MixerSourceMessage::ProcessEffectMessage {
                     effect_id,
@@ -295,7 +306,7 @@ impl MixedSource {
                     if let Some((_, effect)) =
                         self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                     {
-                        effect.process_message(&*message);
+                        effect.process_message(&**message);
                     } else {
                         log::warn!("Effect with id {effect_id} not found for scheduled message");
                     }
@@ -372,14 +383,19 @@ impl Source for MixedSource {
         // Process all pending messages
         self.process_messages(time);
 
-        // Return early if no active sources and no effects
-        if self.playing_sources.is_empty() && self.effects.is_empty() {
+        // Return early and avoid touching the buffer if there's nothing to do
+        if self.playing_sources.is_empty()
+            && self.effects.is_empty()
+            && self.mixers.is_empty()
+            && self.events.is_empty()
+        {
             return 0;
         }
 
-        // clear entire output first: output should be silent when there are no sources
+        // Clear entire output first: output should be silent when there are no sources
         clear_buffer(output);
 
+        // Process sources and effects
         let output_frame_count = output.len() / self.channel_count;
         let mut total_frames_written = 0;
 
@@ -406,14 +422,23 @@ impl Source for MixedSource {
                 let chunk_time = time.with_added_frames(total_frames_written as u64);
                 let chunk_output = &mut output[total_frames_written * self.channel_count
                     ..(total_frames_written + frames_to_process) * self.channel_count];
+                let chunk_len = chunk_output.len();
 
-                // write all source
+                // write sub-mixers
+                for (_, mixer) in &mut self.mixers {
+                    let temp_output = &mut self.temp_out[..chunk_len];
+                    let written = mixer.write(temp_output, &chunk_time);
+                    // .. and add their output to the main output buffer
+                    add_buffers(&mut chunk_output[..written], &temp_output[..written]);
+                }
+
+                // write sources
                 self.process_sources(chunk_output, chunk_time);
                 total_frames_written += frames_to_process;
 
-                // apply all effects
+                // apply effects
                 for (_, effect) in &mut self.effects {
-                    effect.process(output, &chunk_time);
+                    effect.process(chunk_output, &chunk_time);
                 }
             }
         }
@@ -421,7 +446,7 @@ impl Source for MixedSource {
         // drop all sources which finished playing in this iteration
         self.remove_matching_sources(|s| !s.is_active);
 
-        // return output len as we've cleared the entire output before processing
+        // Return output len as we've cleared the entire output before processing
         output.len()
     }
 

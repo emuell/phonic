@@ -8,7 +8,7 @@ use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    player::{MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
     source::{resampled::ResamplingQuality, Source},
     utils::db_to_linear,
     Error, Player, PreloadedFileSource, StreamedFileSource,
@@ -62,6 +62,10 @@ pub struct FilePlaybackOptions {
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
+
+    /// By default None, which means play on the main mixer. When set to some specific id,
+    /// the source will be played on the given mixer instead of the default one.
+    pub target_mixer: Option<MixerId>,
 }
 
 impl Default for FilePlaybackOptions {
@@ -77,6 +81,7 @@ impl Default for FilePlaybackOptions {
             fade_out_duration: Some(Duration::from_millis(50)),
             resampling_quality: ResamplingQuality::Default,
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
+            target_mixer: None,
         }
     }
 }
@@ -140,6 +145,11 @@ impl FilePlaybackOptions {
 
     pub fn resampling_quality(mut self, quality: ResamplingQuality) -> Self {
         self.resampling_quality = quality;
+        self
+    }
+
+    pub fn target_mixer(mut self, mixer_id: MixerId) -> Self {
+        self.target_mixer = Some(mixer_id);
         self
     }
 
