@@ -12,6 +12,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   (on-the-fly decoded) **audio files**.
 - Play, stop, mix and monitor playback of **custom synth tones** thanks to
   [dasp](https://github.com/RustAudio/dasp) (optional feature: disabled by default).
+- Build complex **DSP graphs** by routing audio through sub-mixers and applying built-in or custom **effects** like reverb, chorus, and filters.
 - Play audio on Windows, macOS, Linux or the Web via [cpal](https://github.com/RustAudio/cpal) or
   [sokol-audio](https://github.com/floooh/sokol-rust) (cpal is enabled by default).
 - Decodes and thus plays back most **common audio file formats**, thanks to
@@ -194,6 +195,50 @@ fn main() -> Result<(), Error> {
             Some(play_time as u64),
         )?;
     }
+
+    Ok(())
+}
+```
+
+#### DSP Effects and Mixer Graphs
+
+Create complex audio processing chains by routing sources through different mixers and effects.
+
+```rust no_run
+use phonic::{
+    Player, OutputDevice, DefaultOutputDevice, Error, FilePlaybackOptions,
+    effect::{
+        chorus::{ChorusEffect, ChorusEffectMessage},
+        reverb::{ReverbEffect, ReverbEffectMessage},
+    }
+};
+
+fn main() -> Result<(), Error> {
+    // Create a player
+    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
+
+    // Add a reverb effect to the main mixer. All sounds played without a
+    // specific target mixer will be routed through this effect.
+    let reverb_id = player.add_effect(ReverbEffect::new(), None)?;
+    player.send_effect_message(reverb_id, ReverbEffectMessage::SetWet(0.5))?;
+
+    // Create a new sub-mixer that is a child of the main mixer.
+    let chorus_mixer_id = player.add_mixer(None)?;
+    // Add a chorus effect to this new mixer.
+    let chorus_id = player.add_effect(ChorusEffect::new(), Some(chorus_mixer_id))?;
+    player.send_effect_message(chorus_id, ChorusEffectMessage::SetWet(0.8))?;
+
+    // Play a file through the main mixer (which has reverb).
+    player.play_file(
+        "PATH_TO/some_file.wav",
+        FilePlaybackOptions::default(),
+    )?;
+
+    // Play another file, but route it through our chorus mixer.
+    player.play_file(
+        "PATH_TO/another_file.wav",
+        FilePlaybackOptions::default().target_mixer(chorus_mixer_id),
+    )?;
 
     Ok(())
 }

@@ -36,7 +36,7 @@ enum MixerEvent {
     },
     ProcessEffectMessage {
         effect_id: EffectId,
-        message: Owned<Box<EffectMessage>>,
+        message: Owned<Box<dyn EffectMessage>>,
         sample_time: u64,
     },
 }
@@ -70,7 +70,7 @@ pub(crate) enum MixerSourceMessage {
     },
     ProcessEffectMessage {
         effect_id: EffectId,
-        message: Owned<Box<EffectMessage>>,
+        message: Owned<Box<dyn EffectMessage>>,
         sample_time: u64,
     },
     SetSpeed {
@@ -395,7 +395,7 @@ impl Source for MixedSource {
         // Clear entire output first: output should be silent when there are no sources
         clear_buffer(output);
 
-        // Process sources and effects
+        // Process pending events, sub mixers, sources and effects
         let output_frame_count = output.len() / self.channel_count;
         let mut total_frames_written = 0;
 
@@ -407,14 +407,14 @@ impl Source for MixedSource {
 
             // determine how many frames to process until the next event is due
             let frames_to_process = {
-                let frames_remaining_in_output = output_frame_count - total_frames_written;
-                if let Some(event) = self.events.front() {
-                    let samples_to_next_event =
-                        (event.sample_time() - current_time_in_frames) as usize;
-                    frames_remaining_in_output.min(samples_to_next_event)
-                } else {
-                    frames_remaining_in_output
-                }
+                let frames_remaining = output_frame_count - total_frames_written;
+                let frames_in_temp_out = self.temp_out.len() / self.channel_count;
+                let frames_until_next_event = self.events.front().map_or(usize::MAX, |e| {
+                    (e.sample_time() - current_time_in_frames) as usize
+                });
+                frames_remaining
+                    .min(frames_in_temp_out)
+                    .min(frames_until_next_event)
             };
 
             // process next chunk until we reach an event or end of the output
@@ -424,22 +424,23 @@ impl Source for MixedSource {
                     ..(total_frames_written + frames_to_process) * self.channel_count];
                 let chunk_len = chunk_output.len();
 
-                // write sub-mixers
+                // apply sub-mixers
                 for (_, mixer) in &mut self.mixers {
                     let temp_output = &mut self.temp_out[..chunk_len];
                     let written = mixer.write(temp_output, &chunk_time);
-                    // .. and add their output to the main output buffer
+                    // add each sub mixer output to the main output buffer
                     add_buffers(&mut chunk_output[..written], &temp_output[..written]);
                 }
 
-                // write sources
+                // apply sources
                 self.process_sources(chunk_output, chunk_time);
-                total_frames_written += frames_to_process;
 
                 // apply effects
                 for (_, effect) in &mut self.effects {
                     effect.process(chunk_output, &chunk_time);
                 }
+
+                total_frames_written += frames_to_process;
             }
         }
 
