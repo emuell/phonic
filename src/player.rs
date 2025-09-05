@@ -215,9 +215,9 @@ impl Player {
         self.play_file_source_with_context(file_source, start_time, None)
     }
     /// Play a self created or cloned file source with the given playback status context.
-    pub fn play_file_source_with_context<Source: FileSource>(
+    pub fn play_file_source_with_context<F: FileSource>(
         &mut self,
-        file_source: Source,
+        file_source: F,
         start_time: Option<u64>,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
@@ -378,9 +378,9 @@ impl Player {
 
     /// Add an effect to the given mixer's output.
     /// Use None as mixer_id to add the effect to the main mixer.
-    pub fn add_effect(
+    pub fn add_effect<E: Effect>(
         &mut self,
-        mut effect: Box<dyn Effect>,
+        effect: E,
         mixer_id: Option<MixerId>,
     ) -> Result<EffectId, Error> {
         let mixer_id = mixer_id.unwrap_or(Self::MAIN_MIXER_ID);
@@ -394,6 +394,7 @@ impl Player {
         let channel_count = self.output_channel_count();
         let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
 
+        let mut effect = Box::new(effect);
         effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
 
         let id = unique_usize_id();
@@ -409,23 +410,24 @@ impl Player {
     }
 
     /// Send a message to an effect.
-    pub fn send_effect_message(
+    pub fn send_effect_message<M: Send + Sync + 'static>(
         &mut self,
         effect_id: EffectId,
-        message: Box<EffectMessage>,
+        message: M,
     ) -> Result<(), Error> {
         let sample_time = 0;
         self.send_effect_message_at_sample_time(effect_id, message, sample_time)
     }
 
     /// Send a message to an effect at a specific sample time.
-    pub fn send_effect_message_at_sample_time(
+    pub fn send_effect_message_at_sample_time<M: Send + Sync + 'static>(
         &mut self,
         effect_id: EffectId,
-        message: Box<EffectMessage>,
+        message: M,
         sample_time: u64,
     ) -> Result<(), Error> {
-        let message = Owned::new(&self.collector_handle, message);
+        let message: Owned<Box<EffectMessage>> =
+            Owned::new(&self.collector_handle, Box::new(message));
         let mixer_id = *self
             .mixer_effects
             .get(&effect_id)

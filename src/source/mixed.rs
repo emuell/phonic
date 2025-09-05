@@ -434,12 +434,13 @@ impl Source for MixedSource {
 
                 // write sources
                 self.process_sources(chunk_output, chunk_time);
-                total_frames_written += frames_to_process;
 
                 // apply effects
                 for (_, effect) in &mut self.effects {
                     effect.process(chunk_output, &chunk_time);
                 }
+
+                total_frames_written += frames_to_process;
             }
         }
 

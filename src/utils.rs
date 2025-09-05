@@ -10,6 +10,7 @@ pub(crate) mod actor;
 pub(crate) mod buffer;
 pub(crate) mod decoder;
 pub(crate) mod fader;
+pub(crate) mod filter;
 pub(crate) mod resampler;
 pub(crate) mod smoothed;
 pub(crate) mod wave;
@@ -25,6 +26,14 @@ pub use smoothed::{
     apply_smoothed_gain, apply_smoothed_panning, ExponentialSmoothedValue, LinearSmoothedValue,
     SigmoidSmoothedValue, SmoothedValue,
 };
+
+/// Basic DSP filter set for custom effects and sources.
+pub mod filters {
+    pub use super::filter::{
+        dc::{DcFilter, DcFilterMode},
+        svf::{SvfCoefficients, SvfFilter, SvfFilterType},
+    };
+}
 
 /// Convert raw audio buffers to audio waveforms for GUIs.
 pub mod waveform {
