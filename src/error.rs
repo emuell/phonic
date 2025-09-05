@@ -12,8 +12,10 @@ pub enum Error {
     AudioDecodingError(Box<dyn error::Error + Send + Sync>),
     OutputDeviceError(Box<dyn error::Error + Send + Sync>),
     ResamplingError(Box<dyn error::Error + Send + Sync>),
-    IoError(io::Error),
+    EffectNotFoundError(usize),
+    MixerNotFoundError(usize),
     ParameterError(String),
+    IoError(io::Error),
     SendError,
 }
 
@@ -28,9 +30,13 @@ impl fmt::Display for Error {
             Self::AudioDecodingError(err)
             | Self::OutputDeviceError(err)
             | Self::ResamplingError(err) => err.fmt(f),
-            Self::IoError(err) => err.fmt(f),
+            Self::MixerNotFoundError(mixer_id) => write!(f, "Mixer with id {mixer_id} not found"),
+            Self::EffectNotFoundError(effect_id) => {
+                write!(f, "Effect with id {effect_id} not found")
+            }
             Self::ParameterError(str) => write!(f, "Invalid parameter: {str}"),
-            Self::SendError => write!(f, "Failed to send into a channel"),
+            Self::IoError(err) => err.fmt(f),
+            Self::SendError => write!(f, "Failed to send message into a channel"),
         }
     }
 }
