@@ -1,9 +1,13 @@
+//! An example showcasing how to use phonic with emscripten to create a web-based audio application.
+
 use std::{cell::RefCell, collections::HashMap, ffi};
 
 use phonic::{
-    utils::{pitch_from_note, speed_from_note},
-    DaspSynthSource, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, PlaybackId,
-    Player, PreloadedFileSource, SynthPlaybackOptions,
+    effects::ReverbEffect,
+    sources::{DaspSynthSource, PreloadedFileSource},
+    utils::{db_to_linear, pitch_from_note, speed_from_note},
+    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, OutputDevice, PlaybackId, Player,
+    SynthPlaybackOptions,
 };
 
 use dasp::{signal, Frame, Signal};
@@ -28,6 +32,7 @@ struct EmscriptenPlayer {
     playback_start_time: u64,
     playing_synth_notes: HashMap<u8, PlaybackId>,
     samples: Vec<PreloadedFileSource>,
+    synth_mixer_id: MixerId,
     run_frame_id: ffi::c_long,
 }
 
@@ -38,13 +43,20 @@ impl EmscriptenPlayer {
         let output = DefaultOutputDevice::open()?.sink();
 
         println!("Creating audio file player...");
-        let player = Player::new(output, None);
+        let mut player = Player::new(output, None);
         let sample_rate = player.output_sample_rate();
+
+        // lower master volume a bit
+        player.set_output_volume(db_to_linear(-3.0));
+
+        // create a new mixer for the synth with a reverb effect
+        let synth_mixer_id = player.add_mixer(None)?;
+        player.add_effect(ReverbEffect::with_parameters(0.6, 0.5), synth_mixer_id)?;
 
         println!("Preloading sample files...");
         let mut samples = Vec::new();
         for sample in ["./assets/cowbell.wav", "./assets/bass.wav"] {
-            match PreloadedFileSource::new(
+            match PreloadedFileSource::from_file(
                 sample,
                 None,
                 FilePlaybackOptions::default(),
@@ -73,6 +85,7 @@ impl EmscriptenPlayer {
             playback_beat_counter,
             playing_synth_notes,
             samples,
+            synth_mixer_id,
             run_frame_id,
         })
     }
@@ -118,7 +131,9 @@ impl EmscriptenPlayer {
                     (s * env).to_float_frame()
                 }),
         );
-        let options = SynthPlaybackOptions::default().volume(0.3);
+        let options = SynthPlaybackOptions::default()
+            .volume_db(-6.0)
+            .target_mixer(self.synth_mixer_id);
         DaspSynthSource::new(
             signal,
             format!("Synth Note #{}", note).as_str(),
@@ -131,7 +146,7 @@ impl EmscriptenPlayer {
     // Schedule synth note on for playback
     fn synth_note_on(&mut self, note: u8) {
         if let Some(playback_id) = self.playing_synth_notes.get(&note) {
-            let _ = self.player.stop_source(*playback_id);
+            let _ = self.player.stop_source(*playback_id, None);
             self.playing_synth_notes.remove(&note);
         }
         let playback_id = self
@@ -144,7 +159,7 @@ impl EmscriptenPlayer {
     // Stop a scheduled synth note on
     fn synth_note_off(&mut self, note: u8) {
         if let Some(playback_id) = self.playing_synth_notes.get(&note) {
-            let _ = self.player.stop_source(*playback_id);
+            let _ = self.player.stop_source(*playback_id, None);
             self.playing_synth_notes.remove(&note);
         }
     }
@@ -199,7 +214,7 @@ impl EmscriptenPlayer {
                 .unwrap();
             // and stop it again (fade out) before the next beat starts
             self.player
-                .stop_source_at_sample_time(
+                .stop_source(
                     playback_id,
                     next_beats_sample_time + samples_per_beat as u64,
                 )

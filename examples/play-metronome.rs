@@ -1,6 +1,8 @@
+//! An example showcasing how to build a simple metronome by scheduling preloaded audio samples.
+
 use phonic::{
-    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, Player,
-    PreloadedFileSource,
+    sources::PreloadedFileSource, utils::speed_from_note, DefaultOutputDevice, Error,
+    FilePlaybackOptions, OutputDevice, Player,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -49,10 +51,10 @@ fn main() -> Result<(), Error> {
         // Play sample at current beat
         let playback_id = player.play_file_source(
             sample.clone(FilePlaybackOptions::default().speed(speed), sample_rate)?,
-            Some(sample_time),
+            sample_time,
         )?;
         // Stop sample at the next beat
-        player.stop_source_at_sample_time(playback_id, sample_time + samples_per_beat)?;
+        player.stop_source(playback_id, sample_time + samples_per_beat)?;
     }
 
     // Wait for playback to finish

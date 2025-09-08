@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -28,7 +28,12 @@ struct PlayingSource {
 
 /// Mixer internal event to schedule playback changes.
 enum MixerEvent {
-    SetFileSourceSpeed {
+    SeekSource {
+        playback_id: PlaybackId,
+        position: Duration,
+        sample_time: u64,
+    },
+    SetSourceSpeed {
         playback_id: PlaybackId,
         speed: f64,
         glide: Option<f32>,
@@ -44,7 +49,8 @@ enum MixerEvent {
 impl MixerEvent {
     fn sample_time(&self) -> u64 {
         match self {
-            Self::SetFileSourceSpeed { sample_time, .. } => *sample_time,
+            Self::SeekSource { sample_time, .. } => *sample_time,
+            Self::SetSourceSpeed { sample_time, .. } => *sample_time,
             Self::ProcessEffectMessage { sample_time, .. } => *sample_time,
         }
     }
@@ -73,10 +79,15 @@ pub(crate) enum MixerSourceMessage {
         message: Owned<Box<dyn EffectMessage>>,
         sample_time: u64,
     },
-    SetSpeed {
+    SetSourceSpeed {
         playback_id: PlaybackId,
         speed: f64,
         glide: Option<f32>, // semitones per second
+        sample_time: u64,
+    },
+    SeekSource {
+        playback_id: PlaybackId,
+        position: Duration,
         sample_time: u64,
     },
     StopSource {
@@ -216,19 +227,30 @@ impl MixedSource {
                     });
                     events_added = true;
                 }
-                MixerSourceMessage::SetSpeed {
+                MixerSourceMessage::SetSourceSpeed {
                     playback_id,
                     speed,
                     glide,
                     sample_time,
                 } => {
-                    self.events.push_back(MixerEvent::SetFileSourceSpeed {
+                    self.events.push_back(MixerEvent::SetSourceSpeed {
                         playback_id,
                         speed,
                         glide,
                         sample_time,
                     });
                     events_added = true;
+                }
+                MixerSourceMessage::SeekSource {
+                    playback_id,
+                    position,
+                    sample_time,
+                } => {
+                    self.events.push_back(MixerEvent::SeekSource {
+                        playback_id,
+                        position,
+                        sample_time,
+                    });
                 }
                 MixerSourceMessage::StopSource {
                     playback_id,
@@ -279,11 +301,30 @@ impl MixedSource {
         {
             let event = self.events.pop_front().unwrap();
             match event {
-                MixerEvent::SetFileSourceSpeed {
+                MixerEvent::SeekSource {
+                    playback_id,
+                    position,
+                    sample_time: _,
+                } => {
+                    if let Some(source) = self
+                        .playing_sources
+                        .iter_mut()
+                        .find(|s| s.playback_id == playback_id)
+                    {
+                        if let PlaybackMessageSender::File(queue) = &source.playback_message_queue {
+                            if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
+                                log::warn!("Failed to send seek command to file");
+                            }
+                        } else {
+                            log::warn!("Trying to seek a synth source, which is not supported");
+                        }
+                    }
+                }
+                MixerEvent::SetSourceSpeed {
                     playback_id,
                     speed,
                     glide,
-                    ..
+                    sample_time: _,
                 } => {
                     if let Some(source) = self
                         .playing_sources
@@ -295,13 +336,15 @@ impl MixedSource {
                                 .push(FilePlaybackMessage::SetSpeed(speed, glide))
                                 .is_err()
                             {
-                                log::warn!("failed to send set speed event");
+                                log::warn!("Failed to send set speed event");
                             }
                         }
                     }
                 }
                 MixerEvent::ProcessEffectMessage {
-                    effect_id, message, ..
+                    effect_id,
+                    message,
+                    sample_time: _,
                 } => {
                     if let Some((_, effect)) =
                         self.effects.iter_mut().find(|(id, _)| *id == effect_id)

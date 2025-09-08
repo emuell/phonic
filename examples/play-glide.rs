@@ -1,9 +1,11 @@
+//! An example showcasing how to glide the playback speed of a source over time.
+
 use phonic::{
     utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, Player,
 };
 
 #[allow(unused_imports)]
-use phonic::{PreloadedFileSource, StreamedFileSource};
+use phonic::sources::{PreloadedFileSource, StreamedFileSource};
 
 use std::time::Duration;
 
@@ -55,7 +57,7 @@ fn main() -> Result<(), Error> {
 
     for (note, duration_beats, glide) in &bass_line[1..] {
         let speed = speed_from_note(*note);
-        player.set_source_speed_at_sample_time(playback_id, speed, *glide, current_time)?;
+        player.set_source_speed(playback_id, speed, *glide, current_time)?;
         let duration_samples = (duration_beats * samples_per_beat as f64) as u64;
         current_time += duration_samples;
     }
@@ -66,7 +68,7 @@ fn main() -> Result<(), Error> {
     }
 
     // Stop the source
-    player.stop_source(playback_id)?;
+    player.stop_source(playback_id, None)?;
 
     // Give it a moment to fade out
     std::thread::sleep(Duration::from_millis(200));

@@ -141,8 +141,8 @@ fn main() -> Result<(), Error> {
     });
 
     // Playing files can be seeked or stopped:
-    player.seek_source(long_file_id, std::time::Duration::from_secs(5))?;
-    player.stop_source(small_file_id)?;
+    player.seek_source(long_file_id, std::time::Duration::from_secs(5), None)?;
+    player.stop_source(small_file_id, None)?;
 
     // If you only want one file to play at the same time, simply stop all playing
     // sounds before starting a new one:
@@ -160,7 +160,7 @@ Play a sample file sequence in time with e.g. musical beats.
 ```rust no_run
 use phonic::{
    Player, OutputDevice, DefaultOutputDevice, Error, FilePlaybackOptions,
-   utils::speed_from_note, PreloadedFileSource 
+   utils::speed_from_note, sources::PreloadedFileSource 
 };
 
 fn main() -> Result<(), Error> {
@@ -207,10 +207,7 @@ Create complex audio processing chains by routing sources through different mixe
 ```rust no_run
 use phonic::{
     Player, OutputDevice, DefaultOutputDevice, Error, FilePlaybackOptions,
-    effect::{
-        chorus::{ChorusEffect, ChorusEffectMessage},
-        reverb::{ReverbEffect, ReverbEffectMessage},
-    }
+    effects::{ ChorusEffect, ChorusEffectMessage, ReverbEffect, ReverbEffectMessage },
 };
 
 fn main() -> Result<(), Error> {
@@ -219,14 +216,14 @@ fn main() -> Result<(), Error> {
 
     // Add a reverb effect to the main mixer. All sounds played without a
     // specific target mixer will be routed through this effect.
-    let reverb_id = player.add_effect(ReverbEffect::new(), None)?;
-    player.send_effect_message(reverb_id, ReverbEffectMessage::SetWet(0.5))?;
+    let reverb_id = player.add_effect(ReverbEffect::default(), None)?;
+    player.send_effect_message(reverb_id, ReverbEffectMessage::SetWet(0.5), None)?;
 
     // Create a new sub-mixer that is a child of the main mixer.
     let chorus_mixer_id = player.add_mixer(None)?;
     // Add a chorus effect to this new mixer.
-    let chorus_id = player.add_effect(ChorusEffect::new(), Some(chorus_mixer_id))?;
-    player.send_effect_message(chorus_id, ChorusEffectMessage::SetWet(0.8))?;
+    let chorus_id = player.add_effect(ChorusEffect::default(), Some(chorus_mixer_id))?;
+    player.send_effect_message(chorus_id, ChorusEffectMessage::SetWet(0.8), None)?;
 
     // Play a file through the main mixer (which has reverb).
     player.play_file(

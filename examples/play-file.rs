@@ -1,3 +1,6 @@
+//! An example showcasing how to play audio files, both preloaded and streamed
+//! and how to monitor file playback status.
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -106,7 +109,7 @@ fn main() -> Result<(), Error> {
     let play_time = Instant::now();
     while is_running.load(Ordering::Relaxed) {
         if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(3) {
-            player.stop_source(loop_playback_id.unwrap())?;
+            player.stop_source(loop_playback_id.unwrap(), None)?;
             loop_playback_id = None;
         }
         std::thread::sleep(Duration::from_secs(1));
