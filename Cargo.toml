@@ -74,3 +74,9 @@ required-features = ["dasp-synth"]
 [[example]]
 name = "play-interactive"
 required-features = ["dasp-synth"]
+[[example]]
+name = "play-custom"
+[[example]]
+name = "play-glide"
+[[example]]
+name = "play-metronome"
