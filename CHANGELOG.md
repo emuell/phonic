@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.0 - 2025/09/08
+
+- add real-time, glided file playback speed changes 
+- add new SmoothedValue trait and impls to smoothly change parameter values such as volume
+- read and apply loop points from WAV and FLAC files by default 
+- fixed broken rubato resampler impl (applied with the high quality resampling playback option)
+
 ## v0.7.1 - 2025/07/16
 
 - fixed missing support for other cpal output formats than f32
@@ -7,7 +14,7 @@
 
 ## v0.7.0 - 2025/06/16
 
-- add file blayback from raw encoded file buffers
+- add file playback from raw encoded file buffers
 - add global `volume` factor setters to player
 - fixed volume `fade_in/out` duration calculation 
 
