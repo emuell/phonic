@@ -25,7 +25,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-// Common, shared file source implementation helper
+/// Common, shared file source implementation helper which can be use to create custom file sources.
 pub struct FileSourceImpl {
     pub file_id: PlaybackId,
     pub file_path: Arc<String>,

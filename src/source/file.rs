@@ -1,4 +1,4 @@
-mod common;
+pub mod common;
 pub mod preloaded;
 pub mod streamed;
 
@@ -9,10 +9,11 @@ use crossbeam_queue::ArrayQueue;
 
 use crate::{
     player::{MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{resampled::ResamplingQuality, Source},
     utils::db_to_linear,
-    Error, Player, PreloadedFileSource, StreamedFileSource,
+    Error, Player, ResamplingQuality, Source,
 };
+
+use self::{preloaded::PreloadedFileSource, streamed::StreamedFileSource};
 
 // -------------------------------------------------------------------------------------------------
 

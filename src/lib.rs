@@ -20,27 +20,30 @@ pub use player::{
     EffectId, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player,
 };
 
-#[cfg(feature = "dasp")]
-pub use source::synth::dasp::DaspSynthSource;
-
+pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
 pub use source::{
-    file::{
-        preloaded::PreloadedFileSource, streamed::StreamedFileSource, FilePlaybackOptions,
-        FileSource,
-    },
-    mixed::MixedSource,
+    file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
     resampled::ResamplingQuality,
-    synth::{SynthPlaybackOptions, SynthSource},
+    synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
 };
 
-pub use effect::Effect;
+pub mod sources {
+    //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
 
-// public mods
-pub mod utils;
+    // synths
+    pub use super::source::synth::common::{SynthSourceGenerator, SynthSourceImpl};
+    #[cfg(feature = "dasp")]
+    pub use super::source::synth::dasp::DaspSynthSource;
+
+    // files
+    pub use super::source::file::{
+        common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
+    };
+}
 
 pub mod effects {
-    //! Set of basic, common DSP effect implementations.
+    //! Set of basic, common DSP [`Effect`](super::Effect) implementations.
 
     pub use super::effect::{
         chorus::{ChorusEffect, ChorusEffectMessage},
@@ -50,3 +53,5 @@ pub mod effects {
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }
+
+pub mod utils;

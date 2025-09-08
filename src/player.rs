@@ -220,18 +220,18 @@ impl Player {
     }
 
     /// Play a self created or cloned file source.
-    pub fn play_file_source<F: FileSource>(
+    pub fn play_file_source<F: FileSource, T: Into<Option<u64>>>(
         &mut self,
         file_source: F,
-        start_time: Option<u64>,
+        start_time: T,
     ) -> Result<PlaybackId, Error> {
         self.play_file_source_with_context(file_source, start_time, None)
     }
     /// Play a self created or cloned file source with the given playback status context.
-    pub fn play_file_source_with_context<F: FileSource>(
+    pub fn play_file_source_with_context<F: FileSource, T: Into<Option<u64>>>(
         &mut self,
         file_source: F,
-        start_time: Option<u64>,
+        start_time: T,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
         let mixer_id = file_source
@@ -275,7 +275,7 @@ impl Player {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
-                sample_time: start_time.unwrap_or(0),
+                sample_time: start_time.into().unwrap_or(0),
             })
             .is_err()
         {
@@ -287,19 +287,19 @@ impl Player {
     }
 
     /// Play a self created synth source with the given playback options.
-    pub fn play_synth_source<S: SynthSource>(
+    pub fn play_synth_source<S: SynthSource, T: Into<Option<u64>>>(
         &mut self,
         synth_source: S,
-        start_time: Option<u64>,
+        start_time: T,
     ) -> Result<PlaybackId, Error> {
         self.play_synth_source_with_context(synth_source, start_time, None)
     }
     /// Play a self created synth source with the given playback options and
     /// playback status context.
-    pub fn play_synth_source_with_context<S: SynthSource>(
+    pub fn play_synth_source_with_context<S: SynthSource, T: Into<Option<u64>>>(
         &mut self,
         synth_source: S,
-        start_time: Option<u64>,
+        start_time: T,
         context: Option<PlaybackStatusContext>,
     ) -> Result<PlaybackId, Error> {
         let mixer_id = synth_source
@@ -342,7 +342,7 @@ impl Player {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
-                sample_time: start_time.unwrap_or(0),
+                sample_time: start_time.into().unwrap_or(0),
             })
             .is_err()
         {
@@ -427,29 +427,18 @@ impl Player {
         Ok(id)
     }
 
-    /// Send a message to an effect.
-    pub fn send_effect_message<M: EffectMessage + 'static>(
+    /// Send a message to an effect at a specific sample time or immediately.
+    pub fn send_effect_message<M: EffectMessage + 'static, T: Into<Option<u64>>>(
         &mut self,
         effect_id: EffectId,
         message: M,
-    ) -> Result<(), Error> {
-        let sample_time = 0;
-        self.send_effect_message_at_sample_time(effect_id, message, sample_time)
-    }
-
-    /// Send a message to an effect at a specific sample time.
-    pub fn send_effect_message_at_sample_time<M: EffectMessage + 'static>(
-        &mut self,
-        effect_id: EffectId,
-        message: M,
-        sample_time: u64,
+        sample_time: T,
     ) -> Result<(), Error> {
         let entry = self
             .mixer_effects
             .get(&effect_id)
             .ok_or(Error::EffectNotFoundError(effect_id))?;
         let (mixer_id, effect_name_opt) = entry.value();
-
         if let Some(effect_name) = effect_name_opt {
             if *effect_name != message.effect_name() {
                 return Err(Error::ParameterError(format!(
@@ -460,9 +449,9 @@ impl Player {
                 )));
             }
         }
-
         let message: Owned<Box<EffectMessagePayload>> =
             Owned::new(&self.collector_handle, Box::new(message));
+        let sample_time = sample_time.into().unwrap_or(0);
         let mixer_event_queue = self
             .mixer_event_queues
             .get(mixer_id)
@@ -484,55 +473,64 @@ impl Player {
         }
     }
 
-    /// Change playback position of the given played back source.
+    /// Change playback position of the given source at a specific sample time or immediately.
     /// This is only supported for files and thus won't do anything for synths.
-    pub fn seek_source(
+    pub fn seek_source<T: Into<Option<u64>>>(
         &mut self,
         playback_id: PlaybackId,
         position: Duration,
+        sample_time: T,
     ) -> Result<(), Error> {
-        if let Some(entry) = self.playing_sources.get(&playback_id) {
-            let (msg_sender, _) = entry.value();
-            if let PlaybackMessageSender::File(queue) = msg_sender {
-                if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
-                    log::warn!("failed to send seek command to file");
-                    return Err(Error::SendError);
+        match self.playing_sources.get(&playback_id) {
+            Some(entry) => {
+                let (msg_queue, mixer_id) = entry.value();
+                if let Some(sample_time) = sample_time.into() {
+                    // pass stop request to mixer (force push stop events!)
+                    let mixer_queue = self
+                        .mixer_event_queues
+                        .get(mixer_id)
+                        .ok_or(Error::MixerNotFoundError(*mixer_id))?
+                        .clone();
+                    if mixer_queue
+                        .push(MixerSourceMessage::SeekSource {
+                            playback_id,
+                            position,
+                            sample_time,
+                        })
+                        .is_err()
+                    {
+                        log::warn!("failed to send seek command to file");
+                        return Err(Error::SendError);
+                    }
+                } else if let PlaybackMessageSender::File(queue) = msg_queue {
+                    if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
+                        log::warn!("failed to send seek command to file");
+                        return Err(Error::SendError);
+                    }
+                } else {
+                    log::warn!("trying to seek a synth source, which is not supported");
+                    return Err(Error::MediaFileNotFound);
                 }
-            } else {
-                log::warn!("trying to seek a synth source, which is not supported");
             }
-            return Ok(());
-        } else {
-            log::warn!("trying to seek source #{playback_id} which is not or no longer playing");
+            None => return Err(Error::MediaFileNotFound),
         }
-        Err(Error::MediaFileNotFound)
+        Ok(())
     }
 
-    /// Set a playing file source's speed with the given optional glide rate in semitones per second.
+    /// Set a playing file source's speed at a given sample time in future or immediately,
+    /// with the given optional glide rate in semitones per second.
     /// This is only supported for files and thus won't do anything for synths.
-    pub fn set_source_speed(
+    pub fn set_source_speed<T: Into<Option<u64>>>(
         &mut self,
         playback_id: PlaybackId,
         speed: f64,
         glide: Option<f32>,
-    ) -> Result<(), Error> {
-        let sample_time = 0;
-        self.set_source_speed_at_sample_time(playback_id, speed, glide, sample_time)
-    }
-
-    /// Set a playing file source's speed at a given sample time in future with the given
-    /// optional glide rate in semitones per second.
-    /// This is only supported for files and thus won't do anything for synths.
-    pub fn set_source_speed_at_sample_time(
-        &mut self,
-        playback_id: PlaybackId,
-        speed: f64,
-        glide: Option<f32>,
-        sample_time: u64,
+        sample_time: T,
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
         if let Some(entry) = self.playing_sources.get(&playback_id) {
             let (_, mixer_id) = entry.value();
+            let sample_time = sample_time.into().unwrap_or(0);
             let mixer_queue = self
                 .mixer_event_queues
                 .get(mixer_id)
@@ -540,7 +538,7 @@ impl Player {
                 .clone();
             // pass event to mixer to schedule it
             if mixer_queue
-                .push(MixerSourceMessage::SetSpeed {
+                .push(MixerSourceMessage::SetSourceSpeed {
                     playback_id,
                     speed,
                     glide,
@@ -557,53 +555,43 @@ impl Player {
         }
     }
 
-    /// Immediately stop a playing file or synth source. NB: This will fade-out the source when a
-    /// stop_fade_out_duration option was set in the playback options it got started with.
-    pub fn stop_source(&mut self, playback_id: PlaybackId) -> Result<(), Error> {
-        let stopped = match self.playing_sources.get(&playback_id) {
-            Some(entry) => {
-                let (msg_queue, _) = entry.value();
-                if msg_queue.send_stop().is_err() {
-                    return Err(Error::SendError);
-                }
-                true
-            }
-            None => false,
-        };
-        if stopped {
-            // we shortly will receive an exhausted event which removes the source, but nevertheless
-            // remove it now, to force all following attempts to stop this source to fail
-            self.playing_sources.remove(&playback_id);
-            Ok(())
-        } else {
-            Err(Error::MediaFileNotFound)
-        }
-    }
-
-    /// Stop a playing file or synth source at a given sample time in future.
-    pub fn stop_source_at_sample_time(
+    /// Stop a playing file or synth source at a given sample time in future or immediately.
+    pub fn stop_source<T: Into<Option<u64>>>(
         &mut self,
         playback_id: PlaybackId,
-        stop_time: u64,
+        stop_time: T,
     ) -> Result<(), Error> {
         // check if the given playback id is still know (playing)
-        if let Some(entry) = self.playing_sources.get(&playback_id) {
-            let (_, mixer_id) = entry.value();
-            let mixer_queue = self
-                .mixer_event_queues
-                .get(mixer_id)
-                .ok_or(Error::MixerNotFoundError(*mixer_id))?
-                .clone();
-            // pass stop request to mixer (force push stop events!)
-            mixer_queue.force_push(MixerSourceMessage::StopSource {
-                playback_id,
-                sample_time: stop_time,
-            });
-            // NB: do not remove from playing_sources, as the event may apply in a long time in future.
-            Ok(())
-        } else {
-            Err(Error::MediaFileNotFound)
+        let remove_from_playing_sources;
+        match self.playing_sources.get(&playback_id) {
+            Some(entry) => {
+                let (msg_queue, mixer_id) = entry.value();
+                if let Some(sample_time) = stop_time.into() {
+                    // pass stop request to mixer (force push stop events!)
+                    let mixer_queue = self
+                        .mixer_event_queues
+                        .get(mixer_id)
+                        .ok_or(Error::MixerNotFoundError(*mixer_id))?
+                        .clone();
+                    mixer_queue.force_push(MixerSourceMessage::StopSource {
+                        playback_id,
+                        sample_time,
+                    });
+                    // Do not remove from playing_sources, as the event applies somewhen in future.
+                    remove_from_playing_sources = false;
+                } else {
+                    msg_queue.send_stop()?;
+                    // we shortly will receive an exhausted event which removes the source, but nevertheless
+                    // remove it now, to force all following attempts to stop this source to fail.
+                    remove_from_playing_sources = true;
+                }
+            }
+            None => return Err(Error::MediaFileNotFound),
         }
+        if remove_from_playing_sources {
+            self.playing_sources.remove(&playback_id);
+        }
+        Ok(())
     }
 
     /// Immediately stop all playing and possibly scheduled sources.
@@ -616,7 +604,7 @@ impl Player {
                 .collect::<Vec<_>>()
         };
         for source_id in playing_source_ids {
-            self.stop_source(source_id)?;
+            let _ = self.stop_source(source_id, None);
         }
         // remove all upcoming, scheduled sources in all mixers too (force push stop events!)
         for queue in self.mixer_event_queues.iter() {

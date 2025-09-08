@@ -1,3 +1,5 @@
+//! An example showcasing how to play a `dasp` signal as a synth source.
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,8 +11,8 @@ use std::{
 use dasp::{signal, Signal};
 
 use phonic::{
-    DaspSynthSource, DefaultOutputDevice, Error, OutputDevice, PlaybackStatusEvent, Player,
-    SynthPlaybackOptions,
+    sources::DaspSynthSource, DefaultOutputDevice, Error, OutputDevice, PlaybackStatusEvent,
+    Player, SynthPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------

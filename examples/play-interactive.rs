@@ -1,3 +1,5 @@
+//! An example showcasing interactive audio playback, with real-time control over effects and sources.
+
 use std::{
     collections::HashMap,
     sync::{Arc, Condvar, Mutex},
@@ -10,9 +12,10 @@ use lazy_static::lazy_static;
 
 use phonic::{
     effects,
+    sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
-    DaspSynthSource, DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, OutputDevice,
-    PlaybackId, Player, PreloadedFileSource, ResamplingQuality, SynthPlaybackOptions,
+    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, OutputDevice, PlaybackId, Player,
+    ResamplingQuality, SynthPlaybackOptions,
 };
 
 const FILTER_TYPES: [effects::FilterEffectType; 4] = [
@@ -49,16 +52,14 @@ fn main() -> Result<(), Error> {
         const DEFAULT_FILTER_Q: f32 = 0.707;
         const DEFAULT_FILTER_GAIN: f32 = 1.0;
 
-        loop_filter_effect_id =
-            player.add_effect(effects::FilterEffect::default(), Some(loop_mixer_id))?;
-        player.send_effect_message(
-            loop_filter_effect_id,
-            effects::FilterEffectMessage::Init(
+        loop_filter_effect_id = player.add_effect(
+            effects::FilterEffect::with_parameters(
                 DEFAULT_FILTER_TYPE,
                 DEFAULT_FILTER_CUTOFF,
                 DEFAULT_FILTER_Q,
                 DEFAULT_FILTER_GAIN,
             ),
+            loop_mixer_id,
         )?;
     }
 
@@ -70,19 +71,13 @@ fn main() -> Result<(), Error> {
 
         // // add a chorus effect
         // player.add_effect(
-        //    Box::new(effects::ChorusEffect::default()),
-        //    Some(tone_mixer_id),
+        //    Box::new(effects::ChorusEffect::default()), tone_mixer_id,
         // )?;
 
         // add a reverb effect
-        const DEFAULT_REVERB_SIZE: f32 = 0.6;
-        const DEFAULT_REVERB_WET: f32 = 0.8;
-
-        let tone_reverb_effect_id =
-            player.add_effect(effects::ReverbEffect::default(), Some(tone_mixer_id))?;
-        player.send_effect_message(
-            tone_reverb_effect_id,
-            effects::ReverbEffectMessage::Init(DEFAULT_REVERB_SIZE, DEFAULT_REVERB_WET),
+        player.add_effect(
+            effects::ReverbEffect::with_parameters(0.6, 0.8),
+            tone_mixer_id,
         )?;
     }
 
@@ -172,6 +167,7 @@ fn main() -> Result<(), Error> {
                             .send_effect_message(
                                 loop_filter_effect_id,
                                 effects::FilterEffectMessage::SetCutoff(*cutoff),
+                                None,
                             )
                             .unwrap_or_default();
                     }
@@ -183,6 +179,7 @@ fn main() -> Result<(), Error> {
                             .send_effect_message(
                                 loop_filter_effect_id,
                                 effects::FilterEffectMessage::SetCutoff(*cutoff),
+                                None,
                             )
                             .unwrap_or_default();
                     }
@@ -202,6 +199,7 @@ fn main() -> Result<(), Error> {
                             .send_effect_message(
                                 loop_filter_effect_id,
                                 effects::FilterEffectMessage::SetFilterType(filter_type),
+                                None,
                             )
                             .unwrap_or_default();
                         let cutoff = if filter_type == effects::FilterEffectType::Allpass {
@@ -213,6 +211,7 @@ fn main() -> Result<(), Error> {
                             .send_effect_message(
                                 loop_filter_effect_id,
                                 effects::FilterEffectMessage::SetCutoff(cutoff),
+                                None,
                             )
                             .unwrap_or_default();
                     }
@@ -254,18 +253,14 @@ fn main() -> Result<(), Error> {
                     let mut current = current_loop_seek_start.lock().unwrap();
                     *current = Duration::from_secs_f32(0_f32.max(current.as_secs_f32() - 0.5));
                     let mut player = player.lock().unwrap();
-                    player
-                        .seek_source(loop_playback_id, *current)
-                        .unwrap_or_default();
+                    let _ = player.seek_source(loop_playback_id, *current, None);
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32());
                 }
                 Keycode::Right => {
                     let mut current = current_loop_seek_start.lock().unwrap();
                     *current = Duration::from_secs_f32(4_f32.min(current.as_secs_f32() + 0.5));
                     let mut player = player.lock().unwrap();
-                    player
-                        .seek_source(loop_playback_id, *current)
-                        .unwrap_or_default();
+                    let _ = player.seek_source(loop_playback_id, *current, None);
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
                 }
                 keycode => {
@@ -383,7 +378,7 @@ fn handle_note_on(
 
 fn handle_note_off(player: &mut Player, playback_id: PlaybackId) {
     // stop playing source with the given playback_id
-    player.stop_source(playback_id).unwrap_or_default();
+    player.stop_source(playback_id, None).unwrap_or_default();
 }
 
 // -------------------------------------------------------------------------------------------------
