@@ -12,11 +12,7 @@
         "args": [
           "build",
           "--example=play-file",
-        ],
-        "filter": {
-          "name": "play-file",
-          "kind": "example"
-        }
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
@@ -30,11 +26,7 @@
           "build",
           "--example=play-synth",
           "--features=dasp-synth",
-        ],
-        "filter": {
-          "name": "play-synth",
-          "kind": "example"
-        }
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
@@ -47,11 +39,7 @@
         "args": [
           "build",
           "--example=play-glide",
-        ],
-        "filter": {
-          "name": "play-glide",
-          "kind": "example"
-        }
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
@@ -65,11 +53,20 @@
           "build",
           "--example=play-interactive",
           "--features=dasp-synth",
-        ],
-        "filter": {
-          "name": "play-interactive",
-          "kind": "example"
-        }
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'play-custom'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=play-custom",
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
@@ -82,11 +79,7 @@
         "args": [
           "build",
           "--example=play-metronome",
-        ],
-        "filter": {
-          "name": "play-metronome",
-          "kind": "example"
-        }
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
