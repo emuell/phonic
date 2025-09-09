@@ -158,9 +158,11 @@ fn main() -> Result<(), Error> {
 }
 ```
 
+## Contributing
+
+Patches are welcome! Please fork the latest git repository and create a feature or bugfix branch.
+
+
 ## License
 
-phonic is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
-
-* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0]())
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT]())
+**phonic** is distributed under the terms of the [GNU Affero General Public License V3](https://www.gnu.org/licenses/agpl-3.0.html).
