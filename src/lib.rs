@@ -3,7 +3,6 @@
 // private mods (will be partly re-exported)
 mod effect;
 mod error;
-#[cfg(any(feature = "cpal", feature = "sokol", doc))]
 mod output;
 mod player;
 mod source;
@@ -11,10 +10,15 @@ mod source;
 // public, flat re-exports
 pub use error::Error;
 
-#[cfg(any(feature = "cpal", doc))]
+#[cfg(any(feature = "cpal-output", feature = "sokol-output", doc))]
+pub use output::DefaultOutputDevice;
+pub use output::{OutputDevice, OutputSink};
+
+#[cfg(feature = "wav-output")]
+pub use output::wav::{WavOutputDevice, WavSink};
+
+#[cfg(any(feature = "cpal-output", doc))]
 pub use output::AudioHostId;
-#[cfg(any(feature = "cpal", feature = "sokol", doc))]
-pub use output::{DefaultOutputDevice, DefaultOutputSink, OutputDevice, OutputSink};
 
 pub use player::{
     EffectId, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player,

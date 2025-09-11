@@ -1,22 +1,23 @@
 // Check feature, target dependencies
-#[cfg(all(target_arch = "wasm32", feature = "cpal"))]
+#[cfg(all(target_arch = "wasm32", feature = "cpal-output"))]
 compile_error!("wasm builds are not compatible with cpal. use sokol-output instead");
 
 // Note: when cpal and sokol features are enabled, we use cpal only
-#[cfg(feature = "cpal")]
+#[cfg(feature = "cpal-output")]
 pub mod cpal;
-#[cfg(all(feature = "sokol", not(feature = "cpal")))]
+#[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
 pub mod sokol;
+#[cfg(feature = "wav-output")]
+pub mod wav;
 
 /// The enabled audio output type: cpal or sokol
-#[cfg(feature = "cpal")]
+#[cfg(feature = "cpal-output")]
 pub type DefaultOutputDevice = cpal::CpalOutput;
-
-#[cfg(all(feature = "sokol", not(feature = "cpal")))]
+#[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
 pub type DefaultOutputDevice = sokol::SokolOutput;
 
 /// Available audio hosts for cpal output (platform specific)
-#[cfg(feature = "cpal")]
+#[cfg(feature = "cpal-output")]
 pub enum AudioHostId {
     Default, // system default
     #[cfg(target_os = "windows")]
@@ -28,9 +29,6 @@ pub enum AudioHostId {
     #[cfg(target_os = "linux")]
     Jack,
 }
-
-/// The enabled audio output sink type: cpal or sokol
-pub type DefaultOutputSink = <DefaultOutputDevice as OutputDevice>::Sink;
 
 use super::source::Source;
 
