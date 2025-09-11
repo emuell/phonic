@@ -1,20 +1,31 @@
 //! An example showcasing how to create and use custom effects and synth sources.
 
-use std::{any::Any, f32::consts::PI, time::Duration};
+use std::{any::Any, f32::consts::PI, path::PathBuf, time::Duration};
 
 use phonic::{
     effects::{CompressorEffect, ReverbEffect},
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
     utils::{pitch_from_note, speed_from_note, InterleavedBufferMut},
     DefaultOutputDevice, Effect, EffectMessage, EffectMessagePayload, EffectTime, Error,
-    FilePlaybackOptions, OutputDevice, Player, SynthPlaybackOptions,
+    FilePlaybackOptions, OutputDevice, Player, SynthPlaybackOptions, WavOutputDevice,
 };
+
+use arg::{parse_args, Args};
 
 // -------------------------------------------------------------------------------------------------
 
 #[cfg(all(debug_assertions, feature = "assert_no_alloc"))]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Args, Debug)]
+struct Arguments {
+    #[arg(short = "o", long = "output")]
+    /// Write audio output into the given wav file, instead of using the default audio device.
+    output_path: Option<PathBuf>,
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -176,9 +187,19 @@ type SinSynthSource = SynthSourceImpl<SineSynth>;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
+    // Parse argument
+    let args = parse_args::<Arguments>();
+
     // Setup audio output and player
-    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
+    let mut player = if let Some(output_path) = args.output_path {
+        Player::new(WavOutputDevice::open(output_path)?.sink(), None)
+    } else {
+        Player::new(DefaultOutputDevice::open()?.sink(), None)
+    };
     let sample_rate = player.output_sample_rate();
+
+    // Stop the player until it's fully set up
+    player.stop();
 
     // Create a sub-mixer for the synth, child of the main mixer.
     let bass_mixer_id = player.add_mixer(None)?;
@@ -205,7 +226,7 @@ fn main() -> Result<(), Error> {
     let note_duration_samples = (samples_per_beat as f64 * NOTE_DURATION_IN_BEATS) as usize;
 
     // Preload sample files
-    let drloop = PreloadedFileSource::from_file(
+    let drumloop = PreloadedFileSource::from_file(
         "assets/YuaiLoop.wav",
         None,
         FilePlaybackOptions::default(),
@@ -219,13 +240,13 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Schedule bassline and pad notes for all bars
-    let output_start_time = player.output_sample_frame_position() + sample_rate as u64; // Start 1s in the future
+    let output_start_time = player.output_sample_frame_position();
     #[allow(clippy::needless_range_loop)]
     for bar in 0..BARS_TO_PLAY {
         // Drum loop (on the main mixer)
         if bar == 0 {
             player.play_file_source(
-                drloop.clone(
+                drumloop.clone(
                     FilePlaybackOptions::default()
                         .repeat(BARS_TO_PLAY / 2)
                         .volume_db(0.0),
@@ -271,6 +292,9 @@ fn main() -> Result<(), Error> {
         }
     }
 
+    // start playback
+    player.start();
+
     // Print DSP graph
     println!("Playing a {BARS_TO_PLAY} bar bass line loop over a drum loop and pad sequence...");
     println!("DSP Graph:");
@@ -279,10 +303,11 @@ fn main() -> Result<(), Error> {
     println!("  - SineSynth -> Synth Mixer (TanhDistortion -> Reverb) -> Main Mixer");
 
     // Wait for playback to finish
-    const TAIL_BEATS: u64 = 2;
-    let total_beats = (BASS_LINE.len() * BARS_TO_PLAY) as u64 + TAIL_BEATS;
+    let total_beats = (BASS_LINE.len() * BARS_TO_PLAY) as u64 + 1; // one extra beat as tail;
     let duration_samples = total_beats * samples_per_beat;
-    while player.output_sample_frame_position() < output_start_time + duration_samples {
+    while player.is_running()
+        && player.output_sample_frame_position() < output_start_time + duration_samples
+    {
         std::thread::sleep(Duration::from_millis(500));
     }
 
