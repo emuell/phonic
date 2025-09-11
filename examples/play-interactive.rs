@@ -2,12 +2,15 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex,
+    },
     time::Duration,
 };
 
 use dasp::{signal, Signal};
-use device_query::{DeviceEvents, DeviceEventsHandler, DeviceQuery, DeviceState, Keycode};
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use lazy_static::lazy_static;
 
 use phonic::{
@@ -103,12 +106,15 @@ fn main() -> Result<(), Error> {
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
 
     // create global playback state
+    let playing_synth_ids = Arc::new(Mutex::new(HashMap::<Keycode, usize>::new()));
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
-    let playing_synth_ids = Arc::new(Mutex::new(HashMap::<Keycode, usize>::new()));
     let current_filter_cutoff = Arc::new(Mutex::new(8000.0));
     let current_filter_type_idx = Arc::new(Mutex::new(0));
+
+    // global key state
+    let alt_key_pressed = Arc::new(AtomicBool::new(false));
 
     // print header
     println!("*** phonic interactive playback example:");
@@ -130,7 +136,6 @@ fn main() -> Result<(), Error> {
     // run key event handlers to play, stop and modify sounds interactively
     let event_handler = DeviceEventsHandler::new(Duration::from_millis(10))
         .expect("Could not initialize event loop");
-    let device_state = DeviceState::new();
 
     ctrlc::set_handler({
         let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
@@ -152,78 +157,50 @@ fn main() -> Result<(), Error> {
         let current_filter_cutoff = Arc::clone(&current_filter_cutoff);
         let current_filter_type_idx = Arc::clone(&current_filter_type_idx);
 
+        let alt_key_pressed = Arc::clone(&alt_key_pressed);
+
         move |key: &Keycode| {
-            let keys = device_state.get_keys();
-            let alt_pressed = keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::RAlt);
-
-            if alt_pressed {
-                let mut player = player.lock().unwrap();
-                match key {
-                    Keycode::Right => {
-                        let mut cutoff = current_filter_cutoff.lock().unwrap();
-                        *cutoff = (*cutoff * 1.1_f32).min(player.output_sample_rate() as f32 / 2.0);
-                        println!("Filter cutoff: {:.0} Hz", *cutoff);
-                        player
-                            .send_effect_message(
-                                loop_filter_effect_id,
-                                effects::FilterEffectMessage::SetCutoff(*cutoff),
-                                None,
-                            )
-                            .unwrap_or_default();
-                    }
-                    Keycode::Left => {
-                        let mut cutoff = current_filter_cutoff.lock().unwrap();
-                        *cutoff = (*cutoff / 1.1_f32).max(20.0);
-                        println!("Filter cutoff: {:.0} Hz", *cutoff);
-                        player
-                            .send_effect_message(
-                                loop_filter_effect_id,
-                                effects::FilterEffectMessage::SetCutoff(*cutoff),
-                                None,
-                            )
-                            .unwrap_or_default();
-                    }
-                    Keycode::Key0 | Keycode::Key1 | Keycode::Key2 | Keycode::Key3 => {
-                        let new_type_idx = match key {
-                            Keycode::Key0 => 0,
-                            Keycode::Key1 => 1,
-                            Keycode::Key2 => 2,
-                            Keycode::Key3 => 3,
-                            _ => unreachable!(),
-                        };
-                        let mut type_idx = current_filter_type_idx.lock().unwrap();
-                        *type_idx = new_type_idx;
-                        let filter_type = FILTER_TYPES[*type_idx];
-                        println!("Filter type: {filter_type:?}");
-                        player
-                            .send_effect_message(
-                                loop_filter_effect_id,
-                                effects::FilterEffectMessage::SetFilterType(filter_type),
-                                None,
-                            )
-                            .unwrap_or_default();
-                        let cutoff = if filter_type == effects::FilterEffectType::Allpass {
-                            player.output_sample_rate() as f32 / 2.0
-                        } else {
-                            *current_filter_cutoff.lock().unwrap()
-                        };
-                        player
-                            .send_effect_message(
-                                loop_filter_effect_id,
-                                effects::FilterEffectMessage::SetCutoff(cutoff),
-                                None,
-                            )
-                            .unwrap_or_default();
-                    }
-                    _ => {}
-                }
-                return;
-            }
-
+            let alt_key = alt_key_pressed.load(Ordering::Relaxed);
             match key {
+                Keycode::RAlt | Keycode::LAlt => {
+                    alt_key_pressed.store(true, Ordering::Relaxed);
+                }
                 Keycode::Escape => {
                     println!("Shutting down...");
                     wait_mutex_cond.1.notify_all();
+                }
+                Keycode::Key0 | Keycode::Key1 | Keycode::Key2 | Keycode::Key3 if alt_key => {
+                    let new_type_idx = match key {
+                        Keycode::Key0 => 0,
+                        Keycode::Key1 => 1,
+                        Keycode::Key2 => 2,
+                        Keycode::Key3 => 3,
+                        _ => unreachable!(),
+                    };
+                    let mut type_idx = current_filter_type_idx.lock().unwrap();
+                    *type_idx = new_type_idx;
+                    let filter_type = FILTER_TYPES[*type_idx];
+                    println!("Filter type: {filter_type:?}");
+                    let mut player = player.lock().unwrap();
+                    player
+                        .send_effect_message(
+                            loop_filter_effect_id,
+                            effects::FilterEffectMessage::SetFilterType(filter_type),
+                            None,
+                        )
+                        .unwrap_or_default();
+                    let cutoff = if filter_type == effects::FilterEffectType::Allpass {
+                        player.output_sample_rate() as f32 / 2.0
+                    } else {
+                        *current_filter_cutoff.lock().unwrap()
+                    };
+                    player
+                        .send_effect_message(
+                            loop_filter_effect_id,
+                            effects::FilterEffectMessage::SetCutoff(cutoff),
+                            None,
+                        )
+                        .unwrap_or_default();
                 }
                 Keycode::Key1 => {
                     let mut playmode = current_playmode.lock().unwrap();
@@ -249,6 +226,32 @@ fn main() -> Result<(), Error> {
                         println!("Changed octave to '{}'", *current);
                     }
                 }
+                Keycode::Right if alt_key => {
+                    let mut player = player.lock().unwrap();
+                    let mut cutoff = current_filter_cutoff.lock().unwrap();
+                    *cutoff = (*cutoff * 1.1_f32).min(player.output_sample_rate() as f32 / 2.0);
+                    println!("Filter cutoff: {:.0} Hz", *cutoff);
+                    player
+                        .send_effect_message(
+                            loop_filter_effect_id,
+                            effects::FilterEffectMessage::SetCutoff(*cutoff),
+                            None,
+                        )
+                        .unwrap_or_default();
+                }
+                Keycode::Left if alt_key => {
+                    let mut cutoff = current_filter_cutoff.lock().unwrap();
+                    *cutoff = (*cutoff / 1.1_f32).max(20.0);
+                    println!("Filter cutoff: {:.0} Hz", *cutoff);
+                    let mut player = player.lock().unwrap();
+                    player
+                        .send_effect_message(
+                            loop_filter_effect_id,
+                            effects::FilterEffectMessage::SetCutoff(*cutoff),
+                            None,
+                        )
+                        .unwrap_or_default();
+                }
                 Keycode::Left => {
                     let mut current = current_loop_seek_start.lock().unwrap();
                     *current = Duration::from_secs_f32(0_f32.max(current.as_secs_f32() - 0.5));
@@ -263,8 +266,8 @@ fn main() -> Result<(), Error> {
                     let _ = player.seek_source(loop_playback_id, *current, None);
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
                 }
-                keycode => {
-                    if let Some(relative_note) = key_to_note(keycode) {
+                _ => {
+                    if let Some(relative_note) = key_to_note(key) {
                         let playmode = *current_playmode.lock().unwrap();
                         let octave = *current_octave.lock().unwrap();
                         let final_note = (relative_note + 12 * octave) as u8;
@@ -274,7 +277,7 @@ fn main() -> Result<(), Error> {
 
                         let playback_id =
                             handle_note_on(&mut player, final_note, playmode, tone_mixer_id);
-                        playing_synth_ids.insert(*keycode, playback_id);
+                        playing_synth_ids.insert(*key, playback_id);
                     }
                 }
             }
@@ -286,15 +289,22 @@ fn main() -> Result<(), Error> {
         let player = Arc::clone(&player);
         let playing_synth_ids = Arc::clone(&playing_synth_ids);
 
-        move |key: &Keycode| {
-            if key_to_note(key).is_some() {
-                let mut player = player.lock().unwrap();
-                let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
-                if let Some(playback_id) = playing_synth_ids.get(key) {
-                    handle_note_off(&mut player, *playback_id);
-                    playing_synth_ids.remove(key);
+        let alt_key_pressed = Arc::clone(&alt_key_pressed);
+
+        move |key: &Keycode| match key {
+            Keycode::LAlt | Keycode::RAlt => {
+                alt_key_pressed.store(false, Ordering::Relaxed);
+            }
+            _ => {
+                if key_to_note(key).is_some() {
+                    let mut player = player.lock().unwrap();
+                    let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
+                    if let Some(playback_id) = playing_synth_ids.get(key) {
+                        handle_note_off(&mut player, *playback_id);
+                        playing_synth_ids.remove(key);
+                    }
                 }
-            };
+            }
         }
     });
 
