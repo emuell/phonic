@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload},
     error::Error,
-    output::{DefaultOutputSink, OutputSink},
+    output::OutputSink,
     source::{
         amplified::AmplifiedSource,
         converted::ConvertedSource,
@@ -116,7 +116,7 @@ impl PlaybackMessageSender {
 ///
 /// NB: For playback of [`SynthSource`]s, the `dasp-synth` feature needs to be enabled.
 pub struct Player {
-    sink: DefaultOutputSink,
+    sink: Box<dyn OutputSink>,
     playing_sources: Arc<DashMap<PlaybackId, (PlaybackMessageSender, MixerId)>>,
     playback_status_sender: Sender<PlaybackStatusEvent>,
     collector_handle: Handle,
@@ -129,13 +129,16 @@ impl Player {
     /// The ID of the main mixer, which is always present.
     const MAIN_MIXER_ID: MixerId = 0;
 
-    /// Create a new Player for the given DefaultOutputSink.
+    /// Create a new Player for the given OutputSink.
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
     pub fn new(
-        mut sink: DefaultOutputSink,
+        sink: impl OutputSink + 'static,
         playback_status_sender: Option<Sender<PlaybackStatusEvent>>,
     ) -> Self {
+        // Memorize the sink
+        let mut sink = Box::new(sink);
+
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(DashMap::with_capacity(1024));
         let playback_status_sender =
@@ -155,9 +158,8 @@ impl Player {
 
         let mixer_effects = Arc::new(DashMap::new());
 
-        // start running
-        sink.play(mixer_source);
-        sink.resume();
+        // assign our main mixer source to the sink
+        sink.play(Box::new(mixer_source));
 
         Self {
             sink,
@@ -172,7 +174,7 @@ impl Player {
 
     /// Our audio device's suspended state.
     pub fn output_suspended(&self) -> bool {
-        self.sink.suspended()
+        self.sink.is_suspended()
     }
 
     /// Our audio device's actual sample rate.
@@ -206,6 +208,11 @@ impl Player {
     /// Should be used by custom audio sources only.
     pub fn playback_status_sender(&self) -> Sender<PlaybackStatusEvent> {
         self.playback_status_sender.clone()
+    }
+
+    /// Start audio playback.
+    pub fn is_running(&self) -> bool {
+        self.sink.is_running()
     }
 
     /// Start audio playback.
