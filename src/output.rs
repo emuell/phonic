@@ -37,11 +37,7 @@ use super::source::Source;
 // -------------------------------------------------------------------------------------------------
 
 /// OutputDevice controller
-pub trait OutputSink {
-    /// true when audio output is currently suspended by the system: only used in Sokol's
-    /// WebAudio backend, all other backends return false
-    fn suspended(&self) -> bool;
-
+pub trait OutputSink: Send {
     /// Actual device's output sample buffer channel count.
     fn channel_count(&self) -> usize;
     /// Actual device's output sample rate.
@@ -54,15 +50,21 @@ pub trait OutputSink {
     /// Set a new output volume.
     fn set_volume(&mut self, volume: f32);
 
-    /// Play given source as main output source.
-    fn play(&mut self, source: impl Source);
-    /// Drop actual source, replacing it with silence
-    fn stop(&mut self);
+    /// true when audio output is currently suspended by the system.
+    /// Only used in Sokol's WebAudio backend, other backends do never suspend.
+    fn is_suspended(&self) -> bool;
+
+    /// Returns true while not paused.
+    fn is_running(&self) -> bool;
     /// Pause playback without dropping the output source.
     fn pause(&mut self);
     /// Resume from paused playback.
     fn resume(&mut self);
 
+    /// Play given source as main output source.
+    fn play(&mut self, source: Box<dyn Source>);
+    /// Drop actual source, replacing it with silence
+    fn stop(&mut self);
     /// Release audio device
     fn close(&mut self);
 }

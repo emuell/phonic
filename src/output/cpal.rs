@@ -106,6 +106,7 @@ impl CpalOutput {
             channel_count: supported.channels(),
             sample_rate: supported.sample_rate(),
             volume: 1.0,
+            is_running: false,
             playback_pos,
             stream_send: handle.sender(),
             callback_send,
@@ -149,6 +150,7 @@ pub struct CpalSink {
     channel_count: cpal::ChannelCount,
     sample_rate: cpal::SampleRate,
     volume: f32,
+    is_running: bool,
     playback_pos: Arc<AtomicU64>,
     callback_send: Sender<CallbackMsg>,
     stream_send: Sender<StreamMsg>,
@@ -169,10 +171,6 @@ impl CpalSink {
 }
 
 impl OutputSink for CpalSink {
-    fn suspended(&self) -> bool {
-        false
-    }
-
     fn channel_count(&self) -> usize {
         self.channel_count as usize
     }
@@ -193,15 +191,15 @@ impl OutputSink for CpalSink {
         self.send_to_callback(CallbackMsg::SetVolume(volume));
     }
 
-    fn play(&mut self, source: impl Source) {
-        // ensure source has our sample rate and channel layout
-        assert_eq!(source.channel_count(), self.channel_count());
-        assert_eq!(source.sample_rate(), self.sample_rate());
-        // send message to activate it in the writer
-        self.send_to_callback(CallbackMsg::PlaySource(Box::new(source)));
+    fn is_suspended(&self) -> bool {
+        false
     }
 
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
     fn pause(&mut self) {
+        self.is_running = false;
         self.send_to_stream(StreamMsg::Pause);
         self.send_to_callback(CallbackMsg::Pause);
     }
@@ -209,6 +207,19 @@ impl OutputSink for CpalSink {
     fn resume(&mut self) {
         self.send_to_stream(StreamMsg::Resume);
         self.send_to_callback(CallbackMsg::Resume);
+        self.is_running = true;
+    }
+
+    fn play(&mut self, source: Box<dyn Source>) {
+        // ensure source has our sample rate and channel layout
+        assert_eq!(source.channel_count(), self.channel_count());
+        assert_eq!(source.sample_rate(), self.sample_rate());
+        // send message to activate it in the writer
+        self.send_to_callback(CallbackMsg::PlaySource(source));
+        // auto-start with the first set source
+        if !self.is_running {
+            self.resume();
+        }
     }
 
     fn stop(&mut self) {
@@ -309,6 +320,7 @@ impl Stream {
             }
             sample_format => panic!("Unsupported/unexpected sample format '{sample_format}'"),
         }?;
+
         Ok(Self { device, stream })
     }
 
@@ -482,7 +494,7 @@ impl StreamCallback {
         #[cfg(feature = "assert_no_alloc")]
         let written = assert_no_alloc(|| self.source.write(output, &time));
         // Apply the global volume level
-        apply_smoothed_gain(&mut output[..written], &mut self.volume, );
+        apply_smoothed_gain(&mut output[..written], &mut self.volume);
         // Advance playback pos
         self.playback_pos
             .fetch_add(output.len() as u64, Ordering::Relaxed);

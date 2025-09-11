@@ -54,7 +54,7 @@ struct SokolContext {
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
-    volume: ExponentialSmoothedValue,
+    smoothed_volume: ExponentialSmoothedValue,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -81,12 +81,15 @@ impl Drop for SokolContextRef {
     }
 }
 
+unsafe impl Send for SokolContextRef {}
+
 // -------------------------------------------------------------------------------------------------
 
 // OutputSink for Sokol audio output
 #[derive(Debug, Clone)]
 pub struct SokolSink {
     volume: f32,
+    is_running: bool,
     playback_pos: Arc<AtomicU64>,
     callback_send: Sender<CallbackMessage>,
     #[allow(dead_code)]
@@ -94,10 +97,6 @@ pub struct SokolSink {
 }
 
 impl OutputSink for SokolSink {
-    fn suspended(&self) -> bool {
-        saudio::suspended()
-    }
-
     fn channel_count(&self) -> usize {
         assert!(
             saudio::isvalid(),
@@ -128,25 +127,40 @@ impl OutputSink for SokolSink {
             .unwrap();
     }
 
-    fn play(&mut self, source: impl Source) {
-        // ensure source has our sample rate and channel layout
-        assert_eq!(source.channel_count(), self.channel_count());
-        assert_eq!(source.sample_rate(), self.sample_rate());
-        // send message to activate it in the writer
-        self.callback_send
-            .send(CallbackMessage::PlaySource(Box::new(source)))
-            .unwrap()
+    fn is_suspended(&self) -> bool {
+        saudio::suspended()
+    }
+
+    fn is_running(&self) -> bool {
+        self.is_running
     }
 
     fn pause(&mut self) {
+        self.is_running = false;
         self.callback_send.send(CallbackMessage::Pause).unwrap();
     }
 
     fn resume(&mut self) {
         self.callback_send.send(CallbackMessage::Resume).unwrap();
+        self.is_running = true;
+    }
+
+    fn play(&mut self, source: Box<dyn Source>) {
+        // ensure source has our sample rate and channel layout
+        assert_eq!(source.channel_count(), self.channel_count());
+        assert_eq!(source.sample_rate(), self.sample_rate());
+        // send message to activate it in the writer
+        self.callback_send
+            .send(CallbackMessage::PlaySource(source))
+            .unwrap();
+        // auto-start with the first set source
+        if !self.is_running {
+            self.resume();
+        }
     }
 
     fn stop(&mut self) {
+        self.is_running = false;
         self.callback_send
             .send(CallbackMessage::PlaySource(Box::new(EmptySource)))
             .unwrap();
@@ -171,26 +185,27 @@ impl SokolOutput {
     pub fn open() -> Result<Self, Error> {
         let (callback_send, callback_recv) = bounded(16);
 
+        let volume = 1.0;
+        let is_running = false;
         let playback_pos = Arc::new(AtomicU64::new(0));
 
-        let mut volume = ExponentialSmoothedValue::new(PREFERRED_SAMPLE_RATE as u32);
-        volume.init(1.0);
+        let mut smoothed_volume = ExponentialSmoothedValue::new(PREFERRED_SAMPLE_RATE as u32);
+        smoothed_volume.init(volume);
 
-        let context = Box::new(SokolContext {
+        let context_ref = Rc::new(SokolContextRef::new(Box::new(SokolContext {
             callback_recv,
             source: Box::new(EmptySource),
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
-            volume,
-        });
-
-        let context_ref = Rc::new(SokolContextRef::new(context));
+            smoothed_volume,
+        })));
 
         Self::audio_init(context_ref.context);
 
         let sink = SokolSink {
-            volume: 1.0,
+            volume,
+            is_running,
             playback_pos,
             callback_send,
             context_ref,
@@ -241,7 +256,7 @@ impl SokolOutput {
                     state.state = CallbackState::Playing;
                 }
                 CallbackMessage::SetVolume(volume) => {
-                    state.volume.set_target(volume);
+                    state.smoothed_volume.set_target(volume);
                 }
             }
         }
@@ -270,7 +285,7 @@ impl SokolOutput {
         };
 
         // Apply volume if needed
-        apply_smoothed_gain(&mut output[..samples_written], &mut state.volume);
+        apply_smoothed_gain(&mut output[..samples_written], &mut state.smoothed_volume);
 
         // Mute remaining samples, if any.
         clear_buffer(&mut output[samples_written..]);
