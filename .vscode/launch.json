@@ -65,10 +65,12 @@
       "cargo": {
         "args": [
           "build",
-          "--example=play-custom",
+          "--example=play-custom"
         ]
       },
-      "args": [],
+      "args": [
+        // "--output", "output.wav"
+      ],
       "cwd": "${workspaceFolder}",
     },
     {
