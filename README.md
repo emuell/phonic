@@ -1,6 +1,10 @@
-﻿**phonic** is a cross-platform audio playback and DSP library for Rust, providing a flexible, low-latency audio engine and related tools for games and music applications.
+**phonic** is a cross-platform audio playback and DSP library for Rust, providing a flexible, low-latency audio engine and related tools for games and music applications.
 
 Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic initially addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is now also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns).
+
+> [!NOTE] 
+> phonic has not yet reached a stable version, so expect breaking changes. The effects API in particular is a work in progress and will likely change in the future.
+
 
 ### Features
 
@@ -22,8 +26,14 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 
 - **Custom Synthesis and DSPs**:
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
-  - Play custom-built synthesizers or use the optional `dasp` integration for signal generation.
+  - Play completely custom-built synthesizers or use the optional (dasp)[https://github.com/RustAudio/dasp] integration for creating synth sources.
   - Apply custom-built DSP effects or use built-in effects (reverb, chorus, filter, compressor).
+
+
+### Documentation
+
+Rust docs for the last published versions are available at <https://docs.rs/phonic>
+
 
 ### Examples
 
