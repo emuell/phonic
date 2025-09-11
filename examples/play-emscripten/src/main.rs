@@ -6,7 +6,7 @@ use phonic::{
     effects::ReverbEffect,
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{db_to_linear, pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, OutputDevice, PlaybackId, Player,
+    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, PlaybackId, Player,
     SynthPlaybackOptions,
 };
 
@@ -40,7 +40,7 @@ impl EmscriptenPlayer {
     // Create a new player and preload samples
     pub fn new() -> Result<Self, Error> {
         println!("Initialize audio output...");
-        let output = DefaultOutputDevice::open()?.sink();
+        let output = DefaultOutputDevice::open()?;
 
         println!("Creating audio file player...");
         let mut player = Player::new(output, None);

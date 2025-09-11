@@ -10,9 +10,7 @@ use std::{
 
 use dasp::{signal, Frame, Signal};
 
-use phonic::{
-    DefaultOutputDevice, Error, OutputDevice, PlaybackStatusEvent, Player, SynthPlaybackOptions,
-};
+use phonic::{DefaultOutputDevice, Error, PlaybackStatusEvent, Player, SynthPlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -23,14 +21,11 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
-    // Open default device
-    let audio_output = DefaultOutputDevice::open()?;
-
     // Create channel for playback status events
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
 
-    // Create a source player
-    let mut player = Player::new(audio_output.sink(), Some(status_sender));
+    // Open default audio device and create a new player
+    let mut player = Player::new(DefaultOutputDevice::open()?, Some(status_sender));
     let sample_rate = player.output_sample_rate();
 
     // Creates a signal of a detuned sines using dasp.

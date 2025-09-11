@@ -9,7 +9,7 @@
 				"$rustc"
 			],
 			"group": "build",
-			"label": "rust: cargo build"
+			"label": "rust: build examples"
 		}
 	]
 }

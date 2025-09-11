@@ -17,7 +17,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
     error::Error,
-    output::{AudioHostId, OutputDevice, OutputSink},
+    output::{AudioHostId, OutputDevice},
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         actor::{Act, Actor, ActorHandle},
@@ -39,9 +39,16 @@ const PREFERRED_BUFFER_SIZE: cpal::BufferSize = if cfg!(debug_assertions) {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Audio output device impl using [cpal](https://github.com/RustAudio/cpal).
 pub struct CpalOutput {
+    channel_count: cpal::ChannelCount,
+    sample_rate: cpal::SampleRate,
+    volume: f32,
+    is_running: bool,
+    playback_pos: Arc<AtomicU64>,
+    callback_send: Sender<CallbackMsg>,
+    stream_send: Sender<StreamMsg>,
     _handle: ActorHandle<StreamMsg>,
-    sink: CpalSink,
 }
 
 impl CpalOutput {
@@ -102,7 +109,7 @@ impl CpalOutput {
                 .expect("Failed to open audio stream")
             }
         });
-        let sink = CpalSink {
+        Ok(Self {
             channel_count: supported.channels(),
             sample_rate: supported.sample_rate(),
             volume: 1.0,
@@ -110,11 +117,7 @@ impl CpalOutput {
             playback_pos,
             stream_send: handle.sender(),
             callback_send,
-        };
-
-        Ok(Self {
             _handle: handle,
-            sink,
         })
     }
 
@@ -133,30 +136,7 @@ impl CpalOutput {
 
         Ok(device.default_output_config()?)
     }
-}
 
-impl OutputDevice for CpalOutput {
-    type Sink = CpalSink;
-
-    fn sink(&self) -> Self::Sink {
-        self.sink.clone()
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Clone)]
-pub struct CpalSink {
-    channel_count: cpal::ChannelCount,
-    sample_rate: cpal::SampleRate,
-    volume: f32,
-    is_running: bool,
-    playback_pos: Arc<AtomicU64>,
-    callback_send: Sender<CallbackMsg>,
-    stream_send: Sender<StreamMsg>,
-}
-
-impl CpalSink {
     fn send_to_callback(&self, msg: CallbackMsg) {
         if self.callback_send.send(msg).is_err() {
             log::error!("output stream actor is dead");
@@ -170,7 +150,7 @@ impl CpalSink {
     }
 }
 
-impl OutputSink for CpalSink {
+impl OutputDevice for CpalOutput {
     fn channel_count(&self) -> usize {
         self.channel_count as usize
     }
@@ -229,6 +209,32 @@ impl OutputSink for CpalSink {
     fn close(&mut self) {
         self.send_to_stream(StreamMsg::Close);
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+#[derive(PartialEq)]
+enum StreamMsg {
+    Pause,
+    Resume,
+    Close,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+enum CallbackMsg {
+    PlaySource(Box<dyn Source>),
+    SetVolume(f32),
+    Pause,
+    Resume,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+#[derive(PartialEq)]
+enum CallbackState {
+    Playing,
+    Paused,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -376,26 +382,6 @@ impl Actor for Stream {
 }
 
 // -------------------------------------------------------------------------------------------------
-
-#[derive(PartialEq)]
-enum StreamMsg {
-    Pause,
-    Resume,
-    Close,
-}
-
-enum CallbackMsg {
-    PlaySource(Box<dyn Source>),
-    SetVolume(f32),
-    Pause,
-    Resume,
-}
-
-#[derive(PartialEq)]
-enum CallbackState {
-    Playing,
-    Paused,
-}
 
 struct StreamCallback {
     #[allow(dead_code)]

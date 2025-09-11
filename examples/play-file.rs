@@ -10,8 +10,8 @@ use std::{
 };
 
 use phonic::{
-    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice,
-    PlaybackStatusEvent, Player,
+    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, PlaybackStatusEvent,
+    Player,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -23,15 +23,14 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
-    // Open default device
-    let audio_output = DefaultOutputDevice::open()?;
-
-    // create channel for playback status events
-    // Prefer using a bounded channel here to avoid memory allocations in the audio thread.
+    // create channel for playback status events.
+    // NB: prefer using a bounded channel here to avoid memory allocations in the audio thread.
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
-    let mut player = Player::new(audio_output.sink(), Some(status_sender));
 
-    // pause playing until we've added all sources
+    // create a player instance with the default output device and status channel
+    let mut player = Player::new(DefaultOutputDevice::open()?, Some(status_sender));
+
+    // pause playback until we've added all sources
     player.stop();
 
     // create sound sources and memorize file ids for the playback status

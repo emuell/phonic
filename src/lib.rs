@@ -12,13 +12,7 @@ pub use error::Error;
 
 #[cfg(any(feature = "cpal-output", feature = "sokol-output", doc))]
 pub use output::DefaultOutputDevice;
-pub use output::{OutputDevice, OutputSink};
-
-#[cfg(feature = "wav-output")]
-pub use output::wav::{WavOutputDevice, WavSink};
-
-#[cfg(any(feature = "cpal-output", doc))]
-pub use output::AudioHostId;
+pub use output::OutputDevice;
 
 pub use player::{
     EffectId, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player,
@@ -31,6 +25,21 @@ pub use source::{
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
 };
+
+pub mod outputs {
+    //! Default [`OutputDevice`](super::OutputDevice) implementations.
+
+    #[cfg(any(feature = "cpal-output", doc))]
+    pub use super::output::cpal::CpalOutput;
+    #[cfg(any(feature = "cpal-output", doc))]
+    pub use super::output::AudioHostId;
+
+    #[cfg(feature = "sokol-output")]
+    pub use super::output::sokol::SokolOutput;
+
+    #[cfg(feature = "wav-output")]
+    pub use super::output::wav::WavOutputDevice;
+}
 
 pub mod sources {
     //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.

@@ -4,10 +4,11 @@ use std::{any::Any, f32::consts::PI, path::PathBuf, time::Duration};
 
 use phonic::{
     effects::{CompressorEffect, ReverbEffect},
+    outputs::WavOutputDevice,
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
     utils::{pitch_from_note, speed_from_note, InterleavedBufferMut},
     DefaultOutputDevice, Effect, EffectMessage, EffectMessagePayload, EffectTime, Error,
-    FilePlaybackOptions, OutputDevice, Player, SynthPlaybackOptions, WavOutputDevice,
+    FilePlaybackOptions, Player, SynthPlaybackOptions,
 };
 
 use arg::{parse_args, Args};
@@ -187,14 +188,14 @@ type SinSynthSource = SynthSourceImpl<SineSynth>;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
-    // Parse argument
+    // Parse optional arguments
     let args = parse_args::<Arguments>();
 
     // Setup audio output and player
     let mut player = if let Some(output_path) = args.output_path {
-        Player::new(WavOutputDevice::open(output_path)?.sink(), None)
+        Player::new(WavOutputDevice::open(output_path)?, None)
     } else {
-        Player::new(DefaultOutputDevice::open()?.sink(), None)
+        Player::new(DefaultOutputDevice::open()?, None)
     };
     let sample_rate = player.output_sample_rate();
 

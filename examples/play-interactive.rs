@@ -17,7 +17,7 @@ use phonic::{
     effects,
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, OutputDevice, PlaybackId, Player,
+    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, PlaybackId, Player,
     ResamplingQuality, SynthPlaybackOptions,
 };
 
@@ -37,11 +37,8 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
-    // open default audio output
-    let audio_output = DefaultOutputDevice::open()?;
-
-    // create player and move audio device
-    let mut player = Player::new(audio_output.sink(), None);
+    // create a player with the default audio output device
+    let mut player = Player::new(DefaultOutputDevice::open()?, None);
 
     let loop_mixer_id;
     let loop_filter_effect_id;
