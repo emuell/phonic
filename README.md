@@ -7,6 +7,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 - **Cross-Platform Audio Playback**:
   - Play audio on Windows, macOS, and Linux via [cpal](https://github.com/RustAudio/cpal).
   - WebAssembly support for in-browser audio using [sokol](https://github.com/floooh/sokol-rust) and [emscripten](https://emscripten.org/).
+  - Optional WAV file output device for rendering audio to a file instead of playing it back.
 
 - **Flexible Audio Source Handling**:
   - Play, seek, stop, and mix **preloaded** (buffered) or **streamed** (on-the-fly decoded) audio files.
