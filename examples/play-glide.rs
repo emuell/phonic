@@ -1,8 +1,6 @@
 //! An example showcasing how to glide the playback speed of a source over time.
 
-use phonic::{
-    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, OutputDevice, Player,
-};
+use phonic::{utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, Player};
 
 #[allow(unused_imports)]
 use phonic::sources::{PreloadedFileSource, StreamedFileSource};
@@ -19,7 +17,7 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 fn main() -> Result<(), Error> {
     // Setup audio output and player
-    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
+    let mut player = Player::new(DefaultOutputDevice::open()?, None);
     let sample_rate = player.output_sample_rate();
 
     // Setup beat times

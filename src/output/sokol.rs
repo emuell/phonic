@@ -3,7 +3,6 @@ use assert_no_alloc::*;
 
 use std::{
     ffi,
-    rc::Rc,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -20,7 +19,7 @@ use sokol::{
 
 use crate::{
     error::Error,
-    output::{OutputDevice, OutputSink},
+    output::OutputDevice,
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         buffer::clear_buffer,
@@ -36,149 +35,18 @@ const PREFERRED_BUFFER_SIZE: i32 = if cfg!(debug_assertions) { 4096 } else { 204
 
 // -------------------------------------------------------------------------------------------------
 
-enum CallbackMessage {
-    PlaySource(Box<dyn Source>),
-    Pause,
-    Resume,
-    SetVolume(f32),
-}
-
-enum CallbackState {
-    Playing,
-    Paused,
-}
-
-struct SokolContext {
-    callback_recv: Receiver<CallbackMessage>,
-    source: Box<dyn Source>,
-    state: CallbackState,
-    playback_pos: Arc<AtomicU64>,
-    playback_pos_instant: Instant,
-    smoothed_volume: ExponentialSmoothedValue,
-}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Stores a boxed SokolContext as raw ptr and ensures the box is dropped correctly.
-/// Also shuts down audio before the context gets dropped.
+/// Audio [`OutputDevice`] impl using [sokol](https://github.com/floooh/sokol)s audio player.
+///
+/// Should be primally used as audio output for emscripten builds, because cpal's emscripten
+/// impls are broken and no longer maintained.
 #[derive(Debug)]
-struct SokolContextRef {
-    context: *mut SokolContext,
-}
-
-impl SokolContextRef {
-    fn new(context: Box<SokolContext>) -> Self {
-        Self {
-            context: Box::into_raw(context),
-        }
-    }
-}
-
-impl Drop for SokolContextRef {
-    fn drop(&mut self) {
-        SokolOutput::audio_shutdown();
-        drop(unsafe { Box::from_raw(self.context) });
-    }
-}
-
-unsafe impl Send for SokolContextRef {}
-
-// -------------------------------------------------------------------------------------------------
-
-// OutputSink for Sokol audio output
-#[derive(Debug, Clone)]
-pub struct SokolSink {
+pub struct SokolOutput {
     volume: f32,
     is_running: bool,
     playback_pos: Arc<AtomicU64>,
     callback_send: Sender<CallbackMessage>,
     #[allow(dead_code)]
-    context_ref: Rc<SokolContextRef>,
-}
-
-impl OutputSink for SokolSink {
-    fn channel_count(&self) -> usize {
-        assert!(
-            saudio::isvalid(),
-            "audio not yet initialized or already shut down"
-        );
-        saudio::channels() as usize
-    }
-
-    fn sample_rate(&self) -> u32 {
-        assert!(
-            saudio::isvalid(),
-            "audio not yet initialized or already shut down"
-        );
-        saudio::sample_rate() as u32
-    }
-
-    fn sample_position(&self) -> u64 {
-        self.playback_pos.load(Ordering::Relaxed)
-    }
-
-    fn volume(&self) -> f32 {
-        self.volume
-    }
-    fn set_volume(&mut self, volume: f32) {
-        self.volume = volume;
-        self.callback_send
-            .send(CallbackMessage::SetVolume(volume))
-            .unwrap();
-    }
-
-    fn is_suspended(&self) -> bool {
-        saudio::suspended()
-    }
-
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
-    fn pause(&mut self) {
-        self.is_running = false;
-        self.callback_send.send(CallbackMessage::Pause).unwrap();
-    }
-
-    fn resume(&mut self) {
-        self.callback_send.send(CallbackMessage::Resume).unwrap();
-        self.is_running = true;
-    }
-
-    fn play(&mut self, source: Box<dyn Source>) {
-        // ensure source has our sample rate and channel layout
-        assert_eq!(source.channel_count(), self.channel_count());
-        assert_eq!(source.sample_rate(), self.sample_rate());
-        // send message to activate it in the writer
-        self.callback_send
-            .send(CallbackMessage::PlaySource(source))
-            .unwrap();
-        // auto-start with the first set source
-        if !self.is_running {
-            self.resume();
-        }
-    }
-
-    fn stop(&mut self) {
-        self.is_running = false;
-        self.callback_send
-            .send(CallbackMessage::PlaySource(Box::new(EmptySource)))
-            .unwrap();
-    }
-
-    fn close(&mut self) {
-        self.stop();
-    }
-}
-
-unsafe impl Send for SokolSink {}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Audio output impl using the sokol audio player.
-/// Creates a sink on open and manages sokol audio state.
-pub struct SokolOutput {
-    sink: SokolSink,
+    context_ref: Arc<SokolContextRef>,
 }
 
 impl SokolOutput {
@@ -192,7 +60,7 @@ impl SokolOutput {
         let mut smoothed_volume = ExponentialSmoothedValue::new(PREFERRED_SAMPLE_RATE as u32);
         smoothed_volume.init(volume);
 
-        let context_ref = Rc::new(SokolContextRef::new(Box::new(SokolContext {
+        let context_ref = Arc::new(SokolContextRef::new(Box::new(SokolContext {
             callback_recv,
             source: Box::new(EmptySource),
             playback_pos: Arc::clone(&playback_pos),
@@ -203,15 +71,13 @@ impl SokolOutput {
 
         Self::audio_init(context_ref.context);
 
-        let sink = SokolSink {
+        Ok(Self {
             volume,
             is_running,
             playback_pos,
             callback_send,
             context_ref,
-        };
-
-        Ok(Self { sink })
+        })
     }
 
     fn audio_init(context: *mut SokolContext) {
@@ -298,9 +164,130 @@ impl SokolOutput {
 }
 
 impl OutputDevice for SokolOutput {
-    type Sink = SokolSink;
+    fn channel_count(&self) -> usize {
+        assert!(
+            saudio::isvalid(),
+            "audio not yet initialized or already shut down"
+        );
+        saudio::channels() as usize
+    }
 
-    fn sink(&self) -> Self::Sink {
-        self.sink.clone()
+    fn sample_rate(&self) -> u32 {
+        assert!(
+            saudio::isvalid(),
+            "audio not yet initialized or already shut down"
+        );
+        saudio::sample_rate() as u32
+    }
+
+    fn sample_position(&self) -> u64 {
+        self.playback_pos.load(Ordering::Relaxed)
+    }
+
+    fn volume(&self) -> f32 {
+        self.volume
+    }
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
+        self.callback_send
+            .send(CallbackMessage::SetVolume(volume))
+            .unwrap();
+    }
+
+    fn is_suspended(&self) -> bool {
+        saudio::suspended()
+    }
+
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
+
+    fn pause(&mut self) {
+        self.is_running = false;
+        self.callback_send.send(CallbackMessage::Pause).unwrap();
+    }
+
+    fn resume(&mut self) {
+        self.callback_send.send(CallbackMessage::Resume).unwrap();
+        self.is_running = true;
+    }
+
+    fn play(&mut self, source: Box<dyn Source>) {
+        // ensure source has our sample rate and channel layout
+        assert_eq!(source.channel_count(), self.channel_count());
+        assert_eq!(source.sample_rate(), self.sample_rate());
+        // send message to activate it in the writer
+        self.callback_send
+            .send(CallbackMessage::PlaySource(source))
+            .unwrap();
+        // auto-start with the first set source
+        if !self.is_running {
+            self.resume();
+        }
+    }
+
+    fn stop(&mut self) {
+        self.is_running = false;
+        self.callback_send
+            .send(CallbackMessage::PlaySource(Box::new(EmptySource)))
+            .unwrap();
+    }
+
+    fn close(&mut self) {
+        self.stop();
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+
+enum CallbackMessage {
+    PlaySource(Box<dyn Source>),
+    Pause,
+    Resume,
+    SetVolume(f32),
+}
+
+enum CallbackState {
+    Playing,
+    Paused,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+struct SokolContext {
+    callback_recv: Receiver<CallbackMessage>,
+    source: Box<dyn Source>,
+    state: CallbackState,
+    playback_pos: Arc<AtomicU64>,
+    playback_pos_instant: Instant,
+    smoothed_volume: ExponentialSmoothedValue,
+}
+
+unsafe impl Send for SokolContext {}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Stores a boxed SokolContext as raw ptr and ensures the box is dropped correctly.
+/// Also shuts down audio before the context gets dropped.
+#[derive(Debug)]
+struct SokolContextRef {
+    context: *mut SokolContext,
+}
+
+impl SokolContextRef {
+    fn new(context: Box<SokolContext>) -> Self {
+        Self {
+            context: Box::into_raw(context),
+        }
+    }
+}
+
+impl Drop for SokolContextRef {
+    fn drop(&mut self) {
+        SokolOutput::audio_shutdown();
+        drop(unsafe { Box::from_raw(self.context) });
+    }
+}
+
+unsafe impl Send for SokolContextRef {}
+unsafe impl Sync for SokolContextRef {}

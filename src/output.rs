@@ -3,7 +3,7 @@
 compile_error!("wasm builds are not compatible with cpal. use sokol-output instead");
 
 // Note: when cpal and sokol features are enabled, we use cpal only
-#[cfg(feature = "cpal-output")]
+#[cfg(any(feature = "cpal-output", doc))]
 pub mod cpal;
 #[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
 pub mod sokol;
@@ -11,12 +11,12 @@ pub mod sokol;
 pub mod wav;
 
 /// The enabled audio output type: cpal or sokol
-#[cfg(feature = "cpal-output")]
+#[cfg(any(feature = "cpal-output", doc))]
 pub type DefaultOutputDevice = cpal::CpalOutput;
 #[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
 pub type DefaultOutputDevice = sokol::SokolOutput;
 
-/// Available audio hosts for cpal output (platform specific)
+/// Available audio hosts for cpal output devices (platform specific)
 #[cfg(feature = "cpal-output")]
 pub enum AudioHostId {
     Default, // system default
@@ -34,8 +34,8 @@ use super::source::Source;
 
 // -------------------------------------------------------------------------------------------------
 
-/// OutputDevice controller
-pub trait OutputSink: Send {
+/// Audio output stream device.
+pub trait OutputDevice: Send {
     /// Actual device's output sample buffer channel count.
     fn channel_count(&self) -> usize;
     /// Actual device's output sample rate.
@@ -65,12 +65,4 @@ pub trait OutputSink: Send {
     fn stop(&mut self);
     /// Release audio device
     fn close(&mut self);
-}
-
-// -------------------------------------------------------------------------------------------------
-
-/// OutputDevice implementation: provides a sink controller.
-pub trait OutputDevice {
-    type Sink: OutputSink;
-    fn sink(&self) -> Self::Sink;
 }

@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     error::Error,
-    output::{OutputDevice, OutputSink},
+    output::OutputDevice,
     source::{empty::EmptySource, Source, SourceTime},
     utils::smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
 };
@@ -29,10 +29,10 @@ const BUFFER_SIZE_FRAMES: usize = 1024;
 /// Audio output device, which writes audio into a wav file instead of playing it back.
 ///
 /// NOTE: Unlike the other output devices, the wav writer device is initially paused, so it
-/// must be resumed (or started vua the player) manually after everything you want to write
+/// must be resumed (or started via the player) manually after everything you want to write
 /// via the player got set up.
 pub struct WavOutputDevice {
-    sink: WavSink,
+    stream: Arc<Mutex<WavStream>>,
 }
 
 impl WavOutputDevice {
@@ -56,35 +56,8 @@ impl WavOutputDevice {
     ///   produces any output (e.g. is stopped), the wav file will be closed automatically,
     ///   so the duration also can be endless to stop automatically.
     ///
-    /// Wav files contents are always 32bit floats.
+    /// Wav files contents are always saved as 32bit floats.
     pub fn open_with_specs<P: AsRef<Path>>(
-        file_path: P,
-        sample_rate: u32,
-        channel_count: usize,
-        duration: Duration,
-    ) -> Result<Self, Error> {
-        let sink = WavSink::new(file_path, sample_rate, channel_count, duration)?;
-        Ok(Self { sink })
-    }
-}
-
-impl OutputDevice for WavOutputDevice {
-    type Sink = WavSink;
-
-    fn sink(&self) -> Self::Sink {
-        self.sink.clone()
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Clone)]
-pub struct WavSink {
-    inner: Arc<Mutex<WavSinkInner>>,
-}
-
-impl WavSink {
-    pub fn new<P: AsRef<Path>>(
         file_path: P,
         sample_rate: u32,
         channel_count: usize,
@@ -103,7 +76,7 @@ impl WavSink {
         let mut smoothed_volume = ExponentialSmoothedValue::new(spec.sample_rate);
         smoothed_volume.init(1.0);
 
-        let inner = Arc::new(Mutex::new(WavSinkInner {
+        let stream = Arc::new(Mutex::new(WavStream {
             writer: Some(writer),
             channel_count,
             sample_rate,
@@ -116,20 +89,20 @@ impl WavSink {
             duration,
         }));
 
-        // Start the processing thread
+        // Start the stream in a new detached thread
         thread::spawn({
-            let inner = Arc::clone(&inner);
+            let stream = Arc::clone(&stream);
             move || {
                 loop {
                     // process the next audio slice
                     {
-                        let mut inner = inner.lock().unwrap();
-                        if let Err(err) = inner.process() {
+                        let mut stream = stream.lock().unwrap();
+                        if let Err(err) = stream.process() {
                             panic!("Error processing WAV output: {err}");
                         }
                         // Stop write loop when duration elapsed
-                        if inner.finished {
-                            inner.started = false;
+                        if stream.finished {
+                            stream.started = false;
                             break;
                         }
                     }
@@ -138,8 +111,8 @@ impl WavSink {
                 }
 
                 // Finalize the WAV file when done
-                if let Ok(mut inner) = inner.lock() {
-                    if let Some(writer) = inner.writer.take() {
+                if let Ok(mut stream) = stream.lock() {
+                    if let Some(writer) = stream.writer.take() {
                         if let Err(e) = writer.finalize() {
                             log::error!("Failed to finalize WAV file: {e}");
                         }
@@ -148,33 +121,33 @@ impl WavSink {
             }
         });
 
-        Ok(Self { inner })
+        Ok(Self { stream })
     }
 }
 
-impl OutputSink for WavSink {
+impl OutputDevice for WavOutputDevice {
     fn channel_count(&self) -> usize {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.stream.lock().unwrap();
         inner.channel_count
     }
 
     fn sample_rate(&self) -> u32 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.stream.lock().unwrap();
         inner.sample_rate
     }
 
     fn sample_position(&self) -> u64 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.stream.lock().unwrap();
         inner.playback_pos
     }
 
     fn volume(&self) -> f32 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.stream.lock().unwrap();
         inner.smoothed_volume.target()
     }
 
     fn set_volume(&mut self, volume: f32) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         inner.smoothed_volume.set_target(volume);
     }
 
@@ -183,22 +156,22 @@ impl OutputSink for WavSink {
     }
 
     fn is_running(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.stream.lock().unwrap();
         inner.started
     }
 
     fn pause(&mut self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         inner.started = false;
     }
 
     fn resume(&mut self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         inner.started = true;
     }
 
     fn play(&mut self, source: Box<dyn Source>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         // ensure source has our sample rate and channel layout
         assert_eq!(source.channel_count(), inner.channel_count);
         assert_eq!(source.sample_rate(), inner.sample_rate);
@@ -206,19 +179,19 @@ impl OutputSink for WavSink {
     }
 
     fn stop(&mut self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         inner.source = Box::new(EmptySource);
     }
 
     fn close(&mut self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.stream.lock().unwrap();
         inner.finished = true;
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-struct WavSinkInner {
+struct WavStream {
     writer: Option<WavWriter<BufWriter<File>>>,
     channel_count: usize,
     sample_rate: u32,
@@ -231,7 +204,7 @@ struct WavSinkInner {
     duration: Duration,
 }
 
-impl WavSinkInner {
+impl WavStream {
     fn process(&mut self) -> Result<(), Error> {
         // Do nothing when we didn't started yet
         if !self.started || self.finished {
@@ -275,7 +248,7 @@ impl WavSinkInner {
     }
 }
 
-impl Drop for WavSinkInner {
+impl Drop for WavStream {
     fn drop(&mut self) {
         if let Some(writer) = self.writer.take() {
             if let Err(err) = writer.finalize() {

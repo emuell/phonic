@@ -2,7 +2,7 @@
 
 use phonic::{
     sources::PreloadedFileSource, utils::speed_from_note, DefaultOutputDevice, Error,
-    FilePlaybackOptions, OutputDevice, Player,
+    FilePlaybackOptions, Player,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -14,24 +14,28 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
-    // Setup audio output and player
-    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
-    let sample_rate = player.output_sample_rate();
+    // Create audio output and player
+    let mut player = Player::new(DefaultOutputDevice::open()?, None);
 
     // Preload samples
     let cowbell = PreloadedFileSource::from_file(
         "assets/cowbell.wav",
         None,
         Default::default(),
-        sample_rate,
+        player.output_sample_rate(),
     )?;
-    let bass =
-        PreloadedFileSource::from_file("assets/bass.wav", None, Default::default(), sample_rate)?;
+    let bass = PreloadedFileSource::from_file(
+        "assets/bass.wav",
+        None,
+        Default::default(),
+        player.output_sample_rate(),
+    )?;
 
     // Metronome parameters
     const BPM: f64 = 120.0;
     const BEATS_PER_BAR: usize = 4;
     const BARS_TO_PLAY: usize = 8;
+    let sample_rate = player.output_sample_rate();
 
     let samples_per_beat = (60.0 / BPM * sample_rate as f64) as u64;
     let output_start_time = player.output_sample_frame_position() + sample_rate as u64; // Start 1 second ahead

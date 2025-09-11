@@ -1,18 +1,18 @@
-﻿**phonic** is a cross-platform audio playback and DSP library for Rust, providing a flexible, low-latency audio engine for games and music applications. It offers sample-precise playback, a DSP effects rack, and real-time monitoring of playback status.
+﻿**phonic** is a cross-platform audio playback and DSP library for Rust, providing a flexible, low-latency audio engine and related tools for games and music applications.
 
-Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is now also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns)
+Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic initially addressed the need for precise playback position monitoring not found in other Rust audio libraries. It is now also used as the default sample playback engine for the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns).
 
 ### Features
 
 - **Cross-Platform Audio Playback**:
   - Play audio on Windows, macOS, and Linux via [cpal](https://github.com/RustAudio/cpal).
   - WebAssembly support for in-browser audio using [sokol](https://github.com/floooh/sokol-rust) and [emscripten](https://emscripten.org/).
-  - Optional WAV file output device for rendering audio to a file instead of playing it back.
+  - Optional WAV file output device for rendering computed audio to a file instead of playing it back.
 
 - **Flexible Audio Source Handling**:
   - Play, seek, stop, and mix **preloaded** (buffered) or **streamed** (on-the-fly decoded) audio files.
   - Support for most common audio formats through [Symphonia](https://github.com/pdeljanov/Symphonia).
-  - Automatic resampling and channel mapping for all sources.
+  - Automatic resampling and channel mapping via a fast custom resampler and [Rubato](https://github.com/HEnquist/rubato).
   - Seamless loop playback using loop points from WAV and FLAC files.
 
 - **Advanced Playback Control**:
@@ -21,9 +21,9 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   - Dynamic control over volume, panning, and playback speed.
 
 - **Custom Synthesis and DSPs**:
+  - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
   - Play custom-built synthesizers or use the optional `dasp` integration for signal generation.
-  - Build complex **DSP graphs** by routing audio through sub-mixers.
-  - Apply built-in effects like reverb, chorus, and filters, or create your own.
+  - Apply custom-built DSP effects or use built-in effects (reverb, chorus, filter, compressor).
 
 ### Examples
 
@@ -37,19 +37,19 @@ Monitor playback status of playing files.
 
 ```rust no_run
 use phonic::{
-    Player, OutputDevice, OutputSink, PlaybackStatusEvent, 
-    DefaultOutputDevice, Error, FilePlaybackOptions, SynthPlaybackOptions 
+    DefaultOutputDevice, Player, PlaybackStatusEvent, Error, 
+    FilePlaybackOptions, SynthPlaybackOptions
 };
 
 fn main() -> Result<(), Error> {
     // Open the default audio device (cpal or sokol, depending on the enabled output feature)
-    let device = DefaultOutputDevice::open()?;
+    let output_device = DefaultOutputDevice::open()?;
     // Create an optional channel to receive playback status events ("Position", "Stopped")
     // Prefer using a bounded channel here to avoid memory allocations in the audio thread.
     let (playback_status_sender, playback_status_receiver) = crossbeam_channel::bounded(32);
-    // Create a player and transfer ownership of the audio output to the player. The player
-    // will play, mix down and manage all files and synth sources for us from here.
-    let mut player = Player::new(device.sink(), Some(playback_status_sender));
+    // Create a player and transfer ownership of the output device to the player. The player
+    // will play, mix down and manage file and synth sources for us from here.
+    let mut player = Player::new(output_device, Some(playback_status_sender));
 
     // Start playing a file: The file below is going to be "preloaded" because it uses the 
     // default playback options. Preloaded means it's entirely decoded first, then played back
@@ -77,25 +77,14 @@ fn main() -> Result<(), Error> {
     std::thread::spawn(move || {
         while let Ok(event) = playback_status_receiver.recv() {
             match event {
-                PlaybackStatusEvent::Position { 
-                    id, 
-                    path, 
-                    context: _, 
-                    position 
-                } => {
-                    // context is an optional, user defined payload passed along with 
-                    // `player.play_file_with_context` 
-                    println!(
-                        "Playback pos of source #{id} '{path}': {pos}",
+                PlaybackStatusEvent::Position { id, path, context: _, position } => {
+                    // context is an optional, user defined payload,
+                    // passed along with `player.play_file_with_context` 
+                    println!("Playback pos of source #{id} '{path}': {pos}",
                         pos = position.as_secs_f32()
                     );
                 }
-                PlaybackStatusEvent::Stopped {
-                    id,
-                    path,
-                    context: _,
-                    exhausted,
-                } => {
+                PlaybackStatusEvent::Stopped { id, path, context: _, exhausted, } => {
                     if exhausted {
                         println!("Playback of #{id} '{path}' finished");
                     } else {
@@ -125,13 +114,13 @@ Create complex audio processing chains by routing sources through different mixe
 
 ```rust no_run
 use phonic::{
-    Player, OutputDevice, DefaultOutputDevice, Error, FilePlaybackOptions,
+    DefaultOutputDevice, Player, Error, FilePlaybackOptions, 
     effects::{ChorusEffect, ReverbEffect}
 };
 
 fn main() -> Result<(), Error> {
-    // Create a player
-    let mut player = Player::new(DefaultOutputDevice::open()?.sink(), None);
+    // Create a player with the default output device
+    let mut player = Player::new(DefaultOutputDevice::open()?, None);
 
     // Add a reverb effect to the main mixer. All sounds played without a
     // specific target mixer will now be routed through this effect.
