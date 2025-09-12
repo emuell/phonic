@@ -70,7 +70,9 @@ assert-allocs = ["assert_no_alloc"]
 default = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
 
 [package.metadata.docs.rs]
-all-features = true
+no-default-features = true
+# sokol fails to compile at docs.rs and isn't really important to document
+features = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
 
 [[example]]
 name = "play-file"
