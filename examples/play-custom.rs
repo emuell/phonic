@@ -197,9 +197,8 @@ fn main() -> Result<(), Error> {
     } else {
         Player::new(DefaultOutputDevice::open()?, None)
     };
-    let sample_rate = player.output_sample_rate();
 
-    // Stop the player until it's fully set up
+    // Stop the player until we've scheduled all sources
     player.stop();
 
     // Create a sub-mixer for the synth, child of the main mixer.
@@ -223,7 +222,8 @@ fn main() -> Result<(), Error> {
     // A 16-step bass line, one note per beat, 0 is a note off
     const BASS_LINE: [u8; 16] = [36, 0, 36, 34, 31, 0, 34, 31, 29, 0, 29, 24, 31, 36, 34, 31];
 
-    let samples_per_beat = (60.0 / BPM * sample_rate as f64) as u64;
+    let samples_per_sec = player.output_sample_rate();
+    let samples_per_beat = (60.0 / BPM * samples_per_sec as f64) as u64;
     let note_duration_samples = (samples_per_beat as f64 * NOTE_DURATION_IN_BEATS) as usize;
 
     // Preload sample files
@@ -231,13 +231,13 @@ fn main() -> Result<(), Error> {
         "assets/YuaiLoop.wav",
         None,
         FilePlaybackOptions::default(),
-        sample_rate,
+        samples_per_sec,
     )?;
     let pad = PreloadedFileSource::from_file(
         "assets/pad-ambient.wav",
         None,
         FilePlaybackOptions::default(),
-        sample_rate,
+        samples_per_sec,
     )?;
 
     // Schedule bassline and pad notes for all bars
@@ -251,7 +251,7 @@ fn main() -> Result<(), Error> {
                     FilePlaybackOptions::default()
                         .repeat(BARS_TO_PLAY / 2)
                         .volume_db(0.0),
-                    sample_rate,
+                    samples_per_sec,
                 )?,
                 Some(output_start_time),
             )?;
@@ -267,7 +267,7 @@ fn main() -> Result<(), Error> {
                     .volume_db(0.0)
                     .fade_out(Duration::from_millis(500))
                     .target_mixer(pad_mixer_id),
-                sample_rate,
+                samples_per_sec,
             )?,
             Some(pad_start_time),
         )?;
@@ -281,12 +281,12 @@ fn main() -> Result<(), Error> {
 
             // Create our custom synth source for the current note
             let bass = SinSynthSource::new(
-                SineSynth::new(*note, note_duration_samples, sample_rate),
+                SineSynth::new(*note, note_duration_samples, samples_per_sec),
                 "sin_synth",
                 SynthPlaybackOptions::default()
                     .volume_db(-5.0)
                     .target_mixer(bass_mixer_id),
-                sample_rate,
+                samples_per_sec,
                 None,
             )?;
             player.play_synth_source(bass, Some(sample_time))?;

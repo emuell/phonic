@@ -2,6 +2,7 @@
 //! and how to monitor file playback status.
 
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,9 +11,11 @@ use std::{
 };
 
 use phonic::{
-    utils::speed_from_note, DefaultOutputDevice, Error, FilePlaybackOptions, PlaybackStatusEvent,
-    Player,
+    outputs::WavOutputDevice, utils::speed_from_note, DefaultOutputDevice, Error,
+    FilePlaybackOptions, PlaybackStatusEvent, Player,
 };
+
+use arg::{parse_args, Args};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -22,13 +25,29 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 // -------------------------------------------------------------------------------------------------
 
+#[derive(Args, Debug)]
+struct Arguments {
+    #[arg(short = "o", long = "output")]
+    /// Write audio output into the given wav file, instead of using the default audio device.
+    output_path: Option<PathBuf>,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 fn main() -> Result<(), Error> {
-    // create channel for playback status events.
+    // Parse optional arguments
+    let args = parse_args::<Arguments>();
+
+    // Create channel for playback status events.
     // NB: prefer using a bounded channel here to avoid memory allocations in the audio thread.
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
 
-    // create a player instance with the default output device and status channel
-    let mut player = Player::new(DefaultOutputDevice::open()?, Some(status_sender));
+    // Create a player instance with the default output device and status channel
+    let mut player = if let Some(output_path) = args.output_path {
+        Player::new(WavOutputDevice::open(output_path)?, status_sender)
+    } else {
+        Player::new(DefaultOutputDevice::open()?, status_sender)
+    };
 
     // pause playback until we've added all sources
     player.stop();
@@ -58,9 +77,6 @@ fn main() -> Result<(), Error> {
 
     let mut loop_playback_id = Some(playing_file_ids[1]);
     let is_running = Arc::new(AtomicBool::new(true));
-
-    // start playing
-    player.start();
 
     // handle events from the file sources
     let event_thread = std::thread::spawn({
@@ -104,6 +120,9 @@ fn main() -> Result<(), Error> {
         }
     });
 
+    // start playing
+    player.start();
+
     // stop (fade-out) the loop after 3 secs
     let play_time = Instant::now();
     while is_running.load(Ordering::Relaxed) {
@@ -114,8 +133,8 @@ fn main() -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    // wait until playback thread finished
-    event_thread.join().unwrap();
+    // wait until playback finished
+    event_thread.join().map_err(|_| Error::SendError)?;
 
     Ok(())
 }

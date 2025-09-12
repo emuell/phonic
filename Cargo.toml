@@ -71,9 +71,10 @@ all-features = true
 
 [[example]]
 name = "play-file"
+required-features = ["dasp-synth"]
 [[example]]
 name = "play-synth"
-required-features = ["dasp-synth"]
+required-features = ["wav-output", "dasp-synth"]
 [[example]]
 name = "play-interactive"
 required-features = ["dasp-synth"]
@@ -81,6 +82,5 @@ required-features = ["dasp-synth"]
 name = "play-custom"
 required-features = ["wav-output"]
 [[example]]
-name = "play-glide"
-[[example]]
-name = "play-metronome"
+name = "play-sequence"
+required-features = ["wav-output"]

@@ -14,7 +14,9 @@
           "--example=play-file",
         ]
       },
-      "args": [],
+      "args": [
+        // "--output", "output.wav"
+      ],
       "cwd": "${workspaceFolder}",
     },
     {
@@ -28,34 +30,24 @@
           "--features=dasp-synth",
         ]
       },
-      "args": [],
+      "args": [
+        // "--output", "output.wav"
+      ],
       "cwd": "${workspaceFolder}",
     },
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug example 'play-glide'",
+      "name": "Debug example 'play-sequence'",
       "cargo": {
         "args": [
           "build",
-          "--example=play-glide",
+          "--example=play-sequence",
         ]
       },
-      "args": [],
-      "cwd": "${workspaceFolder}",
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-interactive'",
-      "cargo": {
-        "args": [
-          "build",
-          "--example=play-interactive",
-          "--features=dasp-synth",
-        ]
-      },
-      "args": [],
+      "args": [
+        // "--output", "output.wav"
+      ],
       "cwd": "${workspaceFolder}",
     },
     {
@@ -76,15 +68,16 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug example 'play-metronome'",
+      "name": "Debug example 'play-interactive'",
       "cargo": {
         "args": [
           "build",
-          "--example=play-metronome",
+          "--example=play-interactive",
+          "--features=dasp-synth",
         ]
       },
       "args": [],
       "cwd": "${workspaceFolder}",
-    }
+    },
   ]
 }

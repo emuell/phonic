@@ -1,6 +1,7 @@
 //! An example showcasing how to play a `dasp` signal as a synth source.
 
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -8,9 +9,13 @@ use std::{
     time::Duration,
 };
 
-use dasp::{signal, Frame, Signal};
+use phonic::{
+    outputs::WavOutputDevice, DefaultOutputDevice, Error, PlaybackStatusEvent, Player,
+    SynthPlaybackOptions,
+};
 
-use phonic::{DefaultOutputDevice, Error, PlaybackStatusEvent, Player, SynthPlaybackOptions};
+use arg::{parse_args, Args};
+use dasp::{signal, Frame, Signal};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -20,12 +25,32 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 // -------------------------------------------------------------------------------------------------
 
+#[derive(Args, Debug)]
+struct Arguments {
+    #[arg(short = "o", long = "output")]
+    /// Write audio output into the given wav file, instead of using the default audio device.
+    output_path: Option<PathBuf>,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 fn main() -> Result<(), Error> {
+    // Parse optional arguments
+    let args = parse_args::<Arguments>();
+
     // Create channel for playback status events
     let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
 
-    // Open default audio device and create a new player
-    let mut player = Player::new(DefaultOutputDevice::open()?, Some(status_sender));
+    // Setup audio output and player
+    let mut player = if let Some(output_path) = args.output_path {
+        Player::new(WavOutputDevice::open(output_path)?, status_sender)
+    } else {
+        Player::new(DefaultOutputDevice::open()?, status_sender)
+    };
+
+    // pause playback until we've added all sources
+    player.stop();
+
     let sample_rate = player.output_sample_rate();
 
     // Creates a signal of a detuned sines using dasp.
@@ -138,7 +163,7 @@ fn main() -> Result<(), Error> {
 
     // handle playback events from the player
     let is_running = Arc::new(AtomicBool::new(true));
-    let playback_event_thread = std::thread::spawn({
+    let event_thread = std::thread::spawn({
         let is_running = is_running.clone();
         move || {
             while let Ok(event) = status_receiver.recv() {
@@ -177,8 +202,11 @@ fn main() -> Result<(), Error> {
         }
     });
 
-    // Wait until all sounds finished playing
-    playback_event_thread.join().unwrap();
+    // start playing
+    player.start();
+
+    // Wait until all playback finished
+    event_thread.join().map_err(|_| Error::SendError)?;
 
     Ok(())
 }

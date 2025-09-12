@@ -32,14 +32,14 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A unique ID for a newly created File or Synth Sources.
+/// Unique ID for played back file or synth sources.
 pub type PlaybackId = usize;
 
-/// A unique ID for a newly created effect.
-pub type EffectId = usize;
-
-/// A unique ID for a newly created mixer.
+/// Unique ID for newly added mixers.
 pub type MixerId = usize;
+
+/// Unique ID for newly added effects.
+pub type EffectId = usize;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -132,9 +132,9 @@ impl Player {
     /// Create a new Player for the given [`OutputDevice`].
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
-    pub fn new(
+    pub fn new<S: Into<Option<Sender<PlaybackStatusEvent>>>>(
         output_device: impl OutputDevice + 'static,
-        playback_status_sender: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_sender: S,
     ) -> Self {
         // Memorize the sink
         let mut output_device = Box::new(output_device);
@@ -142,7 +142,7 @@ impl Player {
         // Create a proxy for the playback status channel, so we can trap stop messages
         let playing_sources = Arc::new(DashMap::with_capacity(1024));
         let playback_status_sender =
-            Self::handle_playback_events(playback_status_sender, playing_sources.clone());
+            Self::handle_playback_events(playback_status_sender.into(), playing_sources.clone());
 
         // Create audio garbage collector and thread
         let collector = Collector::new();

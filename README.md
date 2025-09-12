@@ -26,7 +26,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 
 - **Custom Synthesis and DSPs**:
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
-  - Play completely custom-built synthesizers or use the optional (dasp)[https://github.com/RustAudio/dasp] integration for creating synth sources.
+  - Play completely custom-built synthesizers or use the optional [dasp](https://github.com/RustAudio/dasp) integration for creating synth sources.
   - Apply custom-built DSP effects or use built-in effects (reverb, chorus, filter, compressor).
 
 
@@ -59,7 +59,7 @@ fn main() -> Result<(), Error> {
     let (playback_status_sender, playback_status_receiver) = crossbeam_channel::bounded(32);
     // Create a player and transfer ownership of the output device to the player. The player
     // will play, mix down and manage file and synth sources for us from here.
-    let mut player = Player::new(output_device, Some(playback_status_sender));
+    let mut player = Player::new(output_device, playback_status_sender);
 
     // Start playing a file: The file below is going to be "preloaded" because it uses the 
     // default playback options. Preloaded means it's entirely decoded first, then played back
