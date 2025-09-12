@@ -5,11 +5,11 @@ description = "Audio playback library"
 edition = "2021"
 exclude = ["assets", "examples"]
 keywords = ["audio", "dsp", "playback", "emscripten"]
-license = "GNU AFFERO"
+license = "	AGPL-3.0"
 name = "phonic"
 readme = "README.md"
 repository = "https://github.com/emuell/phonic"
-version = "0.8.0"
+version = "0.9.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

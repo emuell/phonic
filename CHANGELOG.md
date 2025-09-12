@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.0 - 2025/09/12
+
+- add nested sub-mixer and DSP effect support
+- add wav writer output device
+- add set of basic built in effects (chorus, filter, compressor/limiter, reverb)
+- reorganized public exports
+- added new and updated existing examples
+- updated crate docs
+- changed license to GNU AFFERO
+
 ## v0.8.0 - 2025/09/08
 
 - add real-time, glided file playback speed changes 
