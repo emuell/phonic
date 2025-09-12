@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.1 - 2025/09/12
+
+- fixed compile errors on docs.rs
+
 ## v0.9.0 - 2025/09/12
 
 - add nested sub-mixer and DSP effect support
