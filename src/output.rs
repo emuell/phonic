@@ -3,15 +3,15 @@
 compile_error!("wasm builds are not compatible with cpal. use sokol-output instead");
 
 // Note: when cpal and sokol features are enabled, we use cpal only
-#[cfg(any(feature = "cpal-output", doc))]
+#[cfg(feature = "cpal-output")]
 pub mod cpal;
-#[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
+#[cfg(feature = "sokol-output")]
 pub mod sokol;
 #[cfg(feature = "wav-output")]
 pub mod wav;
 
 /// The enabled audio output type: cpal or sokol
-#[cfg(any(feature = "cpal-output", doc))]
+#[cfg(feature = "cpal-output")]
 pub type DefaultOutputDevice = cpal::CpalOutput;
 #[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
 pub type DefaultOutputDevice = sokol::SokolOutput;

@@ -48,10 +48,13 @@ pub type EffectMessagePayload = dyn EffectMessage;
 
 // -------------------------------------------------------------------------------------------------
 
-/// An audio effect that can be applied to a mixer's output.
+/// Effects manipulate audio samples in `f32` format and can be `Send` and `Sync`ed across threads.
 ///
-/// Effects process audio buffers in-place and can have their parameters changed at runtime by
-/// sending them `EffectMessage`s.
+/// Buffers are processed in-place. Effect parameters can be changed at runtime by sending 
+/// [`EffectMessage`]s via the player's [`send_effect_message`](crate::Player::send_effect_message).
+/// 
+/// NB: `process` and `process_message` are called in realtime audio threads, so they must not
+/// block! All other functions are called in the main thread to initialize the effect.
 pub trait Effect: Send + Sync + 'static {
     /// A unique, static name for the effect.
     ///
@@ -79,6 +82,9 @@ pub trait Effect: Send + Sync + 'static {
     ///
     /// This method is called repeatedly on the real-time audio thread. To avoid audio glitches,
     /// it must not block, allocate memory, or perform other time-consuming operations.
+    /// 
+    /// Use [`InterleavedBufferMut`](crate::utils::InterleavedBufferMut) to get channel/frame
+    /// representations of the given output buffer as needed.
     fn process(&mut self, output: &mut [f32], time: &EffectTime);
 
     /// Handles a message sent to the effect.

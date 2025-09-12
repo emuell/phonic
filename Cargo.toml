@@ -51,6 +51,9 @@ device_query = { version = "^4.0" }
 ctrlc = { version = "^3.4" }
 arg = { version = "^0.4", features = ["std"] }
 
+[build-dependencies]
+rustc_version = "^0.4"
+
 [profile.release]
 debug = 1 # debug info for profiling
 

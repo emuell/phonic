@@ -61,7 +61,7 @@ impl Default for SourceTime {
 /// in the specified `channel_count` and `sample_rate` specs. Specs may not change during runtime,
 /// so following sources don't have to adapt to new specs.
 ///
-/// `write` is called in the realtime audio thread, so it must not block!
+/// NB: `write` is called in realtime audio threads, so it must not block!
 pub trait Source: Send + Sync + 'static {
     /// The source's output sample rate.
     fn sample_rate(&self) -> u32;
