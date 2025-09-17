@@ -308,7 +308,7 @@ impl Effect for ChorusEffect {
         let dry_amount = 1.0 - wet_amount;
 
         assert!(self.channel_count == 2);
-        for frame in output.as_mut_frames::<2>() {
+        for frame in output.as_frames_mut::<2>() {
             let left_input = frame[0] as f64;
             let right_input = frame[1] as f64;
 

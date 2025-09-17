@@ -1,8 +1,6 @@
 //! Provides utilities for converting between planar and interleaved audio buffers,
 //! SIMD-accelerated buffer operations, and safe abstractions for working with interleaved audio data.
 
-use std::marker::PhantomData;
-
 use pulp::Simd;
 
 // -------------------------------------------------------------------------------------------------
@@ -10,7 +8,7 @@ use pulp::Simd;
 /// Copy the given planar buffer into an interleaved one.
 /// The planar buffer's layout defines layout of the interleaved buffer (channel and frame count).
 /// The interleaved buffer must be large enough to fit the planar buffer.
-pub fn planar_to_interleaved(planar: &[Vec<f32>], interleaved: &mut [f32]) {
+pub fn planar_to_interleaved(planar: &[Vec<f32>], mut interleaved: &mut [f32]) {
     let channel_count = planar.len();
     let frame_count = planar[0].len();
     debug_assert!(
@@ -24,12 +22,10 @@ pub fn planar_to_interleaved(planar: &[Vec<f32>], interleaved: &mut [f32]) {
         2 => {
             let left = &planar[0];
             let right = &planar[1];
-            for (chunk, (l, r)) in interleaved
-                .chunks_exact_mut(2)
-                .zip(left.iter().zip(right.iter()))
-            {
-                chunk[0] = *l;
-                chunk[1] = *r;
+            let frames = interleaved.as_frames_mut::<2>();
+            for (frame, (l, r)) in frames.iter_mut().zip(left.iter().zip(right.iter())) {
+                frame[0] = *l;
+                frame[1] = *r;
             }
         }
         _ => {
@@ -62,13 +58,14 @@ pub fn interleaved_to_planar(interleaved: &[f32], planar: &mut [Vec<f32>]) {
             copy_buffers(&mut planar[0], &interleaved[..frame_count]);
         }
         2 => {
+            let frames = interleaved.as_frames::<2>();
             let left = &mut planar[0];
-            for (p, i) in left.iter_mut().zip(interleaved.chunks_exact(2)) {
-                *p = i[0];
+            for (l, frame) in left.iter_mut().zip(frames) {
+                *l = frame[0];
             }
             let right = &mut planar[1];
-            for (p, i) in right.iter_mut().zip(interleaved.chunks_exact(2)) {
-                *p = i[1];
+            for (r, frame) in right.iter_mut().zip(frames) {
+                *r = frame[1];
             }
         }
         _ => {
@@ -185,21 +182,17 @@ pub trait InterleavedBuffer<'a> {
     /// of that channel across all frames.
     ///
     /// Note: Prefer using `frames` or `as_frames` for hot paths as it's more efficient.
-    fn channels(&self, channel_count: usize) -> Channels<'a> {
+    fn channels(
+        &self,
+        channel_count: usize,
+    ) -> impl Iterator<Item = impl Iterator<Item = &'a f32> + 'a> + 'a {
+        let buffer = self.buffer();
+        let buffer_len = buffer.len();
         assert!(
-            self.buffer().len() % channel_count == 0,
-            "channels: buffer length ({}) must be divisible by channel count ({})",
-            self.buffer().len(),
-            channel_count
+            buffer_len % channel_count == 0,
+            "channels: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
-        let frame_count = self.buffer().len() / channel_count;
-        Channels {
-            ptr: self.buffer().as_ptr(),
-            channel: 0,
-            channel_count,
-            frame_count,
-            _marker: PhantomData,
-        }
+        (0..channel_count).map(move |i| buffer.iter().skip(i).step_by(channel_count))
     }
 
     /// Iterate over frames. Each frame yields `channel_count` samples.
@@ -210,34 +203,32 @@ pub trait InterleavedBuffer<'a> {
         &self,
         channel_count: usize,
     ) -> impl Iterator<Item = impl Iterator<Item = &'a f32> + 'a> + 'a {
+        let buffer = self.buffer();
+        let buffer_len = buffer.len();
         assert!(
-            self.buffer().len() % channel_count == 0,
-            "frames: buffer length ({}) must be divisible by channel count ({})",
-            self.buffer().len(),
-            channel_count
+            buffer_len % channel_count == 0,
+            "frames: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
         self.buffer()
             .chunks_exact(channel_count)
             .map(move |channel_chunk| channel_chunk.iter().take(channel_count))
     }
 
-    /// View the interleaved samples as contiguous frames of size N (channel count).
+    /// View the interleaved samples as contiguous frames of size `CHANNEL_COUNT`.
     ///
     /// Constraints:
-    /// - N must be equal to or a multiple of the channel count.
-    /// - The buffer length must be divisible by N (i.e. no remainder).
+    /// - The buffer length must be divisible by `CHANNEL_COUNT` (i.e. no remainder).
     ///
-    /// Typical usage is `N == self.channel_count()`, in which case each array is one frame.
-    /// For `N = f * channel_count`, each array contains `f` consecutive frames.
+    /// Typical usage is `CHANNEL_COUNT == self.channel_count()`, in which case each array is one frame.
     fn as_frames<const CHANNEL_COUNT: usize>(&self) -> &'a [[f32; CHANNEL_COUNT]] {
+        let buffer = self.buffer();
+        let buffer_len = buffer.len();
+        let (chunks, remainder) = buffer.as_chunks::<CHANNEL_COUNT>();
         assert!(
-            self.buffer().len() % CHANNEL_COUNT == 0,
-            "as_frames: buffer length ({}) must be divisible by N ({CHANNEL_COUNT})",
-            self.buffer().len()
+            remainder.is_empty(),
+            "as_frames: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
-        let frames_count = self.buffer().len() / CHANNEL_COUNT;
-        let ptr = self.buffer().as_ptr() as *const [f32; CHANNEL_COUNT];
-        unsafe { std::slice::from_raw_parts(ptr, frames_count) }
+        chunks
     }
 }
 
@@ -260,7 +251,7 @@ pub trait InterleavedBuffer<'a> {
 /// ];
 ///
 /// // Get mutable access to frames and modify them
-/// for frame in buffer.as_mut_frames::<2>() {
+/// for frame in buffer.as_frames_mut::<2>() {
 ///     frame[0] *= 2.0; // Double the left channel
 ///     frame[1] *= 0.5; // Halve the right channel
 /// }
@@ -277,22 +268,28 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
     /// into the interleaved buffer.
     ///
     /// Note: Prefer using `frames_mut` or `as_frames_mut` for hot paths as it's more efficient.
-    fn channels_mut(&mut self, channel_count: usize) -> ChannelsMut<'a> {
+    fn channels_mut(
+        &mut self,
+        channel_count: usize,
+    ) -> impl Iterator<Item = impl Iterator<Item = &'a mut f32> + 'a> + 'a {
+        let buffer = self.buffer_mut();
+        let buffer_len = buffer.len();
         assert!(
-            self.buffer_mut().len() % channel_count == 0,
-            "channels_mut: buffer length ({}) must be divisible by channel count ({})",
-            self.buffer_mut().len(),
-            channel_count
+            buffer_len % channel_count == 0,
+            "channels_mut: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
-        let frame_count = self.buffer_mut().len() / channel_count;
-        let ptr = self.buffer_mut().as_mut_ptr();
-        ChannelsMut {
-            ptr,
-            channel: 0,
-            channel_count,
-            frame_count,
-            _marker: PhantomData,
-        }
+        let frame_count = buffer_len / channel_count;
+        let ptr = buffer.as_mut_ptr();
+        (0..channel_count).map(move |ch_idx| {
+            (0..frame_count).map(move |fr_idx| {
+                // SAFETY: The outer iterator produces one iterator for each channel.
+                // Each inner iterator accesses samples of one channel, which do not overlap with
+                // samples of other channels. The borrow checker cannot prove this, so we use
+                // unsafe. The lifetime 'a ensures that the returned iterators do not outlive
+                // the buffer.
+                unsafe { &mut *ptr.add(ch_idx + fr_idx * channel_count) }
+            })
+        })
     }
 
     /// Iterate over frames mutably. Each frame yields `channel_count` mutable samples.
@@ -303,31 +300,32 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
         &mut self,
         channel_count: usize,
     ) -> impl Iterator<Item = impl Iterator<Item = &'a mut f32> + 'a> + 'a {
+        let buffer = self.buffer_mut();
+        let buffer_len = buffer.len();
         assert!(
-            self.buffer_mut().len() % channel_count == 0,
-            "frames_mut: buffer length ({}) must be divisible by channel count ({})",
-            self.buffer().len(),
-            channel_count
+            buffer_len % channel_count == 0,
+            "frames_mut: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
-        self.buffer_mut()
+        buffer
             .chunks_exact_mut(channel_count)
             .map(move |channel_chunk| channel_chunk.iter_mut().take(channel_count))
     }
 
-    /// Mutable view of the interleaved samples as contiguous frames of size N (channel count).
+    /// Mutable view of the interleaved samples as contiguous frames of size `CHANNEL_COUNT`.
     ///
     /// Constraints:
-    /// - N must be equal to or a multiple of the channel count.
-    /// - The buffer length must be divisible by N (i.e. no remainder).
-    fn as_mut_frames<const CHANNEL_COUNT: usize>(&mut self) -> &mut [[f32; CHANNEL_COUNT]] {
+    /// - The buffer length must be divisible by `CHANNEL_COUNT` (i.e. no remainder).
+    ///
+    /// Typical usage is `CHANNEL_COUNT == self.channel_count()`, in which case each array is one frame.
+    fn as_frames_mut<const CHANNEL_COUNT: usize>(&mut self) -> &'a mut [[f32; CHANNEL_COUNT]] {
+        let buffer = self.buffer_mut();
+        let buffer_len = buffer.len();
+        let (chunks, remainder) = buffer.as_chunks_mut::<CHANNEL_COUNT>();
         assert!(
-            self.buffer_mut().len() % CHANNEL_COUNT == 0,
-            "as_frames_mut: buffer length ({}) must be divisible by N ({CHANNEL_COUNT})",
-            self.buffer_mut().len()
+            remainder.is_empty(),
+            "as_mut_frames: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
-        let frames_count = self.buffer_mut().len() / CHANNEL_COUNT;
-        let ptr = self.buffer_mut().as_mut_ptr() as *mut [f32; CHANNEL_COUNT];
-        unsafe { std::slice::from_raw_parts_mut(ptr, frames_count) }
+        chunks
     }
 }
 
@@ -368,154 +366,6 @@ impl<'a> InterleavedBufferMut<'a> for Vec<f32> {
         unsafe { &mut *(self.as_mut_slice() as *mut [f32]) }
     }
 }
-
-// -------------------------------------------------------------------------------------------------
-
-/// Iterator over channels of an interleaved buffer (immutable).
-pub struct Channels<'a> {
-    ptr: *const f32,
-    channel: usize,
-    channel_count: usize,
-    frame_count: usize,
-    _marker: PhantomData<&'a f32>,
-}
-
-impl<'a> Iterator for Channels<'a> {
-    type Item = ChannelIter<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.channel >= self.channel_count {
-            return None;
-        }
-        let iter = ChannelIter {
-            ptr: self.ptr,
-            index: self.channel,
-            remaining: self.frame_count,
-            stride: self.channel_count,
-            _marker: PhantomData,
-        };
-        self.channel += 1;
-        Some(iter)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.channel_count.saturating_sub(self.channel);
-        (remaining, Some(remaining))
-    }
-}
-
-impl<'a> ExactSizeIterator for Channels<'a> {}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Immutable iterator over one channel in an interleaved buffer.
-pub struct ChannelIter<'a> {
-    ptr: *const f32,
-    index: usize,
-    remaining: usize,
-    stride: usize,
-    _marker: PhantomData<&'a f32>,
-}
-
-impl<'a> Iterator for ChannelIter<'a> {
-    type Item = &'a f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        // SAFETY:
-        // - Pointer derived from a valid slice.
-        // - Index increases by stride each call, yielding each location at most once.
-        // - Immutable references can alias.
-        unsafe {
-            let p = self.ptr.add(self.index);
-            self.index += self.stride;
-            self.remaining -= 1;
-            Some(&*p)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-}
-
-impl<'a> ExactSizeIterator for ChannelIter<'a> {}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Iterator over mutable channels of an interleaved buffer.
-pub struct ChannelsMut<'a> {
-    ptr: *mut f32,
-    channel: usize,
-    channel_count: usize,
-    frame_count: usize,
-    _marker: PhantomData<&'a mut f32>,
-}
-
-impl<'a> Iterator for ChannelsMut<'a> {
-    type Item = ChannelIterMut<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.channel >= self.channel_count {
-            return None;
-        }
-        let iter = ChannelIterMut {
-            ptr: self.ptr,
-            index: self.channel,
-            remaining: self.frame_count,
-            stride: self.channel_count,
-            _marker: PhantomData,
-        };
-        self.channel += 1;
-        Some(iter)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.channel_count.saturating_sub(self.channel);
-        (remaining, Some(remaining))
-    }
-}
-
-impl<'a> ExactSizeIterator for ChannelsMut<'a> {}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Mutable iterator over one channel in an interleaved buffer.
-pub struct ChannelIterMut<'a> {
-    ptr: *mut f32,
-    index: usize,
-    remaining: usize,
-    stride: usize,
-    _marker: PhantomData<&'a mut f32>,
-}
-
-impl<'a> Iterator for ChannelIterMut<'a> {
-    type Item = &'a mut f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        // SAFETY:
-        // - Pointer derived from a valid slice.
-        // - Index increases by stride each call, yielding each location at most once.
-        // - Mutable references do not alias.
-        unsafe {
-            let p = self.ptr.add(self.index);
-            self.index += self.stride;
-            self.remaining -= 1;
-            Some(&mut *p)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-}
-
-impl<'a> ExactSizeIterator for ChannelIterMut<'a> {}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -659,11 +509,7 @@ mod tests {
             10.0, 11.0, // frame 1: L, R
             20.0, 21.0, // frame 2: L, R
         ];
-        let channels: Vec<Vec<f32>> = data
-            .as_slice()
-            .channels(2)
-            .map(|ch| ch.copied().collect())
-            .collect();
+        let channels: Vec<Vec<f32>> = data.channels(2).map(|ch| ch.copied().collect()).collect();
         assert_eq!(channels, vec![vec![0.0, 10.0, 20.0], vec![1.0, 11.0, 21.0]]);
 
         for (i, ch) in data.channels_mut(2).enumerate() {
@@ -714,7 +560,7 @@ mod tests {
         let frames = data.as_frames::<2>();
         assert_eq!(frames, &[[0.0_f32, 1.0], [10.0, 11.0], [20.0, 21.0]][..]);
 
-        let frames = data.as_mut_frames::<2>();
+        let frames = data.as_frames_mut::<2>();
         for frame in frames.iter_mut() {
             frame[0] += 0.25;
             frame[1] += 0.75;

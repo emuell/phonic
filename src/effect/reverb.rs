@@ -422,7 +422,7 @@ impl Effect for ReverbEffect {
             .unwrap();
 
         assert!(self.channel_count == 2);
-        for frame in output.as_mut_frames::<2>() {
+        for frame in output.as_frames_mut::<2>() {
             let mut input_sample_l = frame[0] as f64;
             let mut input_sample_r = frame[1] as f64;
 

@@ -17,9 +17,7 @@ pub(crate) mod smoothed;
 pub(crate) mod wave;
 
 /// Interleaved buffer helpers.
-pub use buffer::{
-    ChannelIter, ChannelIterMut, Channels, ChannelsMut, InterleavedBuffer, InterleavedBufferMut,
-};
+pub use buffer::{InterleavedBuffer, InterleavedBufferMut};
 
 /// Volume and generic value smoothing helpers.
 pub use fader::VolumeFader;

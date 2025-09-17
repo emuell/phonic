@@ -305,7 +305,7 @@ impl Effect for CompressorEffect {
         copy_buffers(input, output);
         let input_frames = input.as_frames::<2>();
 
-        for (out_frame, in_frame) in output.as_mut_frames::<2>().iter_mut().zip(input_frames) {
+        for (out_frame, in_frame) in output.as_frames_mut::<2>().iter_mut().zip(input_frames) {
             // Get delayed frame from delay line (or original frame if no delay)
             let delayed_frame = self.delay_line.process(in_frame);
 
