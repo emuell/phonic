@@ -32,6 +32,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "bungee-timestretch")]
+use crate::source::stretched::StretchedSource;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Unique ID for played back file or synth sources.
@@ -287,6 +290,8 @@ impl Player {
         let playback_id = file_source.playback_id();
         let playback_volume = file_source.playback_options().volume;
         let playback_panning = file_source.playback_options().panning;
+        #[cfg(feature = "bungee-timestretch")]
+        let playback_stretch_speed = file_source.playback_options().stretch;
         let playback_message_queue =
             PlaybackMessageQueue::File(file_source.playback_message_queue());
         // convert file to mixer's rate and channel layout
@@ -296,6 +301,9 @@ impl Player {
             self.output_device.sample_rate(),
             ResamplingQuality::Default,
         );
+        // apply optional time stretching
+        #[cfg(feature = "bungee-timestretch")]
+        let converted_source = StretchedSource::new(converted_source, playback_stretch_speed);
         // apply volume options
         let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
         let volume_message_queue = amplified_source.message_queue();
