@@ -279,11 +279,18 @@ impl PreloadedFileSource {
 
     fn write_buffer(&mut self, output: &mut [f32]) -> usize {
         let mut written = 0;
+
         let loop_range = self
             .file_buffer
             .loop_range
             .clone()
             .unwrap_or(0..self.file_buffer.buffer.len());
+
+        let resampler = &mut self.file_source.resampler;
+        let resampler_input_buffer = &mut self.file_source.resampler_input_buffer;
+
+        let required_input_len = resampler.required_input_buffer_size().unwrap_or(0);
+
         while written < output.len() {
             // write from resampled buffer into output and apply volume
             let remaining_input_len = if self.playback_repeat > 0 {
@@ -297,36 +304,22 @@ impl PreloadedFileSource {
             let remaining_input_buffer = &self.file_buffer.buffer
                 [self.playback_pos..self.playback_pos + remaining_input_len];
             let remaining_output = &mut output[written..];
-            // pad input with zeros if resampler has input size constrains (should only happen in the last process calls)
-            let required_input_len = self
-                .file_source
-                .resampler
-                .required_input_buffer_size()
-                .unwrap_or(0);
-            let (input_consumed, output_written) = if remaining_input_buffer.len()
-                < required_input_len
-            {
-                self.file_source.resampler_input_buffer.reset_range();
-                self.file_source
-                    .resampler_input_buffer
-                    .copy_from(remaining_input_buffer);
-                clear_buffer(
-                    &mut self.file_source.resampler_input_buffer.get_mut()[remaining_input_len..],
-                );
-                let (_, output_written) = self
-                    .file_source
-                    .resampler
-                    .process(
-                        self.file_source.resampler_input_buffer.get(),
-                        remaining_output,
-                    )
-                    .expect("PreloadedFile resampling failed");
-                (remaining_input_len, output_written)
-            } else {
-                self.file_source
-                    .resampler
-                    .process(remaining_input_buffer, remaining_output)
-                    .expect("PreloadedFile resampling failed")
+            let (input_consumed, output_written) = {
+                // pad input with zeros if resampler has input size constrains.
+                // should only happen in the last process call at the EOF
+                if remaining_input_buffer.len() < required_input_len {
+                    resampler_input_buffer.reset_range();
+                    resampler_input_buffer.copy_from(remaining_input_buffer);
+                    clear_buffer(&mut resampler_input_buffer.get_mut()[remaining_input_len..]);
+                    let (_, output_written) = resampler
+                        .process(resampler_input_buffer.get(), remaining_output)
+                        .expect("PreloadedFile resampling failed");
+                    (remaining_input_len, output_written)
+                } else {
+                    resampler
+                        .process(remaining_input_buffer, remaining_output)
+                        .expect("PreloadedFile resampling failed")
+                }
             };
 
             // move buffer read pos
@@ -342,10 +335,9 @@ impl PreloadedFileSource {
                     self.playback_pos = loop_range.start;
                 } else {
                     self.playback_pos_eof = true;
-                    break;
                 }
             }
-            if output_written == 0 {
+            if self.playback_pos_eof && output_written == 0 {
                 // got no more output from file or resampler
                 break;
             }

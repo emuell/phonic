@@ -24,7 +24,7 @@ pub enum ResamplingQuality {
 pub struct ResampledSource {
     source: Box<dyn Source>,
     output_sample_rate: u32,
-    resampler: Box<dyn AudioResampler>,
+    resampler: Option<Box<dyn AudioResampler>>,
     input_buffer: TempBuffer,
     output_buffer: TempBuffer,
 }
@@ -56,21 +56,33 @@ impl ResampledSource {
             (output_sample_rate as f64 / speed) as u32,
             source.channel_count(),
         );
-        let resampler: Box<dyn AudioResampler> = match quality {
-            ResamplingQuality::HighQuality => Box::new(
-                RubatoResampler::new(resampler_specs)
-                    .expect("Failed to create new rubato resampler instance"),
-            ),
-            ResamplingQuality::Default => Box::new(
-                CubicResampler::new(resampler_specs)
-                    .expect("Failed to create new cubic resampler instance"),
-            ),
+        let resampler: Option<Box<dyn AudioResampler>> = if speed == 1.0 {
+            None
+        } else {
+            match quality {
+                ResamplingQuality::HighQuality => Some(Box::new(
+                    RubatoResampler::new(resampler_specs)
+                        .expect("Failed to create new rubato resampler instance"),
+                )),
+                ResamplingQuality::Default => Some(Box::new(
+                    CubicResampler::new(resampler_specs)
+                        .expect("Failed to create new cubic resampler instance"),
+                )),
+            }
         };
         const DEFAULT_CHUNK_SIZE: usize = 512;
-        let input_buffer_len = resampler
-            .max_input_buffer_size()
-            .unwrap_or(DEFAULT_CHUNK_SIZE);
-        let output_buffer_len = DEFAULT_CHUNK_SIZE;
+        let input_buffer_len = if let Some(resampler) = &resampler {
+            resampler
+                .max_input_buffer_size()
+                .unwrap_or(DEFAULT_CHUNK_SIZE * source.channel_count())
+        } else {
+            0
+        };
+        let output_buffer_len = if resampler.is_some() {
+            DEFAULT_CHUNK_SIZE * source.channel_count()
+        } else {
+            0
+        };
         Self {
             source: Box::new(source),
             resampler,
@@ -83,43 +95,50 @@ impl ResampledSource {
 
 impl Source for ResampledSource {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
-        let mut total_written = 0;
-        while total_written < output.len() {
-            if self.output_buffer.is_empty() {
-                self.output_buffer.reset_range();
-                // when there's no input, try fetch some from our source
-                if self.input_buffer.is_empty() {
-                    let source_time = time
-                        .with_added_frames((total_written / self.source.channel_count()) as u64);
-                    self.input_buffer.reset_range();
-                    let input_read = self.source.write(self.input_buffer.get_mut(), &source_time);
-
-                    // fill up with zeros if resampler needs more samples
-                    if let Some(required_input_len) = self.resampler.required_input_buffer_size() {
-                        if self.input_buffer.len() < required_input_len {
-                            self.input_buffer.set_range(0, required_input_len);
-                            clear_buffer(&mut self.input_buffer.get_mut()[input_read..]);
+        if let Some(resampler) = self.resampler.as_deref_mut() {
+            let mut total_written = 0;
+            while total_written < output.len() {
+                if self.output_buffer.is_empty() {
+                    self.output_buffer.reset_range();
+                    // fetch new input from our source
+                    if self.input_buffer.is_empty() {
+                        let source_time = time.with_added_frames(
+                            (total_written / self.source.channel_count()) as u64,
+                        );
+                        self.input_buffer.reset_range();
+                        let input_read =
+                            self.source.write(self.input_buffer.get_mut(), &source_time);
+                        // pad, fill up up missing inputs with zeros if the resampler has an input buffer constrain
+                        // this should only happen for exhausted sources...
+                        if input_read < self.input_buffer.len() {
+                            let required_input_len =
+                                resampler.required_input_buffer_size().unwrap_or(0);
+                            if self.input_buffer.len() < required_input_len {
+                                self.input_buffer.set_range(0, required_input_len);
+                                clear_buffer(&mut self.input_buffer.get_mut()[input_read..]);
+                            }
                         }
                     }
+                    // run resampler to generate some output
+                    let (input_consumed, output_written) = resampler
+                        .process(self.input_buffer.get(), self.output_buffer.get_mut())
+                        .expect("Resampling failed");
+                    self.input_buffer.consume(input_consumed);
+                    self.output_buffer.set_range(0, output_written);
+                    if self.source.is_exhausted() && output_written == 0 {
+                        // source and resampler produced no more output: we're done
+                        break;
+                    }
                 }
-                // run resampler to generate some output
-                let (input_consumed, output_written) = self
-                    .resampler
-                    .process(self.input_buffer.get(), self.output_buffer.get_mut())
-                    .expect("Resampling failed");
-                self.input_buffer.consume(input_consumed);
-                self.output_buffer.set_range(0, output_written);
-                if output_written == 0 {
-                    // resampler produced no more output: we're done
-                    break;
-                }
+                let target = &mut output[total_written..];
+                let written = self.output_buffer.copy_to(target);
+                self.output_buffer.consume(written);
+                total_written += written;
             }
-            let target = &mut output[total_written..];
-            let written = self.output_buffer.copy_to(target);
-            self.output_buffer.consume(written);
-            total_written += written;
+            total_written
+        } else {
+            self.source.write(output, time)
         }
-        total_written
     }
 
     fn channel_count(&self) -> usize {

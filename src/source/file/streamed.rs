@@ -179,48 +179,41 @@ impl StreamedFileSource {
 
     fn write_buffer(&mut self, output: &mut [f32]) -> usize {
         let mut written = 0;
+
+        let resampler = &mut *self.file_source.resampler;
+        let resampler_input_buffer = &mut self.file_source.resampler_input_buffer;
+
         while written < output.len() {
-            if self.file_source.resampler_input_buffer.is_empty() {
-                self.file_source.resampler_input_buffer.reset_range();
+            // fill up input buffer
+            if resampler_input_buffer.is_empty() {
+                // read input from ring buffer
+                resampler_input_buffer.reset_range();
                 let read_samples = self
                     .consumer
-                    .read(self.file_source.resampler_input_buffer.get_mut())
+                    .read(resampler_input_buffer.get_mut())
                     .unwrap_or(0);
-                self.file_source
-                    .resampler_input_buffer
-                    .set_range(0, read_samples);
-
+                resampler_input_buffer.set_range(0, read_samples);
                 // pad with zeros if resampler has input size constrains
-                let required_input_len = self
-                    .file_source
-                    .resampler
-                    .required_input_buffer_size()
-                    .unwrap_or(0);
-                if self.file_source.resampler_input_buffer.len() < required_input_len
-                    // stop filling up empty input buffers when we've reached the end of file
-                    && (read_samples != 0
-                        || !self.worker_state.end_of_file.load(Ordering::Relaxed))
+                let required_input_len = resampler.required_input_buffer_size().unwrap_or(0);
+                if resampler_input_buffer.len() < required_input_len
+                    && (read_samples != 0 || !self.worker_state.end_of_file.load(Ordering::Relaxed))
                 {
-                    self.file_source
-                        .resampler_input_buffer
-                        .set_range(0, required_input_len);
-                    clear_buffer(
-                        &mut self.file_source.resampler_input_buffer.get_mut()[read_samples..],
+                    log::warn!(
+                        "File stream buffer timeout: Padding {} missing samples with silence...",
+                        required_input_len - read_samples
                     );
+                    resampler_input_buffer.set_range(0, required_input_len);
+                    clear_buffer(&mut resampler_input_buffer.get_mut()[read_samples..]);
                 }
             }
-            let input = self.file_source.resampler_input_buffer.get();
-            let target = &mut output[written..];
-            let (input_consumed, output_written) = self
-                .file_source
-                .resampler
-                .process(input, target)
+            // run resampler
+            let (input_consumed, output_written) = resampler
+                .process(resampler_input_buffer.get(), &mut output[written..])
                 .expect("StreamedFile resampling failed");
-            self.file_source
-                .resampler_input_buffer
-                .consume(input_consumed);
+            resampler_input_buffer.consume(input_consumed);
             written += output_written;
-            if output_written == 0 {
+
+            if self.worker_state.end_of_file.load(Ordering::Relaxed) && output_written == 0 {
                 // got no more output from file or resampler
                 break;
             }
