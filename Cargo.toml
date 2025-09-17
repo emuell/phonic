@@ -54,6 +54,7 @@ assert_no_alloc = { version = "^1.1", features = [
 fundsp = { version = "^0.20", optional = true, default-features = false }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
+bungee-rs = { version = "^0.1", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
@@ -78,12 +79,22 @@ opt-level = 2
 opt-level = 2
 
 [features]
-assert-allocs = ["dep:assert_no_alloc"]
+# output impls
 cpal-output = ["dep:cpal"]
 wav-output = ["dep:hound"]
 web-output = []
+# optional features
+assert-allocs = ["dep:assert_no_alloc"]
 fundsp = ["dep:fundsp"]
-default = ["cpal-output", "wav-output", "fundsp", "assert-allocs"]
+bungee-timestretch = ["dep:bungee-rs"]
+# default features are all features without emscripten, web support
+default = [
+    "assert-allocs",
+    "cpal-output",
+    "wav-output",
+    "fundsp",
+    "bungee-timestretch",
+]
 
 [package.metadata.docs.rs]
 # don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
