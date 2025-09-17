@@ -51,6 +51,7 @@ assert_no_alloc = { version = "^1.1", features = [
 dasp = { version = "^0.11", features = ["signal"], optional = true }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
+bungee-rs = { version = "^0.1", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
@@ -79,16 +80,21 @@ opt-level = 2 # enable optimization for slow DSP packages in debug builds
 
 [features]
 assert-allocs = ["assert_no_alloc"]
+# output impls
 cpal-output = ["cpal"]
 wav-output = ["hound"]
 web-output = []
+# optional features
 dasp-synth = ["dasp"]
-default = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
-
-[package.metadata.docs.rs]
-# don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
-no-default-features = true
-features = ["cpal-output", "wav-output", "dasp-synth"]
+bungee-timestretch = ["bungee-rs"]
+# default features are all features without emscripten, web support
+default = [
+    "cpal-output",
+    "wav-output",
+    "bungee-timestretch",
+    "dasp-synth",
+    "assert-allocs",
+]
 
 [[example]]
 name = "play-file"
