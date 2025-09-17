@@ -48,8 +48,8 @@ fn main() -> Result<(), Error> {
                 FilePlaybackOptions::default(),
             )?,
         player
-            // this file is going to be streamed on the fly with a lowered volume
-            // and a fade out. also pan it a bit to the left and loop it 2 times.
+            // this file is going to be streamed on the fly, looped and time-stretched and
+            // played back with a lowered volume, custom panning and a fade out.
             .play_file(
                 "assets/YuaiLoop.wav",
                 FilePlaybackOptions::default()
@@ -57,7 +57,8 @@ fn main() -> Result<(), Error> {
                     .volume_db(-2.0)
                     .panning(-0.3)
                     .speed(speed_from_note(58))
-                    .repeat(2)
+                    .stretch(0.75)
+                    .repeat(1)
                     .fade_out(Duration::from_secs(3)),
             )?,
     ];
@@ -110,10 +111,10 @@ fn main() -> Result<(), Error> {
     // start playing
     player.start();
 
-    // stop (fade-out) the loop after 3 secs
+    // stop (fade-out) the loop after 8 secs
     let play_time = Instant::now();
     while is_running.load(Ordering::Relaxed) {
-        if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(3) {
+        if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(8) {
             player.stop_source(loop_playback_id.unwrap(), None)?;
             loop_playback_id = None;
         }
