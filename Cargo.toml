@@ -110,7 +110,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "play-file"
-required-features = ["wav-output"]
+required-features = ["wav-output", "bungee-timestretch"]
 [[example]]
 name = "play-synth"
 required-features = ["wav-output", "fundsp"]

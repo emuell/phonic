@@ -1,4 +1,5 @@
 //! AudioTimeStretcher trait for time stretching interleaved audio (sources).
+#![allow(unused)]
 
 use crate::Error;
 

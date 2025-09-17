@@ -42,6 +42,11 @@ pub struct FilePlaybackOptions {
     /// See also `resampling_quality` property.
     pub speed: f64,
 
+    /// By default 1.0f64. Customize to time stretch the file playback. Works in combination
+    /// with the pitch `speed` property too, so you can re-pitch and stretch a file as needed.
+    #[cfg(feature = "bungee-timestretch")]
+    pub stretch: f64,
+
     /// By default `None`: When `Some(> 0)`, this is the number of times the file should
     /// be looped. When supported by the file reader, embedded file loop points are used,
     /// else the entire sample range is repeated.
@@ -89,6 +94,8 @@ impl Default for FilePlaybackOptions {
             volume: 1.0,
             panning: 0.0,
             speed: 1.0,
+            #[cfg(feature = "bungee-timestretch")]
+            stretch: 1.0,
             repeat: None,
             start_time: None,
             fade_in_duration: None,
@@ -136,6 +143,12 @@ impl FilePlaybackOptions {
 
     pub fn speed(mut self, speed: f64) -> Self {
         self.speed = speed;
+        self
+    }
+
+    #[cfg(feature = "bungee-timestretch")]
+    pub fn stretch(mut self, speed: f64) -> Self {
+        self.stretch = speed;
         self
     }
 
@@ -192,10 +205,17 @@ impl FilePlaybackOptions {
                 self.panning
             )));
         }
-        if self.speed < 0.0 || self.speed.is_nan() || self.speed.is_infinite() {
+        if self.speed <= 0.0 || self.speed.is_nan() || self.speed.is_infinite() {
             return Err(Error::ParameterError(format!(
                 "playback options 'speed' value is '{}'",
                 self.speed
+            )));
+        }
+        #[cfg(feature = "bungee-timestretch")]
+        if self.stretch <= 0.0 || self.stretch > 100.0 || self.stretch.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'stretch' speed value is '{}'",
+                self.stretch
             )));
         }
         Ok(())
