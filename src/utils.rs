@@ -6,6 +6,7 @@ pub(crate) mod dsp;
 pub(crate) mod event;
 pub(crate) mod fader;
 pub(crate) mod resampler;
+pub(crate) mod stretcher;
 pub(crate) mod time;
 
 pub mod ahdsr;

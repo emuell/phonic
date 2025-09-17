@@ -60,6 +60,7 @@ fundsp = { version = "^0.23", optional = true, default-features = false, feature
 ] }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
+bungee-rs = { version = "^0.1", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
@@ -84,17 +85,27 @@ opt-level = 2
 opt-level = 2
 
 [features]
-assert-allocs = ["dep:assert_no_alloc"]
+# output impls
 cpal-output = ["dep:cpal"]
 wav-output = ["dep:hound"]
 web-output = []
+# optional features
+assert-allocs = ["dep:assert_no_alloc"]
+bungee-timestretch = ["dep:bungee-rs"]
 fundsp = ["dep:fundsp"]
-default = ["cpal-output", "wav-output", "assert-allocs"]
+# all features without emscripten, web support
+default = [
+    "assert-allocs",
+    "cpal-output",
+    "wav-output",
+    "bungee-timestretch",
+    "fundsp",
+]
 
 [package.metadata.docs.rs]
-# don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
+# don't include "web-audio" here: it fails to compile at docs.rs
 no-default-features = true
-features = ["cpal-output", "wav-output", "fundsp"]
+features = ["cpal-output", "wav-output", "bungee-timestretch", "fundsp"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
@@ -106,6 +117,9 @@ required-features = ["wav-output", "fundsp"]
 [[example]]
 name = "play-interactive"
 required-features = ["wav-output", "fundsp"]
+[[example]]
+name = "play-grains"
+required-features = ["wav-output"]
 [[example]]
 name = "play-custom"
 required-features = ["wav-output"]
