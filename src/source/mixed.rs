@@ -2,20 +2,22 @@ use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
-use sort::bubble_sort_cmp;
 
 use crate::{
     effect::{Effect, EffectMessage},
     player::{EffectId, PlaybackMessageSender},
     source::{file::FilePlaybackMessage, Source, SourceTime},
-    utils::buffer::{add_buffers, clear_buffer},
+    utils::{
+        buffer::{add_buffers, clear_buffer},
+        event::{Event, EventProcessor},
+    },
     PlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// Mixer internal struct to keep track of currently playing sources.
-struct PlayingSource {
+pub(crate) struct PlayingSource {
     is_active: bool,
     playback_id: PlaybackId,
     playback_message_queue: PlaybackMessageSender,
@@ -26,8 +28,8 @@ struct PlayingSource {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Mixer internal event to schedule playback changes.
-enum MixerEvent {
+/// Mixer internal struct to apply sample time tagged playback events.
+pub(crate) enum MixerEvent {
     SeekSource {
         playback_id: PlaybackId,
         position: Duration,
@@ -46,7 +48,7 @@ enum MixerEvent {
     },
 }
 
-impl MixerEvent {
+impl Event for MixerEvent {
     fn sample_time(&self) -> u64 {
         match self {
             Self::SeekSource { sample_time, .. } => *sample_time,
@@ -59,7 +61,7 @@ impl MixerEvent {
 // -------------------------------------------------------------------------------------------------
 
 /// Messages send from player to mixer to start or stop playing sources.
-pub(crate) enum MixerSourceMessage {
+pub(crate) enum MixerMessage {
     AddSource {
         playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageSender,
@@ -103,10 +105,10 @@ pub(crate) enum MixerSourceMessage {
 
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
-    playing_sources: Vec<PlayingSource>,
+    playing_sources: VecDeque<PlayingSource>,
     mixers: Vec<(EffectId, Box<MixedSource>)>,
     effects: Vec<(EffectId, Box<dyn Effect>)>,
-    message_queue: Arc<ArrayQueue<MixerSourceMessage>>,
+    message_queue: Arc<ArrayQueue<MixerMessage>>,
     events: VecDeque<MixerEvent>,
     channel_count: usize,
     sample_rate: u32,
@@ -122,7 +124,7 @@ impl MixedSource {
     pub fn new(channel_count: usize, sample_rate: u32) -> Self {
         // prealloc playing source, sub mixer and effect lists
         const PLAYING_EVENTS_CAPACITY: usize = 1024;
-        let playing_sources = Vec::with_capacity(PLAYING_EVENTS_CAPACITY);
+        let playing_sources = VecDeque::with_capacity(PLAYING_EVENTS_CAPACITY);
         const MIXERS_CAPACITY: usize = 16;
         let mixers = Vec::with_capacity(MIXERS_CAPACITY);
         const EFFECTS_CAPACITY: usize = 16;
@@ -151,7 +153,7 @@ impl MixedSource {
 
     /// Allows controlling the mixer by pushing messages into this event queue.
     /// NB: When adding new sources, ensure they match the mixers sample rate and channel layout
-    pub(crate) fn message_queue(&self) -> Arc<ArrayQueue<MixerSourceMessage>> {
+    pub(crate) fn message_queue(&self) -> Arc<ArrayQueue<MixerMessage>> {
         self.message_queue.clone()
     }
 
@@ -179,11 +181,9 @@ impl MixedSource {
 
     /// Process pending mixer messages
     fn process_messages(&mut self, time: &SourceTime) {
-        let mut sources_added = false;
-        let mut events_added = false;
         while let Some(event) = self.message_queue.pop() {
             match event {
-                MixerSourceMessage::AddSource {
+                MixerMessage::AddSource {
                     playback_id,
                     playback_message_queue,
                     source,
@@ -199,60 +199,65 @@ impl MixedSource {
                         self.sample_rate,
                         "adjust source's sample rate before adding it"
                     );
-                    sources_added = true;
-                    self.playing_sources.push(PlayingSource {
-                        is_active: true,
-                        playback_id,
-                        playback_message_queue,
-                        source,
-                        start_time: sample_time,
-                        stop_time: None,
-                    });
+                    // sort playing_sources by start time
+                    let playing_sources = &mut self.playing_sources;
+                    let insert_pos = playing_sources
+                        .make_contiguous()
+                        .partition_point(|e| e.start_time < sample_time);
+                    playing_sources.insert(
+                        insert_pos,
+                        PlayingSource {
+                            is_active: true,
+                            playback_id,
+                            playback_message_queue,
+                            source,
+                            start_time: sample_time,
+                            stop_time: None,
+                        },
+                    );
                 }
-                MixerSourceMessage::AddEffect { id, effect } => {
+                MixerMessage::AddEffect { id, effect } => {
                     self.effects.push((id, effect));
                 }
-                MixerSourceMessage::AddMixer { id, mixer } => {
+                MixerMessage::AddMixer { id, mixer } => {
                     self.mixers.push((id, mixer));
                 }
-                MixerSourceMessage::ProcessEffectMessage {
+                MixerMessage::ProcessEffectMessage {
                     effect_id,
                     message,
                     sample_time,
                 } => {
-                    self.events.push_back(MixerEvent::ProcessEffectMessage {
+                    self.insert_event(MixerEvent::ProcessEffectMessage {
                         effect_id,
                         message,
                         sample_time,
                     });
-                    events_added = true;
                 }
-                MixerSourceMessage::SetSourceSpeed {
+                MixerMessage::SetSourceSpeed {
                     playback_id,
                     speed,
                     glide,
                     sample_time,
                 } => {
-                    self.events.push_back(MixerEvent::SetSourceSpeed {
+                    self.insert_event(MixerEvent::SetSourceSpeed {
                         playback_id,
                         speed,
                         glide,
                         sample_time,
                     });
-                    events_added = true;
                 }
-                MixerSourceMessage::SeekSource {
+                MixerMessage::SeekSource {
                     playback_id,
                     position,
                     sample_time,
                 } => {
-                    self.events.push_back(MixerEvent::SeekSource {
+                    self.insert_event(MixerEvent::SeekSource {
                         playback_id,
                         position,
                         sample_time,
                     });
                 }
-                MixerSourceMessage::StopSource {
+                MixerMessage::StopSource {
                     playback_id,
                     sample_time,
                 } => {
@@ -264,95 +269,13 @@ impl MixedSource {
                         source.stop_time = Some(sample_time);
                     }
                 }
-                MixerSourceMessage::RemoveAllPendingSources => {
+                MixerMessage::RemoveAllPendingSources => {
                     // remove all sources which are not yet playing
                     self.remove_matching_sources(|source| source.start_time > time.pos_in_frames);
                     self.remove_matching_events(|event| event.sample_time() > time.pos_in_frames);
                 }
-                MixerSourceMessage::RemoveAllSources => {
+                MixerMessage::RemoveAllSources => {
                     self.remove_all_playing_sources();
-                }
-            }
-        }
-
-        // Sort sources by start time if any new sources were added
-        if sources_added {
-            // keep sources sorted by sample time: this makes batch processing easier
-            // NB: use "swap" based sorting here to avoid memory allocations
-            bubble_sort_cmp(&mut self.playing_sources, |a, b| {
-                a.start_time.cmp(&b.start_time) as isize
-            });
-        }
-
-        // Sort events by sample time if any new events were added.
-        if events_added {
-            bubble_sort_cmp(self.events.make_contiguous(), |a, b| {
-                a.sample_time().cmp(&b.sample_time()) as isize
-            });
-        }
-    }
-
-    // Process pending mixer events that are due at the current time
-    fn process_events(&mut self, current_time: u64) {
-        while self
-            .events
-            .front()
-            .is_some_and(|e| e.sample_time() <= current_time)
-        {
-            let event = self.events.pop_front().unwrap();
-            match event {
-                MixerEvent::SeekSource {
-                    playback_id,
-                    position,
-                    sample_time: _,
-                } => {
-                    if let Some(source) = self
-                        .playing_sources
-                        .iter_mut()
-                        .find(|s| s.playback_id == playback_id)
-                    {
-                        if let PlaybackMessageSender::File(queue) = &source.playback_message_queue {
-                            if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
-                                log::warn!("Failed to send seek command to file");
-                            }
-                        } else {
-                            log::warn!("Trying to seek a synth source, which is not supported");
-                        }
-                    }
-                }
-                MixerEvent::SetSourceSpeed {
-                    playback_id,
-                    speed,
-                    glide,
-                    sample_time: _,
-                } => {
-                    if let Some(source) = self
-                        .playing_sources
-                        .iter()
-                        .find(|s| s.playback_id == playback_id)
-                    {
-                        if let PlaybackMessageSender::File(queue) = &source.playback_message_queue {
-                            if queue
-                                .push(FilePlaybackMessage::SetSpeed(speed, glide))
-                                .is_err()
-                            {
-                                log::warn!("Failed to send set speed event");
-                            }
-                        }
-                    }
-                }
-                MixerEvent::ProcessEffectMessage {
-                    effect_id,
-                    message,
-                    sample_time: _,
-                } => {
-                    if let Some((_, effect)) =
-                        self.effects.iter_mut().find(|(id, _)| *id == effect_id)
-                    {
-                        effect.process_message(&**message);
-                    } else {
-                        log::warn!("Effect with id {effect_id} not found for scheduled message");
-                    }
                 }
             }
         }
@@ -452,9 +375,7 @@ impl Source for MixedSource {
             let frames_to_process = {
                 let frames_remaining = output_frame_count - total_frames_written;
                 let frames_in_temp_out = self.temp_out.len() / self.channel_count;
-                let frames_until_next_event = self.events.front().map_or(usize::MAX, |e| {
-                    (e.sample_time() - current_time_in_frames) as usize
-                });
+                let frames_until_next_event = self.time_until_next_event(current_time_in_frames);
                 frames_remaining
                     .min(frames_in_temp_out)
                     .min(frames_until_next_event)
@@ -505,5 +426,72 @@ impl Source for MixedSource {
     fn is_exhausted(&self) -> bool {
         // mixer never is exhausted, as we may get new sources added any time
         false
+    }
+}
+
+impl EventProcessor for MixedSource {
+    type Event = MixerEvent;
+
+    fn events(&self) -> &VecDeque<Self::Event> {
+        &self.events
+    }
+    fn events_mut(&mut self) -> &mut VecDeque<Self::Event> {
+        &mut self.events
+    }
+
+    fn process_event(&mut self, event: Self::Event) {
+        match event {
+            MixerEvent::SeekSource {
+                playback_id,
+                position,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter_mut()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageSender::File(queue) = &source.playback_message_queue {
+                        if let Err(msg) = queue.push(FilePlaybackMessage::Seek(position)) {
+                            log::warn!("Failed to send seek command to file. Force pushing it...");
+                            let _ = queue.force_push(msg);
+                        }
+                    } else {
+                        log::warn!("Trying to seek a synth source, which is not supported");
+                    }
+                }
+            }
+            MixerEvent::SetSourceSpeed {
+                playback_id,
+                speed,
+                glide,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageSender::File(queue) = &source.playback_message_queue {
+                        if let Err(msg) = queue.push(FilePlaybackMessage::SetSpeed(speed, glide)) {
+                            log::warn!("Failed to send set speed event. Force pushing it...");
+                            let _ = queue.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::ProcessEffectMessage {
+                effect_id,
+                message,
+                sample_time: _,
+            } => {
+                if let Some((_, effect)) = self.effects.iter_mut().find(|(id, _)| *id == effect_id)
+                {
+                    effect.process_message(&**message);
+                } else {
+                    log::warn!("Effect with id {effect_id} not found for scheduled message");
+                }
+            }
+        }
     }
 }

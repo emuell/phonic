@@ -27,7 +27,6 @@ crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^6.1" }
 pulp = { version = "^0.21", features = ["macro"] }
-sort = { version = "^0.8" }
 basedrop = { version = "^0.1" }
 audio_thread_priority = { version = "^0.34", default-features = false }
 rubato = { version = "^0.16", default-features = false }

@@ -22,7 +22,7 @@ use crate::{
         amplified::AmplifiedSource,
         converted::ConvertedSource,
         file::{FilePlaybackMessage, FileSource},
-        mixed::{MixedSource, MixerSourceMessage},
+        mixed::{MixedSource, MixerMessage},
         panned::PannedSource,
         resampled::ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
@@ -121,7 +121,7 @@ pub struct Player {
     playback_status_sender: Sender<PlaybackStatusEvent>,
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
-    mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerSourceMessage>>>>,
+    mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
     mixer_effects: Arc<DashMap<EffectId, (MixerId, Option<&'static str>)>>,
 }
 
@@ -279,7 +279,7 @@ impl Player {
         let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
         if mixer_event_queue
-            .push(MixerSourceMessage::AddSource {
+            .push(MixerMessage::AddSource {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
@@ -346,7 +346,7 @@ impl Player {
         let panned_source = PannedSource::new(amplified_source, playback_panning);
         // send the source to the mixer
         if mixer_event_queue
-            .push(MixerSourceMessage::AddSource {
+            .push(MixerMessage::AddSource {
                 playback_id,
                 playback_message_queue,
                 source: Owned::new(&self.collector_handle, Box::new(panned_source)),
@@ -383,7 +383,7 @@ impl Player {
 
         // Send message to parent mixer
         if parent_mixer_event_queue
-            .push(MixerSourceMessage::AddMixer {
+            .push(MixerMessage::AddMixer {
                 id: new_mixer_id,
                 mixer: new_mixer,
             })
@@ -425,7 +425,7 @@ impl Player {
 
         let id = unique_usize_id();
         if mixer_event_queue
-            .push(MixerSourceMessage::AddEffect { id, effect })
+            .push(MixerMessage::AddEffect { id, effect })
             .is_err()
         {
             log::warn!("mixer's event queue is full. add effect event got skipped!");
@@ -466,7 +466,7 @@ impl Player {
             .ok_or(Error::MixerNotFoundError(*mixer_id))?
             .clone();
         if mixer_event_queue
-            .push(MixerSourceMessage::ProcessEffectMessage {
+            .push(MixerMessage::ProcessEffectMessage {
                 effect_id,
                 message,
                 sample_time,
@@ -500,7 +500,7 @@ impl Player {
                         .ok_or(Error::MixerNotFoundError(*mixer_id))?
                         .clone();
                     if mixer_queue
-                        .push(MixerSourceMessage::SeekSource {
+                        .push(MixerMessage::SeekSource {
                             playback_id,
                             position,
                             sample_time,
@@ -546,7 +546,7 @@ impl Player {
                 .clone();
             // pass event to mixer to schedule it
             if mixer_queue
-                .push(MixerSourceMessage::SetSourceSpeed {
+                .push(MixerMessage::SetSourceSpeed {
                     playback_id,
                     speed,
                     glide,
@@ -581,7 +581,7 @@ impl Player {
                         .get(mixer_id)
                         .ok_or(Error::MixerNotFoundError(*mixer_id))?
                         .clone();
-                    mixer_queue.force_push(MixerSourceMessage::StopSource {
+                    mixer_queue.force_push(MixerMessage::StopSource {
                         playback_id,
                         sample_time,
                     });
@@ -618,7 +618,7 @@ impl Player {
         for queue in self.mixer_event_queues.iter() {
             queue
                 .value()
-                .force_push(MixerSourceMessage::RemoveAllPendingSources);
+                .force_push(MixerMessage::RemoveAllPendingSources);
         }
         Ok(())
     }
