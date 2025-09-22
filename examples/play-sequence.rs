@@ -1,14 +1,9 @@
 //! An example showcasing how to build a simple sequencer by scheduling preloaded audio samples
 //! and using sample glide playback parameters.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
-use phonic::{
-    outputs::WavOutputDevice, sources::PreloadedFileSource, utils::speed_from_note,
-    DefaultOutputDevice, Error, FilePlaybackOptions, Player,
-};
-
-use arg::{parse_args, Args};
+use phonic::{sources::PreloadedFileSource, utils::speed_from_note, Error, FilePlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -18,25 +13,18 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 // -------------------------------------------------------------------------------------------------
 
-#[derive(Args, Debug)]
-struct Arguments {
-    #[arg(short = "o", long = "output")]
-    /// Write audio output into the given wav file, instead of using the default audio device.
-    output_path: Option<PathBuf>,
-}
+// Common example code
+#[path = "./common/arguments.rs"]
+mod arguments;
 
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
     // Parse optional arguments
-    let args = parse_args::<Arguments>();
+    let args = arguments::parse();
 
-    // Setup audio output and player
-    let mut player = if let Some(output_path) = args.output_path {
-        Player::new(WavOutputDevice::open(output_path)?, None)
-    } else {
-        Player::new(DefaultOutputDevice::open()?, None)
-    };
+    // Create a player instance with the output device as configured via program arguments
+    let mut player = arguments::new_player(&args, None)?;
 
     // Preload samples
     let cowbell = PreloadedFileSource::from_file(

@@ -17,8 +17,8 @@ use phonic::{
     effects,
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, PlaybackId, Player,
-    ResamplingQuality, SynthPlaybackOptions,
+    Error, FilePlaybackOptions, MixerId, PlaybackId, Player, ResamplingQuality,
+    SynthPlaybackOptions,
 };
 
 const FILTER_TYPES: [effects::FilterEffectType; 4] = [
@@ -36,9 +36,25 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 // -------------------------------------------------------------------------------------------------
 
+// Common example code
+#[path = "./common/arguments.rs"]
+mod arguments;
+
+// -------------------------------------------------------------------------------------------------
+
 fn main() -> Result<(), Error> {
-    // create a player with the default audio output device
-    let mut player = Player::new(DefaultOutputDevice::open()?, None);
+    // Parse optional arguments
+    let args = arguments::parse();
+
+    if args.output_path.is_some() {
+        return Err(Error::ParameterError(
+            "The interactive example only supports real-time playback ".to_owned()
+                + "and thus does not support the wav-writer 'output' argument",
+        ));
+    }
+
+    // Create a player instance with the output device as configured via program arguments
+    let mut player = arguments::new_player(&args, None)?;
 
     let loop_mixer_id;
     let loop_filter_effect_id;
