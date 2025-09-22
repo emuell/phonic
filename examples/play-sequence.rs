@@ -76,21 +76,23 @@ fn main() -> Result<(), Error> {
         player.stop_source(playback_id, sample_time + samples_per_beat)?;
     }
 
-    // Schedule bass line with glides (midi_note, duration_in_beats, glide_rate)
+    // Schedule bass line with glides (midi_note, duration_in_beats, glide, volume, pan)
     let bass_line = [
-        (60, 4.0, None),
-        (56, 1.0, Some(999.0)),
-        (58, 1.0, Some(999.0)),
-        (65, 2.0, Some(12.0)),
-        (56, 4.0, Some(96.0)),
+        (60, 4.0, None, None, Some(0.0)),
+        (56, 1.0, Some(999.0), Some(0.75), Some(1.0)),
+        (58, 1.0, Some(999.0), Some(0.5), Some(-1.0)),
+        (65, 2.0, Some(12.0), None, Some(0.0)),
+        (56, 4.0, Some(96.0), Some(1.0), None),
     ];
 
     // Play first note
-    let (first_note, first_duration_beats, _glide) = bass_line[0];
+    let (first_note, first_duration_beats, _glide, volume, panning) = bass_line[0];
     let bass_playback_id = player.play_file_source(
         bass.clone(
             FilePlaybackOptions::default()
                 .speed(speed_from_note(first_note))
+                .volume(volume.unwrap_or(1.0))
+                .panning(panning.unwrap_or(0.0))
                 .fade_out(Duration::from_millis(1000)),
             samples_per_sec,
         )?,
@@ -101,13 +103,19 @@ fn main() -> Result<(), Error> {
     let first_duration_samples = (first_duration_beats * samples_per_beat as f64) as u64;
     current_time += first_duration_samples;
 
-    for (note, duration_beats, glide) in &bass_line[1..] {
+    for (note, duration_beats, glide, volume, panning) in &bass_line[1..] {
         player.set_source_speed(
             bass_playback_id,
             speed_from_note(*note),
             *glide,
             current_time,
         )?;
+        if let Some(volume) = volume {
+            player.set_source_volume(bass_playback_id, *volume, current_time)?;
+        }
+        if let Some(panning) = panning {
+            player.set_source_panning(bass_playback_id, *panning, current_time)?;
+        }
         let duration_samples = (duration_beats * samples_per_beat as f64) as u64;
         current_time += duration_samples;
     }

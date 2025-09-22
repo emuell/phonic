@@ -1,6 +1,20 @@
-use crate::utils::smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue};
+use std::sync::Arc;
+
+use crossbeam_queue::ArrayQueue;
+
+use crate::utils::{
+    smoothed::{apply_smoothed_gain, SmoothedValue},
+    ExponentialSmoothedValue,
+};
 
 use super::{Source, SourceTime};
+
+// -------------------------------------------------------------------------------------------------
+
+/// Messages to control the amplified source
+pub enum AmplifiedSourceMessage {
+    SetVolume(f32), // new volume value
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -8,6 +22,7 @@ use super::{Source, SourceTime};
 pub struct AmplifiedSource {
     source: Box<dyn Source>,
     volume: ExponentialSmoothedValue,
+    message_queue: Arc<ArrayQueue<AmplifiedSourceMessage>>,
 }
 
 impl AmplifiedSource {
@@ -16,19 +31,44 @@ impl AmplifiedSource {
         InputSource: Source,
     {
         debug_assert!(volume >= 0.0, "Invalid volume factor");
-        let mut vol = ExponentialSmoothedValue::new(source.sample_rate());
-        vol.init(volume);
+        let mut smoothed_volume = ExponentialSmoothedValue::new(source.sample_rate());
+        smoothed_volume.init(volume);
+
+        // we're expecting a single message only, as events are already scheduled by the mixer
+        const MESSAGE_QUEUE_SIZE: usize = 1;
+
         Self {
             source: Box::new(source),
-            volume: vol,
+            volume: smoothed_volume,
+            message_queue: Arc::new(ArrayQueue::new(MESSAGE_QUEUE_SIZE)),
+        }
+    }
+
+    /// Returns the message queue for this source.
+    pub fn message_queue(&self) -> Arc<ArrayQueue<AmplifiedSourceMessage>> {
+        self.message_queue.clone()
+    }
+
+    /// Internal message handling
+    fn process_messages(&mut self) {
+        while let Some(msg) = self.message_queue.pop() {
+            match msg {
+                AmplifiedSourceMessage::SetVolume(volume) => {
+                    self.volume.set_target(volume);
+                }
+            }
         }
     }
 }
 
 impl Source for AmplifiedSource {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        // process pending messages
+        self.process_messages();
+
         // write input source
         let written = self.source.write(output, time);
+
         // apply volume using helper
         let written_out = &mut output[0..written];
         apply_smoothed_gain(written_out, &mut self.volume);
