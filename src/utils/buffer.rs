@@ -223,12 +223,13 @@ pub trait InterleavedBuffer<'a> {
     fn as_frames<const CHANNEL_COUNT: usize>(&self) -> &'a [[f32; CHANNEL_COUNT]] {
         let buffer = self.buffer();
         let buffer_len = buffer.len();
-        let (chunks, remainder) = buffer.as_chunks::<CHANNEL_COUNT>();
         assert!(
-            remainder.is_empty(),
+            buffer_len % CHANNEL_COUNT == 0,
             "as_frames: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
-        chunks
+        let frames_count = self.buffer().len() / CHANNEL_COUNT;
+        let ptr = buffer.as_ptr() as *const [f32; CHANNEL_COUNT];
+        unsafe { std::slice::from_raw_parts(ptr, frames_count) }
     }
 }
 
@@ -320,12 +321,13 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
     fn as_frames_mut<const CHANNEL_COUNT: usize>(&mut self) -> &'a mut [[f32; CHANNEL_COUNT]] {
         let buffer = self.buffer_mut();
         let buffer_len = buffer.len();
-        let (chunks, remainder) = buffer.as_chunks_mut::<CHANNEL_COUNT>();
         assert!(
-            remainder.is_empty(),
-            "as_mut_frames: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
+            buffer_len % CHANNEL_COUNT == 0,
+            "as_frames_mut: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
-        chunks
+        let frames_count = self.buffer().len() / CHANNEL_COUNT;
+        let ptr = buffer.as_mut_ptr() as *mut [f32; CHANNEL_COUNT];
+        unsafe { std::slice::from_raw_parts_mut(ptr, frames_count) }
     }
 }
 
