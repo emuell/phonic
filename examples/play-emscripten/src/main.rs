@@ -2,6 +2,10 @@
 
 use std::{cell::RefCell, collections::HashMap, ffi};
 
+use dasp::{signal, Frame, Signal};
+
+use emscripten_rs_sys::emscripten_request_animation_frame_loop;
+
 use phonic::{
     effects::ReverbEffect,
     sources::{DaspSynthSource, PreloadedFileSource},
@@ -9,17 +13,6 @@ use phonic::{
     DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, PlaybackId, Player,
     SynthPlaybackOptions,
 };
-
-use dasp::{signal, Frame, Signal};
-
-// Emscripten C functions to drive the app without blocking
-extern "C" {
-    fn emscripten_cancel_animation_frame(requestAnimationFrameId: ffi::c_long);
-    fn emscripten_request_animation_frame_loop(
-        func: unsafe extern "C" fn(ffi::c_double, *mut ffi::c_void) -> ffi::c_int,
-        user_data: *mut ffi::c_void,
-    ) -> ffi::c_long;
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -33,7 +26,6 @@ struct EmscriptenPlayer {
     playing_synth_notes: HashMap<u8, PlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
-    run_frame_id: ffi::c_long,
 }
 
 impl EmscriptenPlayer {
@@ -68,8 +60,8 @@ impl EmscriptenPlayer {
         }
 
         println!("Start running...");
-        let run_frame_id = unsafe {
-            emscripten_request_animation_frame_loop(Self::run_frame, std::ptr::null_mut())
+        unsafe {
+            emscripten_request_animation_frame_loop(Some(Self::run_frame), std::ptr::null_mut())
         };
 
         // start playback in a second from now
@@ -86,19 +78,18 @@ impl EmscriptenPlayer {
             playing_synth_notes,
             samples,
             synth_mixer_id,
-            run_frame_id,
         })
     }
 
     // Animation frame callback which drives the player
-    extern "C" fn run_frame(_time: ffi::c_double, _user_data: *mut ffi::c_void) -> ffi::c_int {
+    extern "C" fn run_frame(_time: f64, _user_data: *mut ffi::c_void) -> bool {
         PLAYER.with_borrow_mut(|player| {
             // is a player running?
             if let Some(launcher) = player {
                 launcher.run();
-                1 // continue running
+                true // continue running
             } else {
-                0 // stop running
+                false // stop running
             }
         })
     }
@@ -222,16 +213,6 @@ impl EmscriptenPlayer {
 
             // advance beat counter
             self.playback_beat_counter += 1;
-        }
-    }
-}
-
-impl Drop for EmscriptenPlayer {
-    fn drop(&mut self) {
-        // stop main loop, just in case its still running
-        println!("Stopping run loop...");
-        unsafe {
-            emscripten_cancel_animation_frame(self.run_frame_id);
         }
     }
 }

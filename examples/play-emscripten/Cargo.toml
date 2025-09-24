@@ -9,3 +9,4 @@ description = "Emscripten WASM example for phonic"
 [dependencies]
 phonic = { path = "../..", default-features = false, features = ["web-output", "dasp-synth"]}
 dasp = { version = "^0.11", features = ["signal"] }
+emscripten_rs_sys = { version = "^0.1" }
