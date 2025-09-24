@@ -1,20 +1,20 @@
 // Check feature, target dependencies
 #[cfg(all(target_arch = "wasm32", feature = "cpal-output"))]
-compile_error!("wasm builds are not compatible with cpal. use sokol-output instead");
+compile_error!("wasm builds are not compatible with cpal. use web-output instead");
 
-// Note: when cpal and sokol features are enabled, we use cpal only
+// Note: when cpal-output and web-output features are enabled, use cpal only
 #[cfg(feature = "cpal-output")]
 pub mod cpal;
-#[cfg(feature = "sokol-output")]
-pub mod sokol;
 #[cfg(feature = "wav-output")]
 pub mod wav;
+#[cfg(feature = "web-output")]
+pub mod web;
 
-/// The enabled audio output type: cpal or sokol
+/// The enabled audio output type: cpal or web
 #[cfg(feature = "cpal-output")]
 pub type DefaultOutputDevice = cpal::CpalOutput;
-#[cfg(all(feature = "sokol-output", not(feature = "cpal-output")))]
-pub type DefaultOutputDevice = sokol::SokolOutput;
+#[cfg(all(feature = "web-output", not(feature = "cpal-output")))]
+pub type DefaultOutputDevice = web::WebOutput;
 
 /// Available audio hosts for cpal output devices (platform specific)
 #[cfg(feature = "cpal-output")]
@@ -49,7 +49,7 @@ pub trait OutputDevice: Send {
     fn set_volume(&mut self, volume: f32);
 
     /// true when audio output is currently suspended by the system.
-    /// Only used in Sokol's WebAudio backend, other backends do never suspend.
+    /// Only used in web audio backends, other backends do never suspend.
     fn is_suspended(&self) -> bool;
 
     /// Returns true while not paused.

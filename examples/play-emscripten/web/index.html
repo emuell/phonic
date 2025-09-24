@@ -129,8 +129,7 @@
 <body>
     <h1>Emscripten Demo</h1>
     <p>
-        Hit `Start` to initialize the <a href="https://github.com/floooh/sokol">sokol</a> audio backend and to start a
-        simple player engine.
+        Hit `Start` to initialize the audio backend and to start a simple player engine.
     <p>
 
     <div class="controls">
@@ -193,7 +192,6 @@
         document.addEventListener("keydown", (e) => {
             if (!e.repeat && allPianoKeys.has(e.key)) {
                 const keyValue = allPianoKeys.get(e.key);
-                console.log(keyValue);
                 playNote(keyValue);
             }
         });
