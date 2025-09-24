@@ -10,7 +10,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 
 - **Cross-Platform Audio Playback**:
   - Play audio on Windows, macOS, and Linux via [cpal](https://github.com/RustAudio/cpal).
-  - WebAssembly support for in-browser audio using [sokol](https://github.com/floooh/sokol-rust) and [emscripten](https://emscripten.org/).
+  - WebAssembly support for in-browser audio via [emscripten](https://emscripten.org/).
   - Optional WAV file output device for rendering computed audio to a file instead of playing it back.
 
 - **Flexible Audio Source Handling**:
@@ -52,7 +52,7 @@ use phonic::{
 };
 
 fn main() -> Result<(), Error> {
-    // Open the default audio device (cpal or sokol, depending on the enabled output feature)
+    // Open the default audio device (cpal or web, depending on the enabled output feature)
     let output_device = DefaultOutputDevice::open()?;
     // Create an optional channel to receive playback status events ("Position", "Stopped")
     // Prefer using a bounded channel here to avoid memory allocations in the audio thread.

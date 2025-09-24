@@ -36,5 +36,7 @@ cargo +nightly -Z build-std \
 
 ## copy
 
-# Copy .wasm .js and .data to the web folder.
-cp target/wasm32-unknown-emscripten/$TARGET_DIR/deps/play_emscripten.* web
+# Copy build artifacts to the web folder.
+for ext in wasm js data; do
+  cp "target/wasm32-unknown-emscripten/$TARGET_DIR/deps/play_emscripten.$ext" ./web
+done

@@ -40,9 +40,14 @@ assert_no_alloc = { version = "^1.1", features = [
 ], optional = true }
 dasp = { version = "^0.11", features = ["signal"], optional = true }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
-sokol = { version = "^0.1", optional = true, git = "https://github.com/emuell/sokol-rust" }
 hound = { version = "^3.5", optional = true }
 
+# Target specific dependencies
+[target.'cfg(target_os = "emscripten")'.dependencies]
+emscripten_rs_sys = { version = "^0.1" }
+emscripten-rs-macros = { version = "^0.1" }
+
+# Tests & Examples dependencies
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 hound = { version = "^3.5" }
 svg = { version = "^0.18" }
@@ -59,32 +64,31 @@ rustc_version = "^0.4"
 [profile.release]
 debug = 1 # debug info for profiling
 
-# enable optimization for DSP packages that are extremely slow in debug builds
 [profile.dev.package.rubato]
-opt-level = 2
+opt-level = 2 # enable optimization for slow DSP packages in debug builds
 
 [features]
-cpal-output = ["cpal"]
-sokol-output = ["sokol"]
-wav-output = ["hound"]
-dasp-synth = ["dasp"]
 assert-allocs = ["assert_no_alloc"]
+cpal-output = ["cpal"]
+wav-output = ["hound"]
+web-output = []
+dasp-synth = ["dasp"]
 default = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
 
 [package.metadata.docs.rs]
+# don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
 no-default-features = true
-# sokol fails to compile at docs.rs and isn't really important to document
-features = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
+features = ["cpal-output", "wav-output", "dasp-synth"]
 
 [[example]]
 name = "play-file"
-required-features = ["dasp-synth"]
+required-features = ["wav-output"]
 [[example]]
 name = "play-synth"
 required-features = ["wav-output", "dasp-synth"]
 [[example]]
 name = "play-interactive"
-required-features = ["dasp-synth"]
+required-features = ["wav-output", "dasp-synth"]
 [[example]]
 name = "play-custom"
 required-features = ["wav-output"]

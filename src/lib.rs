@@ -7,7 +7,7 @@
 //!   output device instance, plays sounds and manages DSP effects.
 //!
 //! - **[`OutputDevice`]** represents the audio backend stream. phonic provides implementations
-//!   for different platforms, such as `cpal` for native applications and `sokol` for WebAssembly.
+//!   for different platforms, such as `cpal` for native applications and `webauddio` for WebAssembly.
 //!   The [`DefaultOutputDevice`] is an alias for the recommended output device for the current
 //!   build target.
 //!
@@ -18,7 +18,7 @@
 //! - **[`Effect`]** applies DSP effects to audio signals signals. By default, only one
 //!   mixer is present in the player and will route all sources through it. To create more complex
 //!   routings you can create sub-mixers via [`Player::add_mixer`] and route sources to them.
-//!   Each mixer instance has its own chain of DSP effects, which can be set up via 
+//!   Each mixer instance has its own chain of DSP effects, which can be set up via
 //!   [`Player::add_effect`]. You can use the built in effects impls in [`effects`] or create
 //!   your own ones.
 //!
@@ -55,7 +55,7 @@
 //!     // two seconds ahead of the current output time.
 //!     player.play_file("path/to/your/some_other_file.wav",
 //!       FilePlaybackOptions::default()
-//!         .start_at_time(player.output_sample_frame_position() + 
+//!         .start_at_time(player.output_sample_frame_position() +
 //!            2 * player.output_sample_rate() as u64)
 //!     )?;
 //!
@@ -71,7 +71,14 @@
 //! creating more complex mixer graphs, please see the examples in the `README.md` and the `/examples`
 //! directory of the repository.
 
+// enable feature auto config for docs (see also build.rs)
 #![cfg_attr(all(doc, docsrs), feature(doc_auto_cfg))]
+// enable experimental ASM features for emscripten js! macros
+#![cfg_attr(
+    target_os = "emscripten",
+    feature(asm_experimental_arch),
+    feature(macro_metavar_expr_concat)
+)]
 
 // private mods (will be partly re-exported)
 mod effect;
@@ -83,7 +90,7 @@ mod source;
 // public, flat re-exports
 pub use error::Error;
 
-#[cfg(any(feature = "cpal-output", feature = "sokol-output"))]
+#[cfg(any(feature = "cpal-output", feature = "web-output"))]
 pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
@@ -107,8 +114,8 @@ pub mod outputs {
     #[cfg(feature = "cpal-output")]
     pub use super::output::AudioHostId;
 
-    #[cfg(feature = "sokol-output")]
-    pub use super::output::sokol::SokolOutput;
+    #[cfg(feature = "web-output")]
+    pub use super::output::web::WebOutput;
 
     #[cfg(feature = "wav-output")]
     pub use super::output::wav::WavOutputDevice;
