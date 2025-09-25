@@ -3,8 +3,8 @@
 
 use crate::Error;
 
-#[cfg(feature = "bungee-timestretch")]
 pub(crate) mod bungee;
+pub(crate) mod signalsmith;
 
 // -------------------------------------------------------------------------------------------------
 

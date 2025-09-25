@@ -2,8 +2,26 @@ use super::{Source, SourceTime};
 
 use crate::utils::{
     buffer::TempBuffer,
-    stretcher::{bungee::BungeeTimeStretcher, AudioTimeStretcher, TimeStretchingSpecs},
+    stretcher::{
+        bungee::BungeeTimeStretcher,
+        signalsmith::{SignalSmithPreset, SignalSmithTimeStretcher},
+        AudioTimeStretcher, TimeStretchingSpecs,
+    },
 };
+
+// -------------------------------------------------------------------------------------------------
+
+/// Time stretcher backend and preset selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimeStretchMode {
+    /// SignalSmith time stretcher with default preset.
+    #[default]
+    SignalSmithDefault,
+    /// SignalSmith time stretcher with fast preset.
+    SignalSmithFast,
+    /// Bungee time stretcher.
+    Bungee,
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -16,17 +34,32 @@ pub struct StretchedSource<InputSource: Source + 'static> {
 }
 
 impl<InputSource: Source + 'static> StretchedSource<InputSource> {
-    /// Create a new stretched sources with the given sample rate and rate.
-    pub fn new(source: InputSource, speed: f64) -> Self {
+    /// Create a new stretched sources with the given sample rate, rate and mode.
+    pub fn new(source: InputSource, speed: f64, mode: TimeStretchMode) -> Self {
         let specs = TimeStretchingSpecs::new(speed, source.sample_rate(), source.channel_count());
+
         let stretcher: Option<Box<dyn AudioTimeStretcher>> = if speed == 1.0 {
             None
         } else {
-            Some(Box::new(
-                BungeeTimeStretcher::new(specs)
-                    .expect("Failed to create new bungee stretcher instance"),
-            ))
+            Some(match mode {
+                TimeStretchMode::SignalSmithDefault | TimeStretchMode::SignalSmithFast => {
+                    let preset = if mode == TimeStretchMode::SignalSmithDefault {
+                        SignalSmithPreset::Default
+                    } else {
+                        SignalSmithPreset::Fast
+                    };
+                    Box::new(
+                        SignalSmithTimeStretcher::new(specs, preset)
+                            .expect("Failed to create new bungee stretcher instance"),
+                    )
+                }
+                TimeStretchMode::Bungee => Box::new(
+                    BungeeTimeStretcher::new(specs)
+                        .expect("Failed to create new bungee stretcher instance"),
+                ),
+            })
         };
+
         const DEFAULT_CHUNK_SIZE: usize = 512;
         let input_buffer_len = if let Some(stretcher) = &stretcher {
             stretcher

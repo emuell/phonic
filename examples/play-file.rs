@@ -5,6 +5,9 @@ use std::{sync::mpsc::sync_channel, time::Duration};
 
 use phonic::{utils::speed_from_note, Error, FilePlaybackOptions, PlaybackStatusEvent};
 
+#[cfg(feature = "time-stretching")]
+use phonic::TimeStretchMode;
+
 // -------------------------------------------------------------------------------------------------
 
 #[cfg(all(debug_assertions, feature = "assert-allocs"))]
@@ -32,34 +35,45 @@ fn main() -> Result<(), Error> {
 
     // Create sound sources and memorize handles for control
     let playing_files = [
-        player
-            // files are by default not streamed but are preloaded and played buffered.
-            .play_file(
-                "assets/altijd synth bit.wav",
-                FilePlaybackOptions::default(),
-            )?,
-        player
-            // this file is going to be streamed on the fly, looped and time-stretched and
-            // played back with a lowered volume, custom panning and a fade out.
-            .play_file(
-                "assets/YuaiLoop.wav",
-                FilePlaybackOptions::default()
-                    .streamed()
-                    .volume_db(-2.0)
-                    .panning(-0.3)
-                    .speed(speed_from_note(58))
-                    .stretch(0.75)
-                    .repeat(1)
-                    .fade_out(Duration::from_secs(3)),
-            )?,
+        // files are by default not streamed but are preloaded and played buffered.
+        player.play_file(
+            "assets/altijd synth bit.wav",
+            FilePlaybackOptions::default(),
+        )?,
+        // this file is going to be streamed on the fly, looped and played back
+        // with a lowered volume, custom panning and a fade out.
+        // when `time-stretching` feature is enabled this also stretches the playback
+        // speed, else it's repeating the sample loop twice.
+        #[cfg(feature = "time-stretching")]
+        player.play_file(
+            "assets/YuaiLoop.wav",
+            FilePlaybackOptions::default()
+                .streamed()
+                .volume_db(-2.0)
+                .panning(-0.3)
+                .speed(speed_from_note(58))
+                .stretch(0.5)
+                .stretch_mode(TimeStretchMode::SignalSmithDefault)
+                .fade_out(Duration::from_secs(3)),
+        )?,
+        #[cfg(not(feature = "time-stretching"))]
+        player.play_file(
+            "assets/YuaiLoop.wav",
+            FilePlaybackOptions::default()
+                .streamed()
+                .volume_db(-2.0)
+                .panning(-0.3)
+                .speed(speed_from_note(58))
+                .repeat(2)
+                .fade_out(Duration::from_secs(3)),
+        )?,
     ];
 
-    // Stop (fade-out) the loop after 3 secs.
+    // Stop (fade-out) the loop after 8 secs.
     let samples_per_second = player.output_sample_rate() as u64;
     let now = player.output_sample_frame_position();
-
     let loop_playback_handle = &playing_files[1];
-    loop_playback_handle.stop(now + 3 * samples_per_second)?;
+    loop_playback_handle.stop(now + 8 * samples_per_second)?;
 
     // Handle events from the file sources.
     std::thread::spawn(move || {

@@ -14,15 +14,16 @@ version = "0.13.0"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Dependencies
 [dependencies]
 assume = { version = "^0.5" }
 byteorder = { version = "^1.5", default-features = false }
 rand = { version = "^0.9", default-features = false, features = ["thread_rng"] }
+document-features = { version = "^0.2" }
 log = { version = "^0.4", features = [
     "max_level_debug",
     "release_max_level_info",
 ] }
-
 strum = { version = "^0.27", default-features = false, features = ["derive"] }
 four-cc = { version = "^0.4", default-features = false }
 crossbeam-queue = { version = "^0.3", default-features = false, features = [
@@ -55,13 +56,14 @@ fundsp = { version = "^0.20", optional = true, default-features = false }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
 bungee-rs = { version = "^0.1", optional = true }
+signalsmith-stretch = { version = "^0.1", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
 emscripten_rs_sys = { version = "^0.1", default-features = false }
 emscripten-rs-macros = { version = "^0.1" }
 
-# Tests & Examples dependencies
+# Test & Examples dependencies
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 arg = { version = "^0.4", features = ["std"] }
 simple_logger = { version = "^5.1", default-features = false }
@@ -69,31 +71,42 @@ device_query = { version = "^4.0" }
 hound = { version = "^3.5" }
 svg = { version = "^0.18" }
 
+# Enable debug info for profiling
 [profile.release]
-debug = 1 # debug info for profiling
+debug = 1
 
 # enable optimization for slow DSP packages in debug builds
 [profile.dev.package.rubato]
 opt-level = 2
 [profile.dev.package.fundsp]
 opt-level = 2
+[profile.dev.package.signalsmith-stretch]
+opt-level = 2
 
+# Features
 [features]
-# output impls
-cpal-output = ["dep:cpal"]
+## Enables real-time alloc assertions in all audio output backends.
+assert-allocs = ["assert_no_alloc"]
+
+## Optional Wav output writer audio output backend.
 wav-output = ["dep:hound"]
+## Use CPAL as default audio output backend.
+cpal-output = ["dep:cpal"]
+## Use audio output backend for web browsers. Only works with Emscripten targets.
 web-output = []
-# optional features
-assert-allocs = ["dep:assert_no_alloc"]
+
+## Enable optional fundsp synth generation features.
 fundsp = ["dep:fundsp"]
-bungee-timestretch = ["dep:bungee-rs"]
-# default features are all features without emscripten, web support
+
+## Enable source time-stretching playback features.
+time-stretching = ["dep:signalsmith-stretch", "dep:bungee-rs"]
+
 default = [
     "assert-allocs",
     "cpal-output",
     "wav-output",
     "fundsp",
-    "bungee-timestretch",
+    "time-stretching",
 ]
 
 [package.metadata.docs.rs]
@@ -104,7 +117,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "play-file"
-required-features = ["wav-output", "bungee-timestretch"]
+required-features = ["wav-output"]
 [[example]]
 name = "play-synth"
 required-features = ["wav-output", "fundsp"]
