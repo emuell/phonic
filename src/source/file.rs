@@ -12,6 +12,9 @@ use crate::{
     Error, Player, ResamplingQuality,
 };
 
+#[cfg(feature = "time-stretching")]
+use crate::TimeStretchMode;
+
 use self::{preloaded::PreloadedFileSource, streamed::StreamedFileSource};
 
 // -------------------------------------------------------------------------------------------------
@@ -44,8 +47,12 @@ pub struct FilePlaybackOptions {
 
     /// By default 1.0f64. Customize to time stretch the file playback. Works in combination
     /// with the pitch `speed` property too, so you can re-pitch and stretch a file as needed.
-    #[cfg(feature = "bungee-timestretch")]
+    #[cfg(feature = "time-stretching")]
     pub stretch: f64,
+
+    /// By default TimeStretcherQuality::Default: Backend and quality mode of a time stretcher.
+    #[cfg(feature = "time-stretching")]
+    pub stretch_mode: TimeStretchMode,
 
     /// By default `None`: When `Some(> 0)`, this is the number of times the file should
     /// be looped. When supported by the file reader, embedded file loop points are used,
@@ -94,8 +101,10 @@ impl Default for FilePlaybackOptions {
             volume: 1.0,
             panning: 0.0,
             speed: 1.0,
-            #[cfg(feature = "bungee-timestretch")]
+            #[cfg(feature = "time-stretching")]
             stretch: 1.0,
+            #[cfg(feature = "time-stretching")]
+            stretch_mode: TimeStretchMode::default(),
             repeat: None,
             start_time: None,
             fade_in_duration: None,
@@ -146,9 +155,14 @@ impl FilePlaybackOptions {
         self
     }
 
-    #[cfg(feature = "bungee-timestretch")]
+    #[cfg(feature = "time-stretching")]
     pub fn stretch(mut self, speed: f64) -> Self {
         self.stretch = speed;
+        self
+    }
+    #[cfg(feature = "time-stretching")]
+    pub fn stretch_mode(mut self, quality: TimeStretchMode) -> Self {
+        self.stretch_mode = quality;
         self
     }
 
@@ -211,7 +225,7 @@ impl FilePlaybackOptions {
                 self.speed
             )));
         }
-        #[cfg(feature = "bungee-timestretch")]
+        #[cfg(feature = "time-stretching")]
         if self.stretch <= 0.0 || self.stretch > 100.0 || self.stretch.is_nan() {
             return Err(Error::ParameterError(format!(
                 "playback options 'stretch' speed value is '{}'",

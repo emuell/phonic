@@ -38,7 +38,7 @@ use crate::{
     Generator,
 };
 
-#[cfg(feature = "bungee-timestretch")]
+#[cfg(feature = "time-stretching")]
 use crate::source::stretched::StretchedSource;
 
 // -------------------------------------------------------------------------------------------------
@@ -461,8 +461,6 @@ impl Player {
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
-        #[cfg(feature = "bungee-timestretch")]
-        let playback_stretch_speed = file_source.playback_options().stretch;
         let playback_message_queue = file_source.playback_message_queue();
         let source_name = format!("File: '{}'", file_source.file_name());
         // convert file to mixer's rate and channel layout
@@ -473,8 +471,12 @@ impl Player {
             ResamplingQuality::Default,
         );
         // apply optional time stretching
-        #[cfg(feature = "bungee-timestretch")]
-        let converted_source = StretchedSource::new(converted_source, playback_stretch_speed);
+        #[cfg(feature = "time-stretching")]
+        let converted_source = StretchedSource::new(
+            converted_source,
+            playback_options.stretch,
+            playback_options.stretch_mode,
+        );
         // apply volume options
         let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
         let volume_message_queue = amplified_source.message_queue();

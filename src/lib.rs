@@ -153,6 +153,9 @@ pub use parameter::{
     Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate,
 };
 
+#[cfg(feature = "time-stretching")]
+pub use source::stretched::TimeStretchMode;
+
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
     measured::CpuLoad,

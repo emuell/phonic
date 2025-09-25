@@ -6,6 +6,8 @@ pub(crate) mod dsp;
 pub(crate) mod event;
 pub(crate) mod fader;
 pub(crate) mod resampler;
+
+#[cfg(feature = "time-stretching")]
 pub(crate) mod stretcher;
 pub(crate) mod time;
 

@@ -18,7 +18,7 @@ pub mod measured;
 pub mod mixed;
 pub mod panned;
 pub mod resampled;
-#[cfg(feature = "bungee-timestretch")]
+#[cfg(feature = "time-stretching")]
 pub mod stretched;
 pub mod synth;
 

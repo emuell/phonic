@@ -61,13 +61,14 @@ fundsp = { version = "^0.23", optional = true, default-features = false, feature
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
 bungee-rs = { version = "^0.1", optional = true }
+signalsmith-stretch = { version = "^0.1", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
 emscripten_rs_sys = { version = "^0.1", default-features = false }
 emscripten-rs-macros = { version = "^0.1" }
 
-# Tests & Examples dependencies
+# Test & Examples dependencies
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 arg = { version = "^0.4", features = ["std"] }
 simple_logger = { version = "^5.1", default-features = false }
@@ -83,6 +84,8 @@ debug = 1 # debug info for profiling
 opt-level = 2
 [profile.dev.package.fundsp]
 opt-level = 2
+[profile.dev.package.signalsmith-stretch]
+opt-level = 2
 
 [features]
 # output impls
@@ -91,26 +94,26 @@ wav-output = ["dep:hound"]
 web-output = []
 # optional features
 assert-allocs = ["dep:assert_no_alloc"]
-bungee-timestretch = ["dep:bungee-rs"]
+time-stretching = ["dep:signalsmith-stretch", "dep:bungee-rs"]
 fundsp = ["dep:fundsp"]
 # all features without emscripten, web support
 default = [
     "assert-allocs",
     "cpal-output",
     "wav-output",
-    "bungee-timestretch",
+    "time-stretching",
     "fundsp",
 ]
 
 [package.metadata.docs.rs]
 # don't include "web-audio" here: it fails to compile at docs.rs
 no-default-features = true
-features = ["cpal-output", "wav-output", "bungee-timestretch", "fundsp"]
+features = ["cpal-output", "wav-output", "time-stretching", "fundsp"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "play-file"
-required-features = ["wav-output", "bungee-timestretch"]
+required-features = ["wav-output", "time-stretching"]
 [[example]]
 name = "play-synth"
 required-features = ["wav-output", "fundsp"]
