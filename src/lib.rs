@@ -70,7 +70,9 @@
 //! For more advanced usage, such as monitoring playback, sequencing source playback or managing
 //! creating more complex mixer graphs, please see the examples in the `README.md` and the `/examples`
 //! directory of the repository.
-
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
 // enable feature auto config for docs (see also build.rs)
 #![cfg_attr(all(doc, docsrs), feature(doc_auto_cfg))]
 // enable experimental ASM features for emscripten js! macros
@@ -99,6 +101,8 @@ pub use player::{
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
+#[cfg(feature = "time-stretching")]
+pub use source::stretched::TimeStretchMode;
 pub use source::{
     file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
     resampled::ResamplingQuality,

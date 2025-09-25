@@ -14,6 +14,7 @@ pub(crate) mod fader;
 pub(crate) mod filter;
 pub(crate) mod resampler;
 pub(crate) mod smoothed;
+#[cfg(feature = "time-stretching")]
 pub(crate) mod stretcher;
 pub(crate) mod wave;
 
