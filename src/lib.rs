@@ -73,6 +73,10 @@
 //! For more advanced usage, such as monitoring playback, sequencing source playback or managing
 //! creating more complex mixer graphs, please see the examples in the `README.md` and the `/examples`
 //! directory of the repository.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 // enable feature config when building for docs.rs
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -110,6 +114,9 @@ pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
 pub use parameter::{
     ClonableParameter, Parameter, ParameterScaling, ParameterType, ParameterValueUpdate,
 };
+
+#[cfg(feature = "time-stretching")]
+pub use source::stretched::TimeStretchMode;
 
 pub use source::{
     file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
