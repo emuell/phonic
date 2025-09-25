@@ -14,6 +14,7 @@ version = "0.9.1"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Dependencies
 [dependencies]
 assume = { version = "^0.5" }
 byteorder = { version = "^1.5" }
@@ -23,6 +24,7 @@ log = { version = "^0.4", features = [
     "release_max_level_info",
 ] }
 lazy_static = { version = "^1.4" }
+document-features = { version = "^0.2" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }
 dashmap = { version = "^6.1" }
@@ -42,13 +44,14 @@ dasp = { version = "^0.11", features = ["signal"], optional = true }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
 bungee-rs = { version = "^0.1", git = "https://github.com/emuell/bungee-rs", optional = true }
+signalsmith-stretch = { version = "0.1.3", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
 emscripten_rs_sys = { version = "^0.1" }
 emscripten-rs-macros = { version = "^0.1" }
 
-# Tests & Examples dependencies
+# Test & Examples dependencies
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 hound = { version = "^3.5" }
 svg = { version = "^0.18" }
@@ -59,36 +62,50 @@ simple_logger = { version = "^5.0", default-features = false, features = [
     "colors",
 ] }
 
+# Build dependencies
 [build-dependencies]
-rustc_version = "^0.4"
+rustc_version = { version = "^0.4" }
 
+# Enable debug info for profiling
 [profile.release]
-debug = 1 # debug info for profiling
+debug = 1
 
+# Enable optimization for slow DSP packages in debug builds
 [profile.dev.package.rubato]
-opt-level = 2 # enable optimization for slow DSP packages in debug builds
+opt-level = 2
+[profile.dev.package.signalsmith-stretch]
+opt-level = 2
 
+# Features
 [features]
+## Enables real-time alloc assertions in all audio output backends.
 assert-allocs = ["assert_no_alloc"]
-# output impls
-cpal-output = ["cpal"]
+
+## Optional Wav output writer audio output backend.
 wav-output = ["hound"]
+## Use CPAL as default audio output backend.
+cpal-output = ["cpal"]
+## Default audio output backend for web browsers. Only works with Emscripten targets.
 web-output = []
-# optional features
+
+## Enable optional DASP synth source generation features.
 dasp-synth = ["dasp"]
-bungee-timestretch = ["bungee-rs"]
-# default features are all features without emscripten, web support
+
+## Enable source time-stretching playback features.
+time-stretching = ["signalsmith-stretch", "bungee-rs"]
+
 default = [
     "cpal-output",
     "wav-output",
-    "bungee-timestretch",
     "dasp-synth",
+    "time-stretching",
     "assert-allocs",
 ]
 
+# Example dependencies
 [[example]]
 name = "play-file"
-required-features = ["wav-output", "bungee-timestretch"]
+required-features = ["wav-output"]
 [[example]]
 name = "play-synth"
 required-features = ["wav-output", "dasp-synth"]
