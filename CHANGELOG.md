@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.0 - 2025/09/27
+
+- only enable audio codecs and format features in symphonia, skip video containers, to reduce bloat
+- enable logging and optional wav output arguments for all examples 
+- replaced emscripten sokol audio output backend with a new custom one
+- allow changing and scheduling of volume/panning in playing sources
+- fixed some edge cases in resampler input constraints
+
 ## v0.9.1 - 2025/09/12
 
 - fixed compile errors on docs.rs
