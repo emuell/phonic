@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use arg::{parse_args, Args};
 use crossbeam_channel::Sender;
 
-use phonic::{outputs::WavOutputDevice, DefaultOutputDevice, Error, PlaybackStatusEvent, Player};
+use phonic::{outputs::WavOutput, DefaultOutputDevice, Error, PlaybackStatusEvent, Player};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -59,10 +59,7 @@ pub fn new_player<S: Into<Option<Sender<PlaybackStatusEvent>>>>(
     status_sender: S,
 ) -> Result<Player, Error> {
     if let Some(output_path) = &args.output_path {
-        Ok(Player::new(
-            WavOutputDevice::open(output_path)?,
-            status_sender,
-        ))
+        Ok(Player::new(WavOutput::open(output_path)?, status_sender))
     } else {
         Ok(Player::new(DefaultOutputDevice::open()?, status_sender))
     }

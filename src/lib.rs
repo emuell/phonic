@@ -118,7 +118,7 @@ pub mod outputs {
     pub use super::output::web::WebOutput;
 
     #[cfg(feature = "wav-output")]
-    pub use super::output::wav::WavOutputDevice;
+    pub use super::output::wav::WavOutput;
 }
 
 pub mod sources {

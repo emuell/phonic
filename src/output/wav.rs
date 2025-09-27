@@ -31,11 +31,11 @@ const BUFFER_SIZE_FRAMES: usize = 1024;
 /// NOTE: Unlike the other output devices, the wav writer device is initially paused, so it
 /// must be resumed (or started via the player) manually after everything you want to write
 /// via the player got set up.
-pub struct WavOutputDevice {
+pub struct WavOutput {
     stream: Arc<Mutex<WavStream>>,
 }
 
-impl WavOutputDevice {
+impl WavOutput {
     /// Open a wav output device to write at the given file using default specs and an
     /// endless duration.
     pub fn open<P: AsRef<Path>>(file_path: P) -> Result<Self, Error> {
@@ -125,7 +125,7 @@ impl WavOutputDevice {
     }
 }
 
-impl OutputDevice for WavOutputDevice {
+impl OutputDevice for WavOutput {
     fn channel_count(&self) -> usize {
         let inner = self.stream.lock().unwrap();
         inner.channel_count
