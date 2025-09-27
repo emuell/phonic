@@ -23,6 +23,7 @@ pub struct BungeeTimeStretcher {
     planar_output: Vec<Vec<f32>>,
     pending_output: TempBuffer,
     pending_latency_frames: Option<usize>,
+    remaining_latency_frames: Option<usize>,
 }
 
 impl BungeeTimeStretcher {
@@ -47,6 +48,7 @@ impl BungeeTimeStretcher {
         let planar_output = vec![vec![0.0; max_output_frames]; channel_count];
         let pending_output = TempBuffer::new(max_output_frames * channel_count);
         let pending_latency_frames = None;
+        let remaining_latency_frames = None;
 
         Ok(Self {
             speed,
@@ -56,6 +58,7 @@ impl BungeeTimeStretcher {
             planar_output,
             pending_output,
             pending_latency_frames,
+            remaining_latency_frames,
         })
     }
 }
@@ -91,21 +94,42 @@ impl AudioTimeStretcher for BungeeTimeStretcher {
             }
         }
 
-        // Process new input
-        let input_frames = (input.len() / self.channel_count).min(Self::MAX_INPUT_FRAMES);
-        let output_frames_f = input_frames as f64 / self.speed;
+        // Process new input or flush outputs only
+        let process_outputs_only = input.is_empty();
 
-        // TODO: should flush pending output here
+        let (input_frames, output_frames_f) = if process_outputs_only {
+            // flush pending output only when inputs are silent
+            let remaining_frames = *self
+                .remaining_latency_frames
+                .get_or_insert_with(|| self.stream.latency().ceil() as usize);
+
+            let input_frames = remaining_frames.min(Self::MAX_INPUT_FRAMES);
+            let output_frames_f = input_frames as f64 / self.speed;
+
+            self.remaining_latency_frames
+                .replace(remaining_frames - input_frames);
+
+            (input_frames, output_frames_f)
+        } else {
+            // process inputs and outputs
+            let input_frames = (input.len() / self.channel_count).min(Self::MAX_INPUT_FRAMES);
+            let output_frames_f = input_frames as f64 / self.speed;
+            (input_frames, output_frames_f)
+        };
+
+        // skip processing when there's no input and output is completely flushed
         if input_frames == 0 {
             return Ok((0, 0));
         }
 
-        // Convert input to planar
-        for ch in self.planar_input.iter_mut() {
-            debug_assert!(ch.capacity() >= input_frames);
-            ch.resize(input_frames, 0.0);
+        // Prepare input buffers
+        if !process_outputs_only {
+            for ch in self.planar_input.iter_mut() {
+                debug_assert!(ch.capacity() >= input_frames);
+                ch.resize(input_frames, 0.0);
+            }
+            interleaved_to_planar(input, &mut self.planar_input);
         }
-        interleaved_to_planar(input, &mut self.planar_input);
 
         // Prepare output buffers
         let max_output_frames = output_frames_f.ceil() as usize;
@@ -114,11 +138,13 @@ impl AudioTimeStretcher for BungeeTimeStretcher {
             ch.resize(max_output_frames, 0.0);
         }
 
-        // Process on planar data
-        assert!(
-            self.planar_input[0].len() >= input_frames,
-            "Temporary input buffer is too small"
-        );
+        // Process on prepared planar data
+        if !process_outputs_only {
+            assert!(
+                self.planar_input[0].len() >= input_frames,
+                "Temporary input buffer is too small"
+            );
+        }
         assert!(
             self.planar_output[0].len() >= output_frames_f.ceil() as usize,
             "Temporary output buffer is too small"
@@ -134,7 +160,9 @@ impl AudioTimeStretcher for BungeeTimeStretcher {
             output_frames_f,
             1.0, // pitch
         );
-        input_consumed = input_frames * self.channel_count;
+        if !process_outputs_only {
+            input_consumed = input_frames * self.channel_count;
+        }
 
         // Initialize latency after the first process call
         let pending_latency_frames = *self
