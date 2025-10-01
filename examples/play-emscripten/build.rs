@@ -6,14 +6,26 @@ fn main() {
         // compile options
         println!("cargo::rustc-link-arg=-fexceptions");
         println!("cargo::rustc-link-arg=-sINVOKE_RUN=0");
-        println!("cargo::rustc-link-arg=-sUSE_PTHREADS=1");
-        println!("cargo::rustc-link-arg=-sPTHREAD_POOL_SIZE=4");
-        println!("cargo::rustc-link-arg=-sALLOW_MEMORY_GROWTH=1");
+        // debug options
         if profile == "debug" {
             println!("cargo::rustc-link-arg=-sASSERTIONS=2");
             println!("cargo::rustc-link-arg=-sSAFE_HEAP=1");
             println!("cargo::rustc-link-arg=-sSTACK_OVERFLOW_CHECK=1");
             println!("cargo::rustc-link-arg=-sCHECK_NULL_WRITES=1");
+        }
+        // compile options
+        println!("cargo::rustc-link-arg=-fexceptions");
+        println!("cargo::rustc-link-arg=-sUSE_PTHREADS=1");
+        println!("cargo::rustc-link-arg=-sPTHREAD_POOL_SIZE=8");
+        // memory options
+        println!("cargo::rustc-link-arg=-sSTACK_SIZE=2MB");
+        println!("cargo::rustc-link-arg=-sINITIAL_MEMORY=100MB");
+        println!("cargo::rustc-link-arg=-sALLOW_MEMORY_GROWTH=1");
+        // audio worklets
+        println!("cargo::rustc-link-arg=-sWASM_WORKERS");
+        println!("cargo::rustc-link-arg=-sAUDIO_WORKLET");
+        if profile == "debug" {
+            println!("cargo::rustc-link-arg=-sWEBAUDIO_DEBUG=1");
         }
         // exports
         println!("cargo::rustc-link-arg=--no-entry");
