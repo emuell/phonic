@@ -12,6 +12,16 @@ use std::{
 
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
+use emscripten_rs_sys::{
+    emscripten_audio_context_state, emscripten_audio_node_connect, emscripten_create_audio_context,
+    emscripten_create_wasm_audio_worklet_node,
+    emscripten_create_wasm_audio_worklet_processor_async, emscripten_destroy_audio_context,
+    emscripten_main_runtime_thread_id, emscripten_resume_audio_context_sync,
+    emscripten_set_click_callback_on_thread, emscripten_start_wasm_audio_worklet_thread_async, js,
+    AudioParamFrame, AudioSampleFrame, EmscriptenAudioWorkletNodeCreateOptions,
+    EmscriptenMouseEvent, WebAudioWorkletProcessorCreateOptions, EMSCRIPTEN_WEBAUDIO_T,
+};
+
 use crate::{
     error::Error,
     output::OutputDevice,
@@ -24,12 +34,24 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+/// WebAudio backend to use.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum WebBackend {
+    /// Use `ScriptProcessorNode`. This is deprecated but has better browser compatibility.
+    ScriptProcessorNode,
+    #[default]
+    /// Use Audio Worklet API. This is the preferred, modern way and requires a secure context (HTTPS).
+    AudioWorklet,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 const PREFERRED_SAMPLE_RATE: i32 = 44100;
 const PREFERRED_CHANNELS: i32 = 2;
 const PREFERRED_BUFFER_SIZE: i32 = if cfg!(debug_assertions) {
-    1024 * PREFERRED_CHANNELS
+    2048 * PREFERRED_CHANNELS
 } else {
-    512 * PREFERRED_CHANNELS
+    1024 * PREFERRED_CHANNELS
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -38,16 +60,13 @@ const PREFERRED_BUFFER_SIZE: i32 = if cfg!(debug_assertions) {
 //
 // This is currently using a ScriptProcessorNode callback to feed the sample data into WebAudio.
 // ScriptProcessorNode has been deprecated for a while because it is running from the main thread,
-// with the default initialization parameters it works 'pretty well' though. Ultimately we should
-// use Audio Worklets here, which do require pthreads.
+// with the default initialization parameters it works 'pretty well' though.
 //
 // The magic `js!` embedding is done via https://docs.rs/crate/emscripten_rs_sys and only works in
 // rust nightly builds with `asm_experimental_arch` and `macro_metavar_expr_concat` features enabled.
 
 #[cfg(not(target_os = "emscripten"))]
 compile_error!("The 'web-output' feature currently is implemented for emscripten only.");
-
-use emscripten_rs_sys::js;
 
 // Setup the WebAudio context and attach a ScriptProcessorNode
 js! {
@@ -173,7 +192,21 @@ js! {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Audio [`OutputDevice`] impl using WebAudio with a ScriptProcessorNode.
+// return sample rate of the audio context. Used for audio worklets only.
+js! {
+    fn get_audio_context_sample_rate(context: EMSCRIPTEN_WEBAUDIO_T) -> ffi::c_double,
+    {
+        var AudioContext = window.AudioContext || window.webkitAudioContext;
+        var ctx = new AudioContext();
+        var sr = ctx.sampleRate;
+        ctx.close();
+        return sr;
+    };
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Audio [`OutputDevice`] impl using WebAudio with a ScriptProcessorNode or AudioWorklet.
 ///
 /// Should be primally used as audio output for emscripten builds, because cpal's emscripten
 /// impls are broken and no longer maintained.
@@ -187,49 +220,167 @@ pub struct WebOutput {
     context_ref: Arc<WebContextRef>,
     channel_count: usize,
     sample_rate: u32,
+    backend: WebBackend,
+    webaudio_context_handle: EMSCRIPTEN_WEBAUDIO_T,
 }
 
 impl WebOutput {
     pub fn open() -> Result<Self, Error> {
-        if unsafe {
-            phonic_js_init(
-                PREFERRED_SAMPLE_RATE,
-                PREFERRED_CHANNELS,
-                PREFERRED_BUFFER_SIZE,
-                phonic_pull,
-            )
-        } == 0
-        {
-            return Err(Error::OutputDeviceError(
-                ("Failed to initialize WebAudio: ".to_owned()
-                    + "Please check if your browser supports 'AudioContext's")
-                    .into(),
-            ));
-        }
+        Self::with_backend(WebBackend::default())
+    }
 
-        let channel_count = PREFERRED_CHANNELS as usize;
-        let frame_count = unsafe { phonic_js_buffer_frames() } as usize;
-        let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
-
-        const MESSAGE_QUEUE_SIZE: usize = 16;
-        let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
-
-        let is_running = false;
-        let volume = 1.0;
+    pub fn with_backend(backend: WebBackend) -> Result<Self, Error> {
         let playback_pos = Arc::new(AtomicU64::new(0));
+        let (callback_sender, callback_receiver) = sync_channel(16);
 
-        let context = Box::new(WebContext {
-            callback_receiver,
-            source: Box::new(EmptySource),
-            playback_pos: Arc::clone(&playback_pos),
-            playback_pos_instant: Instant::now(),
-            state: CallbackState::Paused,
-            smoothed_volume: ExponentialSmoothedValue::new(volume, sample_rate),
-            buffer: vec![0.0; frame_count * channel_count],
-            num_channels: channel_count,
-        });
+        let (sample_rate, channel_count, _buffer_frames, context_ptr, webaudio_context_handle) =
+            match backend {
+                WebBackend::ScriptProcessorNode => {
+                    if unsafe {
+                        phonic_js_init(
+                            PREFERRED_SAMPLE_RATE,
+                            PREFERRED_CHANNELS,
+                            PREFERRED_BUFFER_SIZE,
+                            phonic_pull,
+                        )
+                    } == 0
+                    {
+                        return Err(Error::OutputDeviceError(
+                            ("Failed to initialize WebAudio: ".to_owned()
+                                + "Please check if your browser supports 'AudioContext's")
+                                .into(),
+                        ));
+                    }
 
-        let context_ptr = Box::into_raw(context);
+                    let channel_count = PREFERRED_CHANNELS as usize;
+                    let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
+                    let buffer_frames = unsafe { phonic_js_buffer_frames() } as usize;
+
+                    let context = Box::new(WebContext {
+                        callback_receiver,
+                        source: Box::new(EmptySource),
+                        playback_pos: Arc::clone(&playback_pos),
+                        playback_pos_instant: Instant::now(),
+                        state: CallbackState::Paused,
+                        smoothed_volume: ExponentialSmoothedValue::new(1.0, sample_rate),
+                        buffer: vec![0.0; buffer_frames * channel_count],
+                        num_channels: channel_count,
+                    });
+                    let context_ptr = Box::into_raw(context);
+
+                    let webaudio_context_handle = 0;
+
+                    (
+                        sample_rate,
+                        channel_count,
+                        buffer_frames,
+                        context_ptr,
+                        webaudio_context_handle,
+                    )
+                }
+                WebBackend::AudioWorklet => {
+                    println!("phonic: Creating audio context...");
+
+                    let webaudio_context_handle =
+                        unsafe { emscripten_create_audio_context(std::ptr::null()) };
+                    if webaudio_context_handle == 0 {
+                        return Err(Error::OutputDeviceError(
+                            "Failed to create WebAudio context".into(),
+                        ));
+                    }
+
+                    // Resume context on user interaction
+                    extern "C" fn on_user_interaction(
+                        _event_type: ffi::c_int,
+                        _mouse_event: *const EmscriptenMouseEvent,
+                        user_data: *mut ffi::c_void,
+                    ) -> bool {
+                        let context_handle = user_data as EMSCRIPTEN_WEBAUDIO_T;
+                        if context_handle != 0 {
+                            unsafe {
+                                emscripten_resume_audio_context_sync(context_handle);
+                            }
+                        }
+                        false
+                    }
+
+                    let body_selector = ffi::CString::new("body").unwrap();
+                    unsafe {
+                        emscripten_set_click_callback_on_thread(
+                            body_selector.as_ptr(),
+                            webaudio_context_handle as *mut ffi::c_void,
+                            false,
+                            Some(on_user_interaction),
+                            emscripten_main_runtime_thread_id(),
+                        );
+                    }
+
+                    let sample_rate =
+                        unsafe { get_audio_context_sample_rate(webaudio_context_handle) } as u32;
+                    let channel_count = PREFERRED_CHANNELS as usize;
+                    let buffer_frames = 128; // AudioWorklet is fixed to 128 frames
+
+                    println!("phonic: Audio worklet initialized with sample_rate: {sample_rate}");
+
+                    let context = Box::new(WebContext {
+                        callback_receiver,
+                        source: Box::new(EmptySource),
+                        playback_pos: Arc::clone(&playback_pos),
+                        playback_pos_instant: Instant::now(),
+                        state: CallbackState::Paused,
+                        smoothed_volume: ExponentialSmoothedValue::new(1.0, sample_rate),
+                        buffer: vec![0.0; buffer_frames * channel_count],
+                        num_channels: channel_count,
+                    });
+                    let context_ptr = Box::into_raw(context);
+
+                    println!("phonic: Starting audio worklet thread...");
+
+                    const STACK_SIZE: usize = 1024 * 1024 * 2;
+                    let mut stack = unsafe {
+                        // create 16 byte aligned vector as stack
+                        let n_units = (STACK_SIZE / std::mem::size_of::<u128>()) + 1;
+                        let mut aligned: Vec<u128> = Vec::with_capacity(n_units);
+
+                        let ptr = aligned.as_mut_ptr();
+                        let len_units = aligned.len();
+                        let cap_units = aligned.capacity();
+
+                        std::mem::forget(aligned);
+
+                        Vec::from_raw_parts(
+                            ptr as *mut u8,
+                            len_units * std::mem::size_of::<u128>(),
+                            cap_units * std::mem::size_of::<u128>(),
+                        )
+                    };
+
+                    unsafe {
+                        emscripten_start_wasm_audio_worklet_thread_async(
+                            webaudio_context_handle,
+                            stack.as_mut_ptr() as *mut ffi::c_void,
+                            STACK_SIZE as u32,
+                            Some(worklet_audio_thread_initialized),
+                            context_ptr as *mut ffi::c_void,
+                        );
+                    }
+
+                    // Leak the stack: needed for the lifetime of the worklet thread
+                    std::mem::forget(stack);
+
+                    (
+                        sample_rate,
+                        channel_count,
+                        buffer_frames,
+                        context_ptr,
+                        webaudio_context_handle,
+                    )
+                }
+            };
+
+        let volume = 1.0;
+        let is_running = false;
+
         unsafe {
             WEBAUDIO_CONTEXT = context_ptr;
         }
@@ -244,6 +395,8 @@ impl WebOutput {
             context_ref,
             channel_count,
             sample_rate,
+            backend,
+            webaudio_context_handle,
         })
     }
 
@@ -276,7 +429,16 @@ impl OutputDevice for WebOutput {
     }
 
     fn is_suspended(&self) -> bool {
-        unsafe { phonic_js_suspended() != 0 }
+        match self.backend {
+            WebBackend::ScriptProcessorNode => unsafe { phonic_js_suspended() != 0 },
+            WebBackend::AudioWorklet => {
+                const AUDIO_CONTEXT_STATE_SUSPENDED: ffi::c_int = 1;
+                unsafe {
+                    emscripten_audio_context_state(self.webaudio_context_handle)
+                        == AUDIO_CONTEXT_STATE_SUSPENDED
+                }
+            }
+        }
     }
 
     fn is_running(&self) -> bool {
@@ -315,6 +477,17 @@ impl OutputDevice for WebOutput {
     }
 }
 
+impl Drop for WebOutput {
+    fn drop(&mut self) {
+        if self.backend == WebBackend::AudioWorklet && self.webaudio_context_handle != 0 {
+            unsafe {
+                emscripten_destroy_audio_context(self.webaudio_context_handle);
+                self.webaudio_context_handle = 0;
+            }
+        }
+    }
+}
+
 // -------------------------------------------------------------------------------------------------
 
 enum CallbackMessage {
@@ -331,17 +504,131 @@ enum CallbackState {
 
 // -------------------------------------------------------------------------------------------------
 
+// Audio worklet backend impl using Emscripten's custom worklet impls. Using plain JS is hard to
+// realize as the processors can only be created within a AudioWorkletGlobalScope.
+
+extern "C" fn worklet_audio_thread_initialized(
+    context_handle: EMSCRIPTEN_WEBAUDIO_T,
+    success: bool,
+    user_data: *mut ffi::c_void,
+) {
+    if !success {
+        println!("Audio worklet thread FAILED to initialize");
+        return;
+    }
+
+    println!("phonic: Creating audio worklet processor...");
+
+    let processor_name = ffi::CString::new("phonic-processor").unwrap();
+    let opts = WebAudioWorkletProcessorCreateOptions {
+        name: processor_name.as_ptr(),
+        numAudioParams: 0,
+        audioParamDescriptors: std::ptr::null(),
+    };
+
+    unsafe {
+        emscripten_create_wasm_audio_worklet_processor_async(
+            context_handle,
+            &opts,
+            Some(worklet_processor_created),
+            user_data,
+        );
+        std::mem::forget(processor_name); // Leak CString
+    }
+}
+
+extern "C" fn worklet_processor_created(
+    context_handle: EMSCRIPTEN_WEBAUDIO_T,
+    success: bool,
+    user_data: *mut ffi::c_void,
+) {
+    if !success {
+        println!("phonic: Creating audio worklet processor FAILED");
+        return;
+    }
+
+    println!("phonic: Creating audio worklet node...");
+
+    let mut output_channel_counts = [PREFERRED_CHANNELS];
+    let node_opts = EmscriptenAudioWorkletNodeCreateOptions {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCounts: output_channel_counts.as_mut_ptr(),
+    };
+
+    let processor_name = ffi::CString::new("phonic-processor").unwrap();
+    let node = unsafe {
+        emscripten_create_wasm_audio_worklet_node(
+            context_handle,
+            processor_name.as_ptr(),
+            &node_opts,
+            Some(worklet_process_audio),
+            user_data,
+        )
+    };
+    std::mem::forget(processor_name); // leak!
+
+    unsafe {
+        emscripten_audio_node_connect(node, context_handle, 0, 0);
+    }
+
+    println!("phonic: Audio worklet node is up and running");
+}
+
+extern "C" fn worklet_process_audio(
+    _num_inputs: ffi::c_int,
+    _inputs: *const AudioSampleFrame,
+    num_outputs: ffi::c_int,
+    outputs: *mut AudioSampleFrame,
+    _num_params: ffi::c_int,
+    _params: *const AudioParamFrame,
+    user_data: *mut ffi::c_void,
+) -> bool {
+    if num_outputs == 0 || user_data.is_null() {
+        return true;
+    }
+
+    // set context, first time we got called
+    unsafe {
+        if WEBAUDIO_CONTEXT.is_null() {
+            WEBAUDIO_CONTEXT = user_data as *mut WebContext;
+        }
+    }
+
+    // pull frames and copy to output
+    let output_frame = unsafe { &mut *outputs };
+    let num_frames = output_frame.samplesPerChannel as usize;
+    let num_channels = output_frame.numberOfChannels as usize;
+
+    let buffer_ptr = phonic_pull(num_frames as ffi::c_int);
+
+    if !buffer_ptr.is_null() {
+        let output_len = num_frames * num_channels;
+        let buffer_slice = unsafe { std::slice::from_raw_parts(buffer_ptr, output_len) };
+        let output_slice = unsafe { std::slice::from_raw_parts_mut(output_frame.data, output_len) };
+        output_slice.copy_from_slice(buffer_slice);
+    }
+
+    true // keep processing
+}
+
+// -------------------------------------------------------------------------------------------------
+
 static mut WEBAUDIO_CONTEXT: *mut WebContext = std::ptr::null_mut();
+
+// Audio pull functions as used by the worklet and script processor backends.
 
 extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
     unsafe {
         if WEBAUDIO_CONTEXT.is_null() {
             return std::ptr::null();
         }
+
         let state = &mut *WEBAUDIO_CONTEXT;
 
         let num_frames = num_frames as usize;
-        let output_samples = num_frames * state.num_channels;
+        let num_channels = state.num_channels;
+        let output_samples = num_frames * num_channels;
 
         if state.buffer.len() < output_samples {
             state.buffer.resize(output_samples, 0.0);
@@ -372,18 +659,43 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
         // Write out as many samples as possible from the audio source to the output buffer.
         let samples_written = match state.state {
             CallbackState::Playing => {
-                let time = SourceTime {
-                    pos_in_frames: state.playback_pos.load(Ordering::Relaxed)
-                        / state.source.channel_count().max(1) as u64,
-                    pos_instant: state.playback_pos_instant,
-                };
-                #[cfg(not(feature = "assert-allocs"))]
+                /*{
+                    // Sine wave generation for testing
+                    static mut SINE_PHASE: f32 = 0.0;
+                    const SINE_FREQ: f32 = 100.0;
+                    const SAMPLE_RATE: f32 = 48000.0;
+
+                    let phase_increment = std::f32::consts::TAU * SINE_FREQ / SAMPLE_RATE;
+
+                    for frame in 0..num_frames {
+                        let value = unsafe { SINE_PHASE.sin() * 0.25 };
+                        unsafe {
+                            SINE_PHASE += phase_increment;
+                            if SINE_PHASE > std::f32::consts::TAU {
+                                SINE_PHASE -= std::f32::consts::TAU;
+                            }
+                        }
+                        for channel in 0..num_channels {
+                            output[frame * num_channels + channel] = value;
+                        }
+                    }
+
+                    num_frames * num_channels
+                }*/
                 {
-                    state.source.write(&mut output[..output_samples], &time)
-                }
-                #[cfg(feature = "assert-allocs")]
-                {
-                    assert_no_alloc(|| state.source.write(&mut output[..output_samples], &time))
+                    let time = SourceTime {
+                        pos_in_frames: state.playback_pos.load(Ordering::Relaxed)
+                            / num_channels as u64,
+                        pos_instant: state.playback_pos_instant,
+                    };
+                    #[cfg(not(feature = "assert-allocs"))]
+                    {
+                        state.source.write(output, &time)
+                    }
+                    #[cfg(feature = "assert-allocs")]
+                    {
+                        assert_no_alloc(|| state.source.write(output, &time))
+                    }
                 }
             }
             CallbackState::Paused => 0,

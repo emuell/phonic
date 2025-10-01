@@ -142,7 +142,8 @@ impl App {
                 "example_synth",
                 organ_synth::voice_factory,
                 8,           // 8 voices
-                None,        // playback_status_send
+                None,        // playback status sender
+                None,        // playback pos emit rate
                 sample_rate, // output rate
             )?,
             Some(synth_mixer_id),
