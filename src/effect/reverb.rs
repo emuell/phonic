@@ -155,7 +155,7 @@ pub struct ReverbEffect {
 
 impl ReverbEffect {
     const DEFAULT_ROOM_SIZE: f32 = 0.6;
-    const DEFAULT_WET: f32 = 0.5;
+    const DEFAULT_WET: f32 = 0.35;
 
     pub fn with_parameters(room_size: f32, wet: f32) -> Self {
         let mut rng = rand::rng();
