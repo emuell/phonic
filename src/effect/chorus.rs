@@ -115,7 +115,7 @@ pub enum ChorusEffectMessage {
     /// Reset LFO phase and delay lines.
     Reset,
     /// Set the filter type for the feedback path.
-    SetFilterType(SvfFilterType),
+    SetFilterType(ChorusFilterType),
     /// Set filter cutoff frequency in Hz.
     SetFilterFreq(f32),
     /// Set filter resonance (Q factor). Range: 0.0 to 1.0.
@@ -133,6 +133,10 @@ impl EffectMessage for ChorusEffectMessage {
 
 // -------------------------------------------------------------------------------------------------
 
+pub type ChorusFilterType = SvfFilterType;
+
+// -------------------------------------------------------------------------------------------------
+
 /// A stereo chorus effect with an filtered, interpolated delay-line.
 pub struct ChorusEffect {
     sample_rate: u32,
@@ -145,7 +149,7 @@ pub struct ChorusEffect {
     feedback: f64,
     delay: f64,
     wet_mix: f64,
-    filter_type: SvfFilterType,
+    filter_type: ChorusFilterType,
     filter_freq: f32,
     filter_resonance: f32,
 
@@ -167,15 +171,15 @@ impl ChorusEffect {
     const MAX_APPLIED_RANGE_IN_SAMPLES: f64 = 256.0;
     const MAX_APPLIED_DELAY_IN_MS: f64 = 100.0;
 
-    const DEFAULT_RATE: f64 = 8.0;
+    const DEFAULT_RATE: f64 = 1.0;
     const DEFAULT_PHASE: f64 = PI / 2.0;
     const DEFAULT_DEPTH: f64 = 0.25;
-    const DEFAULT_FEEDBACK: f64 = 0.25;
-    const DEFAULT_DELAY: f64 = 2.0;
+    const DEFAULT_FEEDBACK: f64 = 0.5;
+    const DEFAULT_DELAY: f64 = 12.0;
     const DEFAULT_WET_MIX: f64 = 0.5;
-    const DEFAULT_FILTER_TYPE: SvfFilterType = SvfFilterType::Highpass;
-    const DEFAULT_FILTER_FREQ: f32 = 800.0;
-    const DEFAULT_FILTER_RESONANCE: f32 = 0.5;
+    const DEFAULT_FILTER_TYPE: ChorusFilterType = ChorusFilterType::Highpass;
+    const DEFAULT_FILTER_FREQ: f32 = 400.0;
+    const DEFAULT_FILTER_RESONANCE: f32 = 0.3;
 
     #[allow(clippy::too_many_arguments)]
     pub fn with_parameters(
@@ -185,7 +189,7 @@ impl ChorusEffect {
         feedback: f64,
         delay: f64,
         wet_mix: f64,
-        filter_type: SvfFilterType,
+        filter_type: ChorusFilterType,
         filter_freq: f32,
         filter_resonance: f32,
     ) -> Self {
