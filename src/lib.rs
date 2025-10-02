@@ -139,9 +139,10 @@ pub mod effects {
     //! Set of basic, common DSP [`Effect`](super::Effect) implementations.
 
     pub use super::effect::{
-        chorus::{ChorusEffect, ChorusEffectMessage},
+        chorus::{ChorusEffect, ChorusEffectMessage, ChorusFilterType},
         compressor::{CompressorEffect, CompressorEffectMessage},
         dcfilter::{DcFilterEffect, DcFilterEffectMessage},
+        distortion::{DistortionEffect, DistortionEffectMessage, DistortionType},
         filter::{FilterEffect, FilterEffectMessage, FilterEffectType},
         reverb::{ReverbEffect, ReverbEffectMessage},
     };

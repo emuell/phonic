@@ -7,6 +7,7 @@ use crate::{Error, SourceTime};
 pub mod chorus;
 pub mod compressor;
 pub mod dcfilter;
+pub mod distortion;
 pub mod filter;
 pub mod reverb;
 
