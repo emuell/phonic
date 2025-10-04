@@ -1,7 +1,11 @@
-use std::any::Any;
+use four_cc::FourCC;
 
 use crate::{
-    effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    effect::{Effect, EffectTime},
+    parameter::{
+        EnumParameter, EnumParameterValue, FloatParameter, FloatParameterValue, Parameter,
+        ParameterValueUpdate,
+    },
     utils::{
         filter::svf::{SvfFilter, SvfFilterType},
         InterleavedBufferMut,
@@ -11,40 +15,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// Filter type parameter
+/// Filter type used in `FilterEffect`.
 pub type FilterEffectType = SvfFilterType;
-
-// -------------------------------------------------------------------------------------------------
-
-/// Message type for `FilterEffect` to change filter parameters.
-#[derive(Clone, Debug)]
-#[allow(unused)]
-pub enum FilterEffectMessage {
-    /// Set all filter parameters at once.
-    Init(
-        FilterEffectType, // Type
-        f32,              // Cutoff
-        f32,              // Q
-        f32,              // Gain
-    ),
-    /// Change the filter type.
-    SetFilterType(FilterEffectType),
-    /// Change the cutoff frequency in Hz. Range: 20.0 to sample_rate / 2.
-    SetCutoff(f32),
-    /// Change the resonance (Q factor). Range: > 0.0.
-    SetQ(f32),
-    /// Change the gain parameter in dB (applied for shelving/peak filters only).
-    SetGain(f32),
-}
-
-impl EffectMessage for FilterEffectMessage {
-    fn effect_name(&self) -> &'static str {
-        FilterEffect::name()
-    }
-    fn payload(&self) -> &dyn Any {
-        self
-    }
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -54,39 +26,70 @@ pub struct FilterEffect {
     channel_count: usize,
     sample_rate: u32,
     filters: Vec<SvfFilter>,
+    filter_type: EnumParameterValue<FilterEffectType>,
+    cutoff: FloatParameterValue,
+    q: FloatParameterValue,
+    gain: FloatParameterValue,
 }
 
 impl FilterEffect {
-    const DEFAULT_FILTER_TYPE: SvfFilterType = SvfFilterType::Lowpass;
-    const DEFAULT_CUTOFF: f32 = 22050.0; // This will be clamped to nyquist in initialize
-    const DEFAULT_Q: f32 = 0.707;
-    const DEFAULT_GAIN: f32 = 0.0;
+    pub const EFFECT_NAME: &str = "FilterEffect";
+    pub const TYPE_ID: FourCC = FourCC(*b"type");
+    pub const CUTOFF_ID: FourCC = FourCC(*b"cuto");
+    pub const Q_ID: FourCC = FourCC(*b"q   ");
+    pub const GAIN_ID: FourCC = FourCC(*b"gain");
 
-    pub fn with_parameters(filter_type: SvfFilterType, cutoff: f32, q: f32, gain: f32) -> Self {
-        let template_filter =
-            SvfFilter::new(filter_type, 44100, cutoff.max(20.0), q.max(0.001), gain).unwrap();
+    /// Creates a new `FilterEffect` with default parameter values.
+    pub fn new() -> Self {
+        let filter_type = SvfFilterType::Lowpass;
+        let cutoff = 22050.0;
+        let q = 0.707;
+        let gain = 0.0;
+        let template_filter = SvfFilter::new(filter_type, 44100, cutoff, q, gain).unwrap();
         Self {
             channel_count: 0,
             sample_rate: 0,
             filters: vec![template_filter],
+            filter_type: EnumParameter::new(Self::TYPE_ID, "Type", FilterEffectType::Lowpass)
+                .into(),
+            cutoff: FloatParameter::new(Self::CUTOFF_ID, "Cutoff", 20.0..=22050.0, 22050.0).into(),
+            q: FloatParameter::new(Self::Q_ID, "Q", 0.001..=24.0, 0.707).into(),
+            gain: FloatParameter::new(Self::GAIN_ID, "Gain", -24.0..=24.0, 0.0).into(),
         }
+    }
+
+    /// Creates a new `DistortionEffect` with the given parameter values.
+    pub fn with_parameters(filter_type: SvfFilterType, cutoff: f32, q: f32, gain: f32) -> Self {
+        let mut filter = Self::new();
+        filter.filter_type.set_value(filter_type);
+        filter.cutoff.set_value(cutoff);
+        filter.q.set_value(q);
+        filter.gain.set_value(gain);
+        filter.filters[0]
+            .set(filter_type, 44100, cutoff, q, gain)
+            .unwrap();
+        filter
     }
 }
 
 impl Default for FilterEffect {
     fn default() -> Self {
-        Self::with_parameters(
-            Self::DEFAULT_FILTER_TYPE,
-            Self::DEFAULT_CUTOFF,
-            Self::DEFAULT_Q,
-            Self::DEFAULT_GAIN,
-        )
+        Self::new()
     }
 }
 
 impl Effect for FilterEffect {
-    fn name() -> &'static str {
-        "FilterEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![
+            Box::new(self.filter_type.description().clone()),
+            Box::new(self.cutoff.description().clone()),
+            Box::new(self.q.description().clone()),
+            Box::new(self.gain.description().clone()),
+        ]
     }
 
     fn initialize(
@@ -133,37 +136,32 @@ impl Effect for FilterEffect {
         }
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
-        if let Some(message) = message.payload().downcast_ref::<FilterEffectMessage>() {
-            let nyquist = self.sample_rate as f32 / 2.0;
-            const MIN_Q: f32 = 0.001;
-            const MIN_CUTOFF: f32 = 20.0;
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::TYPE_ID => self.filter_type.apply_update(value),
+            Self::CUTOFF_ID => self.cutoff.apply_update(value),
+            Self::Q_ID => self.q.apply_update(value),
+            Self::GAIN_ID => self.gain.apply_update(value),
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+        };
 
-            for filter in &mut self.filters {
-                let coeffs = filter.coefficients_mut();
-                let result = match message {
-                    FilterEffectMessage::Init(ft, c, q, g) => {
-                        let cutoff = c.clamp(MIN_CUTOFF, nyquist);
-                        let q_clamped = q.max(MIN_Q);
-                        coeffs.set(*ft, self.sample_rate, cutoff, q_clamped, *g)
-                    }
-                    FilterEffectMessage::SetFilterType(ft) => coeffs.set_filter_type(*ft),
-                    FilterEffectMessage::SetCutoff(c) => {
-                        let cutoff = c.clamp(MIN_CUTOFF, nyquist);
-                        coeffs.set_cutoff(cutoff)
-                    }
-                    FilterEffectMessage::SetQ(q) => {
-                        let q_clamped = q.max(MIN_Q);
-                        coeffs.set_q(q_clamped)
-                    }
-                    FilterEffectMessage::SetGain(g) => coeffs.set_gain(*g),
-                };
-                if let Err(err) = result {
-                    log::error!("Failed to apply new filter parameters: {err}");
-                }
+        for filter in &mut self.filters {
+            let coeffs = filter.coefficients_mut();
+            let result = match id {
+                Self::TYPE_ID => coeffs.set_filter_type(*self.filter_type.value()),
+                Self::CUTOFF_ID => coeffs.set_cutoff(*self.cutoff.value()),
+                Self::Q_ID => coeffs.set_q(*self.q.value()),
+                Self::GAIN_ID => coeffs.set_gain(*self.gain.value()),
+                _ => Ok(()),
+            };
+            if let Err(err) = result {
+                log::error!("Failed to apply new filter parameters: {err}");
             }
-        } else {
-            log::error!("FilterEffect: Invalid/unknown message payload");
         }
+        Ok(())
     }
 }

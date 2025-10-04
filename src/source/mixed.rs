@@ -2,10 +2,12 @@ use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
+use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectMessage},
-    player::{EffectId, MixerId, PlaybackMessageQueue},
+    parameter::ParameterValueUpdate,
+    player::{EffectId, PlaybackMessageQueue},
     source::{
         amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
         Source, SourceTime,
@@ -14,7 +16,7 @@ use crate::{
         buffer::{add_buffers, clear_buffer},
         event::{Event, EventProcessor},
     },
-    PlaybackId,
+    MixerId, PlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -61,6 +63,12 @@ pub(crate) enum MixerEvent {
         message: Owned<Box<dyn EffectMessage>>,
         sample_time: u64,
     },
+    ProcessEffectParameterUpdate {
+        effect_id: EffectId,
+        parameter_id: FourCC,
+        value: Owned<ParameterValueUpdate>,
+        sample_time: u64,
+    },
 }
 
 impl Event for MixerEvent {
@@ -71,6 +79,7 @@ impl Event for MixerEvent {
             Self::SetSourceVolume { sample_time, .. } => *sample_time,
             Self::SetSourcePanning { sample_time, .. } => *sample_time,
             Self::ProcessEffectMessage { sample_time, .. } => *sample_time,
+            Self::ProcessEffectParameterUpdate { sample_time, .. } => *sample_time,
         }
     }
 }
@@ -98,6 +107,12 @@ pub(crate) enum MixerMessage {
     ProcessEffectMessage {
         effect_id: EffectId,
         message: Owned<Box<dyn EffectMessage>>,
+        sample_time: u64,
+    },
+    ProcessEffectParameterUpdate {
+        effect_id: EffectId,
+        parameter_id: FourCC,
+        value: Owned<ParameterValueUpdate>,
         sample_time: u64,
     },
     SetSourceSpeed {
@@ -275,6 +290,19 @@ impl MixedSource {
                     self.insert_event(MixerEvent::ProcessEffectMessage {
                         effect_id,
                         message,
+                        sample_time,
+                    });
+                }
+                MixerMessage::ProcessEffectParameterUpdate {
+                    effect_id,
+                    parameter_id,
+                    value,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::ProcessEffectParameterUpdate {
+                        effect_id,
+                        parameter_id,
+                        value,
                         sample_time,
                     });
                 }
@@ -592,9 +620,30 @@ impl EventProcessor for MixedSource {
             } => {
                 if let Some((_, effect)) = self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
-                    effect.process_message(&**message);
+                    if let Err(err) = effect.process_message(&**message) {
+                        log::error!("Failed to process message on effect {effect_id}: {err}");
+                    }
                 } else {
                     log::warn!("Effect with id {effect_id} not found for scheduled message");
+                }
+            }
+            MixerEvent::ProcessEffectParameterUpdate {
+                effect_id,
+                parameter_id,
+                value,
+                sample_time: _,
+            } => {
+                if let Some((_, effect)) = self.effects.iter_mut().find(|(id, _)| *id == effect_id)
+                {
+                    if let Err(err) = effect.process_parameter_update(parameter_id, &value) {
+                        log::error!(
+                            "Failed to update parameter '{parameter_id}' on effect {effect_id}: {err}",
+                        );
+                    }
+                } else {
+                    log::warn!(
+                        "Effect with id {effect_id} not found for scheduled parameter update"
+                    );
                 }
             }
         }

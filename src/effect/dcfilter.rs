@@ -1,31 +1,14 @@
+use four_cc::FourCC;
+
 use crate::{
-    effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    effect::{Effect, EffectTime},
+    parameter::{EnumParameter, EnumParameterValue, Parameter, ParameterValueUpdate},
     utils::{
         filter::dc::{DcFilter, DcFilterMode},
         InterleavedBufferMut,
     },
     Error,
 };
-use std::any::Any;
-
-// -------------------------------------------------------------------------------------------------
-
-/// Message type for `DcFilterEffect` to change filter parameters.
-#[derive(Clone, Debug)]
-#[allow(unused)]
-pub enum DcFilterEffectMessage {
-    // Set the DC filter mode (frequency)
-    SetMode(DcFilterMode),
-}
-
-impl EffectMessage for DcFilterEffectMessage {
-    fn effect_name(&self) -> &'static str {
-        DcFilterEffect::name()
-    }
-    fn payload(&self) -> &dyn Any {
-        self
-    }
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -35,47 +18,44 @@ pub struct DcFilterEffect {
     channel_count: usize,
     sample_rate: u32,
     filters: Vec<DcFilter>,
-    mode: DcFilterMode,
+    mode: EnumParameterValue<DcFilterMode>,
 }
 
 impl DcFilterEffect {
-    const DEFAULT_MODE: DcFilterMode = DcFilterMode::Default;
+    pub const EFFECT_NAME: &str = "DcFilterEffect";
+    pub const MODE_ID: FourCC = FourCC(*b"mode");
 
-    pub fn with_parameters(mode: DcFilterMode) -> Self {
+    /// Creates a new `DcFilterEffect` with default parameter values.
+    pub fn new() -> Self {
         Self {
             channel_count: 0,
             sample_rate: 0,
             filters: Vec::new(),
-            mode,
+            mode: EnumParameter::new(Self::MODE_ID, "Mode", DcFilterMode::Default).into(),
         }
+    }
+
+    /// Creates a new `DcFilterEffect` with the given parameter values.
+    pub fn with_parameters(mode: DcFilterMode) -> Self {
+        let mut filter = Self::default();
+        filter.mode.set_value(mode);
+        filter
     }
 }
 
 impl Default for DcFilterEffect {
     fn default() -> Self {
-        Self::with_parameters(Self::DEFAULT_MODE)
+        Self::new()
     }
 }
 
 impl Effect for DcFilterEffect {
-    fn name() -> &'static str {
-        "DcFilterEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
     }
 
-    /// Sends a message to update the filter parameters.
-    fn process_message(&mut self, message: &EffectMessagePayload) {
-        if let Some(message) = message.payload().downcast_ref::<DcFilterEffectMessage>() {
-            match message {
-                DcFilterEffectMessage::SetMode(mode) => {
-                    self.mode = *mode;
-                    for filter in &mut self.filters {
-                        filter.init(self.sample_rate, *mode);
-                    }
-                }
-            }
-        } else {
-            log::error!("DcFilterEffect: Invalid/unknown message payload");
-        }
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![Box::new(self.mode.description().clone())]
     }
 
     fn initialize(
@@ -90,7 +70,7 @@ impl Effect for DcFilterEffect {
         self.filters.clear();
         for _ in 0..channel_count {
             let mut filter = DcFilter::new();
-            filter.init(sample_rate, self.mode);
+            filter.init(sample_rate, *self.mode.value());
             self.filters.push(filter);
         }
         Ok(())
@@ -105,5 +85,20 @@ impl Effect for DcFilterEffect {
         {
             filter.process(channel_iter);
         }
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::MODE_ID => self.mode.apply_update(value),
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+        }
+        for filter in &mut self.filters {
+            filter.init(self.sample_rate, *self.mode.value());
+        }
+        Ok(())
     }
 }

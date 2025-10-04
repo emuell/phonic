@@ -1,14 +1,19 @@
-use std::any::Any;
+use four_cc::FourCC;
+use strum::{Display, EnumIter, EnumString};
 
 use crate::{
-    effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    effect::{Effect, EffectTime},
+    parameter::{
+        EnumParameter, EnumParameterValue, FloatParameter, FloatParameterValue, Parameter,
+        ParameterValueUpdate,
+    },
     Error,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// The type of distortion to apply.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Display, EnumIter, EnumString)]
 pub enum DistortionType {
     /// No distortion.
     #[default]
@@ -37,49 +42,37 @@ pub enum DistortionType {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Message type for `DistortionEffect` to change parameters.
-#[derive(Clone, Debug)]
-#[allow(unused)]
-pub enum DistortionEffectMessage {
-    /// Set the distortion type.
-    SetType(DistortionType),
-    /// Set the drive amount. Range: 0.0 to 1.0.
-    SetDrive(f32),
-    /// Set the wet/dry mix. Range: 0.0 (dry) to 1.0 (wet).
-    SetMix(f32),
-}
-
-impl EffectMessage for DistortionEffectMessage {
-    fn effect_name(&self) -> &'static str {
-        DistortionEffect::name()
-    }
-    fn payload(&self) -> &dyn Any {
-        self
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// A simple distortion effect with multiple waveshaping algorithms.
 #[derive(Debug)]
 pub struct DistortionEffect {
-    distortion_type: DistortionType,
-    drive: f32,
-    mix: f32,
+    distortion_type: EnumParameterValue<DistortionType>,
+    drive: FloatParameterValue,
+    mix: FloatParameterValue,
 }
 
 impl DistortionEffect {
-    const DEFAULT_TYPE: DistortionType = DistortionType::Diode;
-    const DEFAULT_DRIVE: f32 = 0.5;
-    const DEFAULT_MIX: f32 = 1.0;
+    pub const EFFECT_NAME: &str = "DistortionEffect";
+    pub const TYPE_ID: FourCC = FourCC(*b"type");
+    pub const DRIVE_ID: FourCC = FourCC(*b"driv");
+    pub const MIX_ID: FourCC = FourCC(*b"mix ");
+
+    /// Creates a new `DistortionEffect` with default parameter values.
+    pub fn new() -> Self {
+        Self {
+            distortion_type: EnumParameter::new(Self::TYPE_ID, "Type", DistortionType::Diode)
+                .into(),
+            drive: FloatParameter::new(Self::DRIVE_ID, "Drive", 0.0..=2.0, 0.5).into(),
+            mix: FloatParameter::new(Self::MIX_ID, "Mix", 0.0..=1.0, 1.0).into(),
+        }
+    }
 
     /// Creates a new `DistortionEffect` with the given parameters.
     pub fn with_parameters(distortion_type: DistortionType, drive: f32, mix: f32) -> Self {
-        Self {
-            distortion_type,
-            drive: drive.clamp(0.0, 2.0),
-            mix: mix.clamp(0.0, 1.0),
-        }
+        let mut distortion = Self::default();
+        distortion.distortion_type.set_value(distortion_type);
+        distortion.drive.set_value(drive);
+        distortion.mix.set_value(mix);
+        distortion
     }
 
     #[inline]
@@ -134,22 +127,22 @@ impl DistortionEffect {
     /// Process helper function that calls `process_sample` for each sample in a buffer
     #[inline]
     pub fn process<'a>(&mut self, output: impl Iterator<Item = &'a mut f32>) {
-        let dist_function = match self.distortion_type {
+        let dist_function = match *self.distortion_type.value() {
             DistortionType::None => return,
             DistortionType::SoftClip => Self::soft_clip,
             DistortionType::HardClip => Self::hard_clip,
             DistortionType::Diode => Self::diode,
             DistortionType::Fuzz => Self::fuzz,
         };
-        if self.mix >= 1.0 {
+        if *self.mix.value() >= 1.0 {
             for sample in output {
-                *sample = dist_function(*sample, self.drive);
+                *sample = dist_function(*sample, *self.drive.value());
             }
         } else {
             for sample in output {
                 let dry = *sample;
-                let wet = dist_function(dry, self.drive);
-                *sample = (1.0 - self.mix) * dry + self.mix * wet;
+                let wet = dist_function(dry, *self.drive.value());
+                *sample = (1.0 - *self.mix.value()) * dry + *self.mix.value() * wet;
             }
         }
     }
@@ -157,17 +150,21 @@ impl DistortionEffect {
 
 impl Default for DistortionEffect {
     fn default() -> Self {
-        Self {
-            distortion_type: Self::DEFAULT_TYPE,
-            drive: Self::DEFAULT_DRIVE,
-            mix: Self::DEFAULT_MIX,
-        }
+        Self::new()
     }
 }
 
 impl Effect for DistortionEffect {
-    fn name() -> &'static str {
-        "DistortionEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![
+            Box::new(self.distortion_type.description().clone()),
+            Box::new(self.drive.description().clone()),
+            Box::new(self.mix.description().clone()),
+        ]
     }
 
     fn initialize(
@@ -180,21 +177,23 @@ impl Effect for DistortionEffect {
     }
 
     fn process(&mut self, output: &mut [f32], _time: &EffectTime) {
-        if self.distortion_type == DistortionType::None || self.mix == 0.0 {
+        if *self.distortion_type.value() == DistortionType::None || *self.mix.value() == 0.0 {
             return;
         }
         self.process(output.iter_mut());
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
-        if let Some(message) = message.payload().downcast_ref::<DistortionEffectMessage>() {
-            match message {
-                DistortionEffectMessage::SetType(t) => self.distortion_type = *t,
-                DistortionEffectMessage::SetDrive(d) => self.drive = d.clamp(0.0, 10.0),
-                DistortionEffectMessage::SetMix(m) => self.mix = m.clamp(0.0, 1.0),
-            }
-        } else {
-            log::error!("DistortionEffect: Invalid/unknown message payload");
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::TYPE_ID => self.distortion_type.apply_update(value),
+            Self::DRIVE_ID => self.drive.apply_update(value),
+            Self::MIX_ID => self.mix.apply_update(value),
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
+        Ok(())
     }
 }
