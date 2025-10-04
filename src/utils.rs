@@ -16,6 +16,8 @@ pub(crate) mod resampler;
 pub(crate) mod smoothed;
 pub(crate) mod wave;
 
+// -------------------------------------------------------------------------------------------------
+
 /// Interleaved buffer helpers.
 pub use buffer::{InterleavedBuffer, InterleavedBufferMut};
 

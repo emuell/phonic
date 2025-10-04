@@ -22,6 +22,8 @@ log = { version = "^0.4", features = [
     "max_level_debug",
     "release_max_level_info",
 ] }
+strum = { version = "^0.27", features = ["derive"] }
+four-cc = { version = "0.4" }
 lazy_static = { version = "^1.4" }
 crossbeam-channel = { version = "^0.5" }
 crossbeam-queue = { version = "^0.3" }

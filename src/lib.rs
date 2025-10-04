@@ -45,7 +45,7 @@
 //!
 //!     // Add a limiter to the main mixer. All sounds, including the sub mixer's output
 //!     // will be routed through this effect now.
-//!     player.add_effect(CompressorEffect::default_limiter(), None)?;
+//!     player.add_effect(CompressorEffect::new_limiter(), None)?;
 //!
 //!     // Play a file with default options on the sub mixer. It will start playing immediately.
 //!     player.play_file("path/to/your/file.wav",
@@ -84,10 +84,11 @@
 mod effect;
 mod error;
 mod output;
+mod parameter;
 mod player;
 mod source;
 
-// public, flat re-exports
+// public, flat re-exports (common types and traits)
 pub use error::Error;
 
 #[cfg(any(feature = "cpal-output", feature = "web-output"))]
@@ -99,6 +100,8 @@ pub use player::{
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
+pub use parameter::{Parameter, ParameterType, ParameterValueUpdate};
+
 pub use source::{
     file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
     resampled::ResamplingQuality,
@@ -106,6 +109,7 @@ pub use source::{
     Source, SourceTime,
 };
 
+// public, modularized re-exports (common trait impls)
 pub mod outputs {
     //! Default [`OutputDevice`](super::OutputDevice) implementations.
 
@@ -123,27 +127,30 @@ pub mod outputs {
 
 pub mod sources {
     //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
-
-    // synths
+    pub use super::source::file::{
+        common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
+    };
     pub use super::source::synth::common::{SynthSourceGenerator, SynthSourceImpl};
     #[cfg(feature = "dasp")]
     pub use super::source::synth::dasp::DaspSynthSource;
+}
 
-    // files
-    pub use super::source::file::{
-        common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
+pub mod parameters {
+    //! Effect [`Parameter`](super::Parameter) implementations.
+    pub use super::parameter::{
+        BooleanParameter, BooleanParameterValue, EnumParameter, EnumParameterValue, FloatParameter,
+        FloatParameterValue, IntegerParameter, IntegerParameterValue,
     };
 }
 
 pub mod effects {
     //! Set of basic, common DSP [`Effect`](super::Effect) implementations.
-
     pub use super::effect::{
-        chorus::{ChorusEffect, ChorusEffectMessage, ChorusFilterType},
-        compressor::{CompressorEffect, CompressorEffectMessage},
-        dcfilter::{DcFilterEffect, DcFilterEffectMessage},
-        distortion::{DistortionEffect, DistortionEffectMessage, DistortionType},
-        filter::{FilterEffect, FilterEffectMessage, FilterEffectType},
+        chorus::{ChorusEffect, ChorusEffectFilterType, ChorusEffectMessage},
+        compressor::CompressorEffect,
+        dcfilter::DcFilterEffect,
+        distortion::{DistortionEffect, DistortionType},
+        filter::{FilterEffect, FilterEffectType},
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }

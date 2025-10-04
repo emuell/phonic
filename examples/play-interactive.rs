@@ -196,9 +196,10 @@ fn main() -> Result<(), Error> {
                     println!("Filter type: {filter_type:?}");
                     let mut player = player.lock().unwrap();
                     player
-                        .send_effect_message(
+                        .set_effect_parameter(
                             loop_filter_effect_id,
-                            effects::FilterEffectMessage::SetFilterType(filter_type),
+                            effects::FilterEffect::TYPE_ID,
+                            filter_type,
                             None,
                         )
                         .unwrap_or_default();
@@ -208,9 +209,10 @@ fn main() -> Result<(), Error> {
                         *current_filter_cutoff.lock().unwrap()
                     };
                     player
-                        .send_effect_message(
+                        .set_effect_parameter(
                             loop_filter_effect_id,
-                            effects::FilterEffectMessage::SetCutoff(cutoff),
+                            effects::FilterEffect::CUTOFF_ID,
+                            cutoff,
                             None,
                         )
                         .unwrap_or_default();
@@ -245,9 +247,10 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff * 1.1_f32).min(player.output_sample_rate() as f32 / 2.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     player
-                        .send_effect_message(
+                        .set_effect_parameter(
                             loop_filter_effect_id,
-                            effects::FilterEffectMessage::SetCutoff(*cutoff),
+                            effects::FilterEffect::CUTOFF_ID,
+                            *cutoff,
                             None,
                         )
                         .unwrap_or_default();
@@ -258,9 +261,10 @@ fn main() -> Result<(), Error> {
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     let mut player = player.lock().unwrap();
                     player
-                        .send_effect_message(
+                        .set_effect_parameter(
                             loop_filter_effect_id,
-                            effects::FilterEffectMessage::SetCutoff(*cutoff),
+                            effects::FilterEffect::CUTOFF_ID,
+                            *cutoff,
                             None,
                         )
                         .unwrap_or_default();
