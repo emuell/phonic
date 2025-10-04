@@ -1,5 +1,6 @@
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    parameter::{FloatParameter, FloatParameterValue, Parameter, ParameterValueUpdate},
     utils::{
         filter::svf::{SvfFilter, SvfFilterType},
         InterleavedBufferMut,
@@ -8,6 +9,7 @@ use crate::{
 };
 
 use core::f32;
+use four_cc::FourCC;
 use rand::Rng;
 use std::any::Any;
 
@@ -15,22 +17,14 @@ use std::any::Any;
 
 /// Message type for `ReverbEffect` to change parameters.
 #[derive(Clone, Debug)]
-#[allow(unused)]
 pub enum ReverbEffectMessage {
-    /// Set all reverb parameters at once.
-    Init(
-        f32, // room_size
-        f32, // wet
-    ),
-    /// Controls the size of the reverb. Range: 0.0 to 1.0.
-    SetRoomSize(f32),
-    /// Controls the wet/dry mix. Range: 0.0 to 1.0.
-    SetWet(f32),
+    /// Reset/clear all delay lines
+    Reset,
 }
 
 impl EffectMessage for ReverbEffectMessage {
     fn effect_name(&self) -> &'static str {
-        ReverbEffect::name()
+        ReverbEffect::EFFECT_NAME
     }
     fn payload(&self) -> &dyn Any {
         self
@@ -43,8 +37,8 @@ impl EffectMessage for ReverbEffectMessage {
 pub struct ReverbEffect {
     sample_rate: u32,
     channel_count: usize,
-    room_size: f32,
-    wet: f32,
+    room_size: FloatParameterValue,
+    wet: FloatParameterValue,
 
     biquad_a_l: SvfFilter,
     biquad_a_r: SvfFilter,
@@ -154,10 +148,12 @@ pub struct ReverbEffect {
 }
 
 impl ReverbEffect {
-    const DEFAULT_ROOM_SIZE: f32 = 0.6;
-    const DEFAULT_WET: f32 = 0.35;
+    pub const EFFECT_NAME: &str = "Reverb";
+    pub const ROOM_SIZE_ID: FourCC = FourCC(*b"room");
+    pub const WET_ID: FourCC = FourCC(*b"wet ");
 
-    pub fn with_parameters(room_size: f32, wet: f32) -> Self {
+    /// Creates a new `ReverbEffect` with default parameter values.
+    pub fn new() -> Self {
         let mut rng = rand::rng();
         let mut fpd_l = 1;
         while fpd_l < 16386 {
@@ -187,8 +183,8 @@ impl ReverbEffect {
         Self {
             sample_rate: 0,
             channel_count: 0,
-            room_size: room_size.clamp(0.0, 1.0),
-            wet: wet.clamp(0.0, 1.0),
+            room_size: FloatParameter::new(Self::ROOM_SIZE_ID, "Room Size", 0.0..=1.0, 0.6).into(),
+            wet: FloatParameter::new(Self::WET_ID, "Wet", 0.0..=1.0, 0.35).into(),
             biquad_a_l: SvfFilter::default(),
             biquad_a_r: SvfFilter::default(),
             biquad_b_l: SvfFilter::default(),
@@ -292,34 +288,64 @@ impl ReverbEffect {
         }
     }
 
-    /// Access to the room size parameter
-    pub fn room_size(&self) -> f32 {
-        self.room_size
-    }
-    pub fn set_room_size(&mut self, room_size: f32) {
-        assert!((0.0..=1.0).contains(&room_size));
-        self.room_size = room_size
+    /// Creates a new `ReverbEffect` with the given parameters.
+    pub fn with_parameters(room_size: f32, wet: f32) -> Self {
+        let mut reverb = Self::new();
+        reverb.room_size.set_value(room_size);
+        reverb.wet.set_value(wet);
+        reverb
     }
 
-    /// Access to the dry/wet parameter
-    pub fn wet(&self) -> f32 {
-        self.wet
-    }
-    pub fn set_wet(&mut self, wet: f32) {
-        assert!((0.0..=1.0).contains(&wet));
-        self.wet = wet
+    fn reset(&mut self) {
+        for v in [
+            &mut self.a_al,
+            &mut self.a_ar,
+            &mut self.a_bl,
+            &mut self.a_br,
+            &mut self.a_cl,
+            &mut self.a_cr,
+            &mut self.a_dl,
+            &mut self.a_dr,
+            &mut self.a_el,
+            &mut self.a_er,
+            &mut self.a_fl,
+            &mut self.a_fr,
+            &mut self.a_gl,
+            &mut self.a_gr,
+            &mut self.a_hl,
+            &mut self.a_hr,
+            &mut self.a_il,
+            &mut self.a_ir,
+            &mut self.a_jl,
+            &mut self.a_jr,
+            &mut self.a_kl,
+            &mut self.a_kr,
+            &mut self.a_ll,
+            &mut self.a_lr,
+            &mut self.a_ml,
+            &mut self.a_mr,
+        ] {
+            v.fill(0.0);
+        }
     }
 }
 
 impl Default for ReverbEffect {
     fn default() -> Self {
-        Self::with_parameters(Self::DEFAULT_ROOM_SIZE, Self::DEFAULT_WET)
+        Self::new()
     }
 }
 
 impl Effect for ReverbEffect {
-    fn name() -> &'static str {
-        "ReverbEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![
+            Box::new(self.room_size.description().clone()),
+            Box::new(self.wet.description().clone()),
+        ]
     }
 
     fn initialize(
@@ -339,8 +365,8 @@ impl Effect for ReverbEffect {
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        let room_size = self.room_size as f64;
-        let wet = self.wet as f64;
+        let room_size = *self.room_size.value() as f64;
+        let wet = *self.wet.value() as f64;
         let vib_speed = 0.1;
         let vib_depth = 7.0;
         let size = (room_size.powi(2) * 75.0) + 25.0;
@@ -717,22 +743,29 @@ impl Effect for ReverbEffect {
         }
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
+    fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
         if let Some(message) = message.payload().downcast_ref::<ReverbEffectMessage>() {
             match message {
-                ReverbEffectMessage::Init(room_size, wet) => {
-                    self.set_room_size((*room_size).clamp(0.0, 1.0));
-                    self.set_wet(*wet);
-                }
-                ReverbEffectMessage::SetRoomSize(room_size) => {
-                    self.set_room_size((*room_size).clamp(0.0, 1.0));
-                }
-                ReverbEffectMessage::SetWet(wet) => {
-                    self.set_wet(*wet);
-                }
+                ReverbEffectMessage::Reset => self.reset(),
             }
+            Ok(())
         } else {
-            log::error!("ReverbEffect: Invalid/unknown message payload");
+            Err(Error::ParameterError(
+                "ReverbEffect: Invalid/unknown message payload".to_owned(),
+            ))
         }
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::ROOM_SIZE_ID => self.room_size.apply_update(value),
+            Self::WET_ID => self.wet.apply_update(value),
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+        }
+        Ok(())
     }
 }

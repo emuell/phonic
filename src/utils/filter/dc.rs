@@ -1,6 +1,8 @@
+use strum::{Display, EnumIter, EnumString};
+
 // -------------------------------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Display, EnumIter, EnumString)]
 #[allow(unused)]
 pub enum DcFilterMode {
     /// ~1Hz cutoff: very gentle, might not remove all DC offset.

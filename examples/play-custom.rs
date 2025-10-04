@@ -1,12 +1,14 @@
 //! An example showcasing how to create and use custom effects and synth sources.
 
-use std::{any::Any, f32::consts::PI, time::Duration};
+use std::{f32::consts::PI, time::Duration};
 
+use four_cc::FourCC;
 use phonic::{
     effects::{CompressorEffect, ReverbEffect},
+    parameters::{FloatParameter, FloatParameterValue},
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
     utils::{pitch_from_note, speed_from_note, InterleavedBufferMut},
-    Effect, EffectMessage, EffectMessagePayload, EffectTime, Error, FilePlaybackOptions,
+    Effect, EffectTime, Error, FilePlaybackOptions, Parameter, ParameterValueUpdate,
     SynthPlaybackOptions,
 };
 
@@ -24,52 +26,44 @@ mod arguments;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Message enum for our custom TanhDistortion effect.
-#[derive(Clone, Debug)]
-#[allow(unused)]
-enum TanhDistortionMessage {
-    /// Set the distortion gain. Range: 0.0 to 1.0.
-    SetGain(f32),
-}
-
-impl EffectMessage for TanhDistortionMessage {
-    fn effect_name(&self) -> &'static str {
-        TanhDistortion::name()
-    }
-    fn payload(&self) -> &dyn Any {
-        self
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// A simple distortion [`Effect`] that uses the `tanh` function for waveshaping.
 #[derive(Clone)]
 struct TanhDistortion {
     channel_count: usize,
-    gain: f32,
+    gain: FloatParameterValue,
 }
 
 impl TanhDistortion {
-    const DEFAULT_GAIN: f32 = 0.7;
+    const EFFECT_NAME: &str = "TanhDistortion";
+    const GAIN_ID: FourCC = FourCC(*b"gain");
 
-    fn with_parameters(gain: f32) -> Self {
+    fn new() -> Self {
         Self {
             channel_count: 0,
-            gain,
+            gain: FloatParameter::new(Self::GAIN_ID, "Gain", 0.0..=1.0, 0.7).into(),
         }
+    }
+
+    fn with_parameters(gain: f32) -> Self {
+        let mut distortion = Self::new();
+        distortion.gain.set_value(gain);
+        distortion
     }
 }
 
 impl Default for TanhDistortion {
     fn default() -> Self {
-        Self::with_parameters(Self::DEFAULT_GAIN)
+        Self::new()
     }
 }
 
 impl Effect for TanhDistortion {
-    fn name() -> &'static str {
-        "TanhDistortion"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![Box::new(self.gain.description().clone())]
     }
 
     fn initialize(
@@ -84,7 +78,9 @@ impl Effect for TanhDistortion {
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
         // Map gain (0-1) to a drive amount.
-        let drive = 1.0 + self.gain * 15.0;
+        let drive = 1.0 + self.gain.value() * 15.0;
+        let wet_amount = *self.gain.value();
+        let dry_amount = 1.0 - self.gain.value();
 
         for frame in output.frames_mut(self.channel_count) {
             for sample in frame {
@@ -92,21 +88,23 @@ impl Effect for TanhDistortion {
                 // Apply drive, waveshape, and apply makeup gain.
                 let wet = (dry * drive).tanh() * 0.5;
                 // Linearly interpolate between dry and wet signal based on gain.
-                *sample = dry * (1.0 - self.gain) + wet * self.gain;
+                *sample = dry * dry_amount + wet * wet_amount;
             }
         }
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
-        if let Some(message) = message.payload().downcast_ref::<TanhDistortionMessage>() {
-            match message {
-                TanhDistortionMessage::SetGain(gain) => {
-                    self.gain = (*gain).clamp(0.0, 1.0);
-                }
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::GAIN_ID => {
+                self.gain.apply_update(value);
             }
-        } else {
-            log::error!("TanhDistortion: Invalid/unknown message payload");
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
+        Ok(())
     }
 }
 
@@ -199,8 +197,8 @@ fn main() -> Result<(), Error> {
     let pad_mixer_id = player.add_mixer(None)?;
     player.add_effect(ReverbEffect::with_parameters(0.4, 0.6), pad_mixer_id)?;
 
-    // Add a limiter to the main mixer
-    player.add_effect(CompressorEffect::default_limiter(), None)?;
+    // Add a limiter with default parameters to the main mixer
+    player.add_effect(CompressorEffect::new_limiter(), None)?;
 
     // Sequencing
     const BPM: f64 = 160.0; // BPM of the loop file

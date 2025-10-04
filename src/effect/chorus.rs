@@ -1,14 +1,19 @@
+use std::{any::Any, f64::consts::PI};
+
+use four_cc::FourCC;
+
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    parameter::{
+        EnumParameter, EnumParameterValue, FloatParameter, FloatParameterValue, Parameter,
+        ParameterValueUpdate,
+    },
     utils::{
         filter::svf::{SvfFilter, SvfFilterType},
         InterleavedBufferMut,
     },
     Error,
 };
-
-use std::any::Any;
-use std::f64::consts::PI;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -91,40 +96,13 @@ impl InterpolatingDelayBuffer {
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub enum ChorusEffectMessage {
-    /// Set all chorus parameters at once.
-    Init(
-        f32, // Rate
-        f32, // Depth
-        f32, // Feedback
-        f32, // Delay
-        f32, // Wet
-        f32, // Phase
-    ),
-    /// Set LFO rate in Hz. Range: 0.01 to 10.0.
-    SetRate(f32),
-    /// Set LFO depth. Range: 0.0 to 1.0.
-    SetDepth(f32),
-    /// Set feedback amount. Range: -1.0 to 1.0.
-    SetFeedback(f32),
-    /// Set base delay time in milliseconds. Range: 0.0 to 100.0.
-    SetDelay(f32),
-    /// Set wet/dry mix. Range: 0.0 (dry) to 1.0 (wet).
-    SetWet(f32),
-    /// Set phase offset between left and right LFOs in radians. Range: 0.0 to PI.
-    SetPhase(f32),
     /// Reset LFO phase and delay lines.
     Reset,
-    /// Set the filter type for the feedback path.
-    SetFilterType(ChorusFilterType),
-    /// Set filter cutoff frequency in Hz.
-    SetFilterFreq(f32),
-    /// Set filter resonance (Q factor). Range: 0.0 to 1.0.
-    SetFilterResonance(f32),
 }
 
 impl EffectMessage for ChorusEffectMessage {
     fn effect_name(&self) -> &'static str {
-        ChorusEffect::name()
+        ChorusEffect::EFFECT_NAME
     }
     fn payload(&self) -> &dyn Any {
         self
@@ -133,7 +111,8 @@ impl EffectMessage for ChorusEffectMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-pub type ChorusFilterType = SvfFilterType;
+/// Filter type used in `ChorusEffect`.
+pub type ChorusEffectFilterType = SvfFilterType;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -143,15 +122,15 @@ pub struct ChorusEffect {
     channel_count: usize,
 
     // Parameters
-    rate: f64,
-    phase: f64,
-    depth: f64,
-    feedback: f64,
-    delay: f64,
-    wet_mix: f64,
-    filter_type: ChorusFilterType,
-    filter_freq: f32,
-    filter_resonance: f32,
+    rate: FloatParameterValue,
+    phase: FloatParameterValue,
+    depth: FloatParameterValue,
+    feedback: FloatParameterValue,
+    delay: FloatParameterValue,
+    wet_mix: FloatParameterValue,
+    filter_type: EnumParameterValue<ChorusEffectFilterType>,
+    filter_freq: FloatParameterValue,
+    filter_resonance: FloatParameterValue,
 
     // Runtime data
     lfo_range: f64,
@@ -168,44 +147,53 @@ pub struct ChorusEffect {
 }
 
 impl ChorusEffect {
+    pub const EFFECT_NAME: &str = "ChorusEffect";
+    pub const RATE_ID: FourCC = FourCC(*b"rate");
+    pub const PHASE_ID: FourCC = FourCC(*b"phas");
+    pub const DEPTH_ID: FourCC = FourCC(*b"dpth");
+    pub const FEEDBACK_ID: FourCC = FourCC(*b"fdbk");
+    pub const DELAY_ID: FourCC = FourCC(*b"dlay");
+    pub const WET_ID: FourCC = FourCC(*b"wet ");
+    pub const FILTER_TYPE_ID: FourCC = FourCC(*b"ftyp");
+    pub const FILTER_FREQ_ID: FourCC = FourCC(*b"ffrq");
+    pub const FILTER_RESO_ID: FourCC = FourCC(*b"fres");
+
     const MAX_APPLIED_RANGE_IN_SAMPLES: f64 = 256.0;
     const MAX_APPLIED_DELAY_IN_MS: f64 = 100.0;
 
-    const DEFAULT_RATE: f64 = 1.0;
-    const DEFAULT_PHASE: f64 = PI / 2.0;
-    const DEFAULT_DEPTH: f64 = 0.25;
-    const DEFAULT_FEEDBACK: f64 = 0.5;
-    const DEFAULT_DELAY: f64 = 12.0;
-    const DEFAULT_WET_MIX: f64 = 0.5;
-    const DEFAULT_FILTER_TYPE: ChorusFilterType = ChorusFilterType::Highpass;
-    const DEFAULT_FILTER_FREQ: f32 = 400.0;
-    const DEFAULT_FILTER_RESONANCE: f32 = 0.3;
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_parameters(
-        rate: f64,
-        phase: f64,
-        depth: f64,
-        feedback: f64,
-        delay: f64,
-        wet_mix: f64,
-        filter_type: ChorusFilterType,
-        filter_freq: f32,
-        filter_resonance: f32,
-    ) -> Self {
+    /// Creates a new `ChorusEffect` with default parameter values.
+    pub fn new() -> Self {
         Self {
             sample_rate: 0,
             channel_count: 0,
 
-            rate: rate.clamp(0.01, 10.0),
-            phase: phase.clamp(0.0, PI),
-            depth: depth.clamp(0.0, 1.0),
-            feedback: feedback.clamp(-1.0, 1.0),
-            delay: delay.clamp(0.0, Self::MAX_APPLIED_DELAY_IN_MS),
-            wet_mix: wet_mix.clamp(0.0, 1.0),
-            filter_type,
-            filter_freq: filter_freq.clamp(20.0, 22050.0),
-            filter_resonance: filter_resonance.clamp(0.0, 1.0),
+            rate: FloatParameter::new(Self::RATE_ID, "Rate", 0.01..=10.0, 1.0).into(),
+            phase: FloatParameter::new(Self::PHASE_ID, "Phase", 0.0..=PI as f32, PI as f32 / 2.0)
+                .into(),
+            depth: FloatParameter::new(Self::DEPTH_ID, "Depth", 0.0..=1.0, 0.25).into(),
+            feedback: FloatParameter::new(Self::FEEDBACK_ID, "Feedback", -1.0..=1.0, 0.5).into(),
+            delay: FloatParameter::new(Self::DELAY_ID, "Delay", 0.0..=100.0, 12.0).into(),
+            wet_mix: FloatParameter::new(Self::WET_ID, "Wet", 0.0..=1.0, 0.5).into(),
+            filter_type: EnumParameter::new(
+                Self::FILTER_TYPE_ID,
+                "Filter Type",
+                ChorusEffectFilterType::Highpass,
+            )
+            .into(),
+            filter_freq: FloatParameter::new(
+                Self::FILTER_FREQ_ID,
+                "Filter Freq",
+                20.0..=22050.0,
+                400.0,
+            )
+            .into(),
+            filter_resonance: FloatParameter::new(
+                Self::FILTER_RESO_ID,
+                "Filter Reso",
+                0.0..=1.0,
+                0.3,
+            )
+            .into(),
 
             lfo_range: 0.0,
             current_phase: 0.0,
@@ -221,14 +209,43 @@ impl ChorusEffect {
         }
     }
 
+    /// Creates a new `ChorusEffect` with the given parameters.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_parameters(
+        rate: f32,
+        phase: f32,
+        depth: f32,
+        feedback: f32,
+        delay: f32,
+        wet_mix: f32,
+        filter_type: ChorusEffectFilterType,
+        filter_freq: f32,
+        filter_resonance: f32,
+    ) -> Self {
+        let mut chorus = Self::default();
+        chorus.rate.set_value(rate);
+        chorus.phase.set_value(phase);
+        chorus.depth.set_value(depth);
+        chorus.feedback.set_value(feedback);
+        chorus.delay.set_value(delay);
+        chorus.wet_mix.set_value(wet_mix);
+        chorus.filter_type.set_value(filter_type);
+        chorus.filter_freq.set_value(filter_freq);
+        chorus.filter_resonance.set_value(filter_resonance);
+        chorus
+    }
+
     fn update_lfos(&mut self, offset: Option<f64>) {
         if let Some(off) = offset {
             self.current_phase = off * 2.0 * PI;
         }
-        self.left_osc.set_rate(self.rate, self.sample_rate);
-        self.right_osc.set_rate(self.rate, self.sample_rate);
+        self.left_osc
+            .set_rate(*self.rate.value() as f64, self.sample_rate);
+        self.right_osc
+            .set_rate(*self.rate.value() as f64, self.sample_rate);
         self.left_osc.set_phase(self.current_phase);
-        self.right_osc.set_phase(self.current_phase + self.phase);
+        self.right_osc
+            .set_phase(self.current_phase + *self.phase.value() as f64);
     }
 
     fn reset(&mut self) {
@@ -242,23 +259,27 @@ impl ChorusEffect {
 
 impl Default for ChorusEffect {
     fn default() -> Self {
-        Self::with_parameters(
-            Self::DEFAULT_RATE,
-            Self::DEFAULT_PHASE,
-            Self::DEFAULT_DEPTH,
-            Self::DEFAULT_FEEDBACK,
-            Self::DEFAULT_DELAY,
-            Self::DEFAULT_WET_MIX,
-            Self::DEFAULT_FILTER_TYPE,
-            Self::DEFAULT_FILTER_FREQ,
-            Self::DEFAULT_FILTER_RESONANCE,
-        )
+        Self::new()
     }
 }
 
 impl Effect for ChorusEffect {
-    fn name() -> &'static str {
-        "ChorusEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![
+            Box::new(self.rate.description().clone()),
+            Box::new(self.depth.description().clone()),
+            Box::new(self.feedback.description().clone()),
+            Box::new(self.delay.description().clone()),
+            Box::new(self.wet_mix.description().clone()),
+            Box::new(self.phase.description().clone()),
+            Box::new(self.filter_type.description().clone()),
+            Box::new(self.filter_freq.description().clone()),
+            Box::new(self.filter_resonance.description().clone()),
+        ]
     }
 
     fn initialize(
@@ -285,17 +306,17 @@ impl Effect for ChorusEffect {
         self.delay_buffer_right = InterpolatingDelayBuffer::new(max_buffer_size);
 
         self.filter_bank_left = SvfFilter::new(
-            self.filter_type,
+            *self.filter_type.value(),
             sample_rate,
-            self.filter_freq,
-            self.filter_resonance + 0.707,
+            *self.filter_freq.value(),
+            *self.filter_resonance.value() + 0.707,
             1.0,
         )?;
         self.filter_bank_right = SvfFilter::new(
-            self.filter_type,
+            *self.filter_type.value(),
             sample_rate,
-            self.filter_freq,
-            self.filter_resonance + 0.707,
+            *self.filter_freq.value(),
+            *self.filter_resonance.value() + 0.707,
             1.0,
         )?;
 
@@ -305,10 +326,10 @@ impl Effect for ChorusEffect {
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        let delay_ms = self.delay;
-        let depth = self.depth;
-        let feedback = self.feedback.clamp(-0.999, 0.999);
-        let wet_amount = self.wet_mix;
+        let delay_ms = *self.delay.value() as f64;
+        let depth = *self.depth.value() as f64;
+        let feedback = self.feedback.value().clamp(-0.999, 0.999) as f64;
+        let wet_amount = *self.wet_mix.value() as f64;
         let dry_amount = 1.0 - wet_amount;
 
         assert!(self.channel_count == 2);
@@ -347,64 +368,78 @@ impl Effect for ChorusEffect {
         }
 
         // Move our LFO offset to keep our oscillators updated when changing the rate or phase
-        let phase_inc = 2.0 * PI * self.rate / self.sample_rate as f64;
+        let phase_inc = 2.0 * PI * *self.rate.value() as f64 / self.sample_rate as f64;
         self.current_phase += output.len() as f64 / self.channel_count as f64 * phase_inc;
         while self.current_phase >= 2.0 * PI {
             self.current_phase -= 2.0 * PI;
         }
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
+    fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
         if let Some(message) = message.payload().downcast_ref::<ChorusEffectMessage>() {
             match message {
-                ChorusEffectMessage::Init(rate, depth, feedback, delay, wet, phase) => {
-                    self.rate = *rate as f64;
-                    self.depth = *depth as f64;
-                    self.feedback = *feedback as f64;
-                    self.delay = (*delay as f64).clamp(0.0, Self::MAX_APPLIED_DELAY_IN_MS);
-                    self.wet_mix = *wet as f64;
-                    self.phase = *phase as f64;
-                    self.update_lfos(None);
-                }
-                ChorusEffectMessage::SetRate(rate) => {
-                    self.rate = *rate as f64;
-                    self.update_lfos(None);
-                }
-                ChorusEffectMessage::SetDepth(depth) => self.depth = *depth as f64,
-                ChorusEffectMessage::SetFeedback(feedback) => self.feedback = *feedback as f64,
-                ChorusEffectMessage::SetDelay(delay) => {
-                    self.delay = (*delay as f64).clamp(0.0, Self::MAX_APPLIED_DELAY_IN_MS)
-                }
-                ChorusEffectMessage::SetWet(wet) => self.wet_mix = *wet as f64,
-                ChorusEffectMessage::SetPhase(phase) => {
-                    self.phase = *phase as f64;
-                    self.update_lfos(None);
-                }
                 ChorusEffectMessage::Reset => self.reset(),
-                ChorusEffectMessage::SetFilterType(ft) => {
-                    self.filter_type = *ft;
-                    let _ = self
-                        .filter_bank_left
-                        .coefficients_mut()
-                        .set_filter_type(*ft);
-                    let _ = self
-                        .filter_bank_right
-                        .coefficients_mut()
-                        .set_filter_type(*ft);
-                }
-                ChorusEffectMessage::SetFilterFreq(c) => {
-                    self.filter_freq = *c;
-                    let _ = self.filter_bank_left.coefficients_mut().set_cutoff(*c);
-                    let _ = self.filter_bank_right.coefficients_mut().set_cutoff(*c);
-                }
-                ChorusEffectMessage::SetFilterResonance(q) => {
-                    self.filter_resonance = *q;
-                    let _ = self.filter_bank_left.coefficients_mut().set_q(*q + 0.707);
-                    let _ = self.filter_bank_right.coefficients_mut().set_q(*q + 0.707);
-                }
             }
+            Ok(())
         } else {
-            log::error!("ChorusEffect: Invalid/unknown message payload");
+            Err(Error::ParameterError(
+                "ChorusEffect: Invalid/unknown message payload".to_owned(),
+            ))
         }
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        match id {
+            Self::RATE_ID => self.rate.apply_update(value),
+            Self::PHASE_ID => self.phase.apply_update(value),
+            Self::DEPTH_ID => self.depth.apply_update(value),
+            Self::FEEDBACK_ID => self.feedback.apply_update(value),
+            Self::DELAY_ID => self.delay.apply_update(value),
+            Self::WET_ID => self.wet_mix.apply_update(value),
+            Self::FILTER_TYPE_ID => self.filter_type.apply_update(value),
+            Self::FILTER_FREQ_ID => self.filter_freq.apply_update(value),
+            Self::FILTER_RESO_ID => self.filter_resonance.apply_update(value),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
+        };
+
+        match id {
+            Self::RATE_ID | Self::PHASE_ID => self.update_lfos(None),
+            Self::FILTER_TYPE_ID => {
+                let _ = self
+                    .filter_bank_left
+                    .coefficients_mut()
+                    .set_filter_type(*self.filter_type.value());
+                let _ = self
+                    .filter_bank_right
+                    .coefficients_mut()
+                    .set_filter_type(*self.filter_type.value());
+            }
+            Self::FILTER_FREQ_ID => {
+                let _ = self
+                    .filter_bank_left
+                    .coefficients_mut()
+                    .set_cutoff(*self.filter_freq.value());
+                let _ = self
+                    .filter_bank_right
+                    .coefficients_mut()
+                    .set_cutoff(*self.filter_freq.value());
+            }
+            Self::FILTER_RESO_ID => {
+                let q = *self.filter_resonance.value() + 0.707;
+                let _ = self.filter_bank_left.coefficients_mut().set_q(q);
+                let _ = self.filter_bank_right.coefficients_mut().set_q(q);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }

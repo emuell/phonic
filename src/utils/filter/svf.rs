@@ -1,11 +1,13 @@
 use std::{f32, f64};
 
+use strum::{Display, EnumIter, EnumString};
+
 use crate::Error;
 
 // -------------------------------------------------------------------------------------------------
 
 /// Available filter types for the State Variable Filter.
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Display, EnumIter, EnumString)]
 #[allow(unused)]
 pub enum SvfFilterType {
     #[default]

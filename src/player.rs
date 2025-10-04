@@ -13,11 +13,13 @@ use basedrop::{Collector, Handle, Owned};
 use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
+use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload},
     error::Error,
     output::OutputDevice,
+    parameter::ParameterValueUpdate,
     source::{
         amplified::{AmplifiedSource, AmplifiedSourceMessage},
         converted::ConvertedSource,
@@ -543,7 +545,7 @@ impl Player {
         // The effect's parent mixer uses a temp buffer of size:
         let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
 
-        let effect_name = E::name();
+        let effect_name = effect.name();
         let mut effect = Box::new(effect);
         effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
 
@@ -608,6 +610,75 @@ impl Player {
         }
 
         Ok(())
+    }
+
+    /// Set a raw parameter value on an effect at a specific sample time or immediately.
+    ///
+    /// The `value` must be of the correct type for the parameter (`f32`, `i32`, `bool`, or the
+    /// specific enum type).
+    pub fn set_effect_parameter<V: Any + Send + Sync, T: Into<Option<u64>>>(
+        &mut self,
+        effect_id: EffectId,
+        parameter_id: FourCC,
+        value: V,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into().unwrap_or(0);
+        let value = Owned::new(
+            &self.collector_handle,
+            ParameterValueUpdate::Raw(Box::new(value)),
+        );
+
+        if self
+            .effect_mixer_event_queue(effect_id)?
+            .push(MixerMessage::ProcessEffectParameterUpdate {
+                effect_id,
+                parameter_id,
+                value,
+                sample_time,
+            })
+            .is_err()
+        {
+            log::warn!("Mixer's event queue is full. Parameter update got skipped!");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            Err(Error::SendError)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set a normalized parameter value on an effect at a specific sample time or immediately.
+    ///
+    /// The `value` must be in the range `0.0..=1.0`.
+    pub fn set_effect_parameter_normalized<T: Into<Option<u64>>>(
+        &mut self,
+        effect_id: EffectId,
+        parameter_id: FourCC,
+        value: f32,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into().unwrap_or(0);
+        let value = Owned::new(
+            &self.collector_handle,
+            ParameterValueUpdate::Normalized(value),
+        );
+
+        if self
+            .effect_mixer_event_queue(effect_id)?
+            .push(MixerMessage::ProcessEffectParameterUpdate {
+                effect_id,
+                parameter_id,
+                value,
+                sample_time,
+            })
+            .is_err()
+        {
+            log::warn!("Mixer's event queue is full. Parameter update got skipped!");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            Err(Error::SendError)
+        } else {
+            Ok(())
+        }
     }
 
     /// Send a message to an effect at a specific sample time or immediately.

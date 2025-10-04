@@ -1,7 +1,8 @@
-use std::any::Any;
+use four_cc::FourCC;
 
 use crate::{
-    effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
+    effect::{Effect, EffectTime},
+    parameter::{FloatParameter, FloatParameterValue, Parameter, ParameterValueUpdate},
     utils::{buffer::copy_buffers, db_to_linear, InterleavedBuffer, InterleavedBufferMut},
     Error,
 };
@@ -109,47 +110,6 @@ impl<const CHANNELS: usize> DelayLine<CHANNELS> {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Message type for `CompressorEffect` to change parameters.
-#[derive(Clone, Debug)]
-#[allow(unused)]
-pub enum CompressorEffectMessage {
-    /// Set all compressor parameters at once.
-    Init(
-        f32, // threshold
-        f32, // ratio
-        f32, // attack_time
-        f32, // release_time
-        f32, // makeup_gain
-        f32, // knee_width
-        f32, // lookahead_time
-    ),
-    /// Threshold in decibels (dB). Range: -60.0 to 0.0.
-    SetThreshold(f32),
-    /// Compression ratio. Range: 1.0 to infinity. Ratios >= 20.0 are treated as infinite (limiter).
-    SetRatio(f32),
-    /// Attack time in seconds. Range: 0.001 to 0.5.
-    SetAttack(f32),
-    /// Release time in seconds. Range: 0.1 to 2.0.
-    SetRelease(f32),
-    /// Makeup gain in decibels (dB). Range: -24.0 to 24.0.
-    SetMakeupGain(f32),
-    /// Knee width in decibels (dB). Range: 0.0 to 12.0.
-    SetKnee(f32),
-    /// Lookahead time in seconds. Range: 0.001 to 0.2.
-    SetLookahead(f32),
-}
-
-impl EffectMessage for CompressorEffectMessage {
-    fn effect_name(&self) -> &'static str {
-        CompressorEffect::name()
-    }
-    fn payload(&self) -> &dyn Any {
-        self
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// A basic stereo compressor effect with lookahead and soft-knee.
 ///
 /// When ratio is above 20.0 it acts as a hard-limiter.
@@ -159,13 +119,13 @@ pub struct CompressorEffect {
     sample_rate: u32,
     channel_count: usize,
     // Parameters
-    threshold: f32,
-    ratio: f32,
-    attack_time: f32,
-    release_time: f32,
-    makeup_gain: f32,
-    knee_width: f32,
-    lookahead_time: f32,
+    threshold: FloatParameterValue,
+    ratio: FloatParameterValue,
+    attack_time: FloatParameterValue,
+    release_time: FloatParameterValue,
+    makeup_gain: FloatParameterValue,
+    knee_width: FloatParameterValue,
+    lookahead_time: FloatParameterValue,
     // Internal state
     current_envelope: f32,
     attack_coeff: f32,
@@ -175,35 +135,37 @@ pub struct CompressorEffect {
 }
 
 impl CompressorEffect {
-    const DEFAULT_THRESHOLD: f32 = -12.0;
-    const DEFAULT_LIMITER_THRESHOLD: f32 = -0.01;
-    const DEFAULT_RATIO: f32 = 8.0;
-    const DEFAULT_ATTACK_TIME: f32 = 0.02;
-    const DEFAULT_RELEASE_TIME: f32 = 2.0;
-    const DEFAULT_MAKEUP_GAIN: f32 = 6.0;
-    const DEFAULT_KNEE_WIDTH: f32 = 3.0;
-    const DEFAULT_LOOKAHEAD_TIME: f32 = 0.04;
+    pub const EFFECT_NAME: &str = "CompressorEffect";
+    pub const THRESHOLD_ID: FourCC = FourCC(*b"thrs");
+    pub const RATIO_ID: FourCC = FourCC(*b"rato");
+    pub const ATTACK_ID: FourCC = FourCC(*b"attk");
+    pub const RELEASE_ID: FourCC = FourCC(*b"rels");
+    pub const MAKEUP_GAIN_ID: FourCC = FourCC(*b"gain");
+    pub const KNEE_ID: FourCC = FourCC(*b"knee");
+    pub const LOOKAHEAD_ID: FourCC = FourCC(*b"look");
 
-    /// Creates a new `CompressorEffect` with the given parameters.
-    pub fn with_parameters(
-        threshold: f32,
-        ratio: f32,
-        attack_time: f32,
-        release_time: f32,
-        makeup_gain: f32,
-        knee_width: f32,
-        lookahead_time: f32,
-    ) -> Self {
+    const DEFAULT_LIMITER_THRESHOLD: f32 = -0.01;
+
+    /// Creates a new `CompressorEffect` with the default parameters.
+    pub fn new_compressor() -> Self {
         Self {
             sample_rate: 0,
             channel_count: 0,
-            threshold: threshold.clamp(-60.0, 0.0),
-            ratio: ratio.clamp(1.0, 20.0),
-            attack_time: attack_time.clamp(0.001, 0.5),
-            release_time: release_time.clamp(0.1, 2.0),
-            makeup_gain: makeup_gain.clamp(-24.0, 24.0),
-            knee_width: knee_width.clamp(0.0, 12.0),
-            lookahead_time: lookahead_time.clamp(0.001, 0.2),
+            threshold: FloatParameter::new(Self::THRESHOLD_ID, "Threshold", -60.0..=0.0, -12.0)
+                .into(),
+            ratio: FloatParameter::new(Self::RATIO_ID, "Ratio", 1.0..=20.0, 8.0).into(),
+            attack_time: FloatParameter::new(Self::ATTACK_ID, "Attack", 0.001..=0.5, 0.02).into(),
+            release_time: FloatParameter::new(Self::RELEASE_ID, "Release", 0.1..=2.0, 2.0).into(),
+            makeup_gain: FloatParameter::new(
+                Self::MAKEUP_GAIN_ID,
+                "Makeup Gain",
+                -24.0..=24.0,
+                6.0,
+            )
+            .into(),
+            knee_width: FloatParameter::new(Self::KNEE_ID, "Knee", 0.0..=12.0, 3.0).into(),
+            lookahead_time: FloatParameter::new(Self::LOOKAHEAD_ID, "Lookahead", 0.001..=0.2, 0.04)
+                .into(),
             current_envelope: 0.0,
             attack_coeff: 0.0,
             release_coeff: 0.0,
@@ -212,14 +174,42 @@ impl CompressorEffect {
         }
     }
 
+    /// Creates a new `CompressorEffect` with default limiter parameters.
+    pub fn new_limiter() -> Self {
+        let effect = Self::default();
+        let attack = effect.attack_time.description().default_value();
+        let release = effect.release_time.description().default_value();
+        Self::with_limiter_parameters(Self::DEFAULT_LIMITER_THRESHOLD, attack, release)
+    }
+
+    /// Creates a new `CompressorEffect` with the given parameters.
+    pub fn with_compressor_parameters(
+        threshold: f32,
+        ratio: f32,
+        attack_time: f32,
+        release_time: f32,
+        makeup_gain: f32,
+        knee_width: f32,
+        lookahead_time: f32,
+    ) -> Self {
+        let mut compressor = Self::default();
+        compressor.threshold.set_value(threshold);
+        compressor.ratio.set_value(ratio);
+        compressor.attack_time.set_value(attack_time);
+        compressor.release_time.set_value(release_time);
+        compressor.makeup_gain.set_value(makeup_gain);
+        compressor.knee_width.set_value(knee_width);
+        compressor.lookahead_time.set_value(lookahead_time);
+        compressor
+    }
+
     /// Creates a new `CompressorEffect` configured as a limiter.
     pub fn with_limiter_parameters(threshold: f32, attack_time: f32, release_time: f32) -> Self {
         let ratio = 20.0;
         let makeup_gain = 0.0;
         let knee_width = 0.0;
         let lookahead_time = attack_time;
-
-        Self::with_parameters(
+        Self::with_compressor_parameters(
             threshold,
             ratio,
             attack_time,
@@ -230,25 +220,17 @@ impl CompressorEffect {
         )
     }
 
-    pub fn default_limiter() -> Self {
-        Self::with_limiter_parameters(
-            Self::DEFAULT_LIMITER_THRESHOLD,
-            Self::DEFAULT_ATTACK_TIME,
-            Self::DEFAULT_RELEASE_TIME,
-        )
-    }
-
     fn update_coeffs(&mut self) {
         if self.sample_rate > 0 {
             // Convert time constants to coefficients
             // Using the standard formula: coeff = 1 - exp(-1 / (time * sample_rate))
-            self.attack_coeff = if self.attack_time > 0.0 {
-                (-1.0 / (self.attack_time * self.sample_rate as f32)).exp()
+            self.attack_coeff = if *self.attack_time.value() > 0.0 {
+                (-1.0 / (*self.attack_time.value() * self.sample_rate as f32)).exp()
             } else {
                 0.0
             };
-            self.release_coeff = if self.release_time > 0.0 {
-                (-1.0 / (self.release_time * self.sample_rate as f32)).exp()
+            self.release_coeff = if *self.release_time.value() > 0.0 {
+                (-1.0 / (*self.release_time.value() * self.sample_rate as f32)).exp()
             } else {
                 0.0
             };
@@ -258,21 +240,25 @@ impl CompressorEffect {
 
 impl Default for CompressorEffect {
     fn default() -> Self {
-        Self::with_parameters(
-            Self::DEFAULT_THRESHOLD,
-            Self::DEFAULT_RATIO,
-            Self::DEFAULT_ATTACK_TIME,
-            Self::DEFAULT_RELEASE_TIME,
-            Self::DEFAULT_MAKEUP_GAIN,
-            Self::DEFAULT_KNEE_WIDTH,
-            Self::DEFAULT_LOOKAHEAD_TIME,
-        )
+        Self::new_compressor()
     }
 }
 
 impl Effect for CompressorEffect {
-    fn name() -> &'static str {
-        "CompressorEffect"
+    fn name(&self) -> &'static str {
+        Self::EFFECT_NAME
+    }
+
+    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+        vec![
+            Box::new(self.threshold.description().clone()),
+            Box::new(self.ratio.description().clone()),
+            Box::new(self.attack_time.description().clone()),
+            Box::new(self.release_time.description().clone()),
+            Box::new(self.makeup_gain.description().clone()),
+            Box::new(self.knee_width.description().clone()),
+            Box::new(self.lookahead_time.description().clone()),
+        ]
     }
 
     fn initialize(
@@ -289,9 +275,14 @@ impl Effect for CompressorEffect {
             ));
         }
         self.input_buffer = vec![0.0; max_frames * channel_count];
-        self.delay_line.initialize(sample_rate, self.lookahead_time);
+        self.delay_line
+            .initialize(sample_rate, *self.lookahead_time.value());
 
-        self.current_envelope = if self.ratio >= 20.0 { -120.0 } else { 0.0 };
+        self.current_envelope = if *self.ratio.value() >= 20.0 {
+            -120.0
+        } else {
+            0.0
+        };
         self.update_coeffs();
 
         Ok(())
@@ -310,7 +301,7 @@ impl Effect for CompressorEffect {
             let delayed_frame = self.delay_line.process(in_frame);
 
             // Envelope detection on current (undelayed) input
-            let input_db = if self.ratio >= 20.0 {
+            let input_db = if *self.ratio.value() >= 20.0 {
                 // Limiter mode: use peak from the entire lookahead buffer to prevent overshoots.
                 let lookahead_peak = self.delay_line.peak_value();
                 if lookahead_peak > 1e-6 {
@@ -339,12 +330,12 @@ impl Effect for CompressorEffect {
 
             // Gain reduction calculation
             let envelope = self.current_envelope;
-            let t = self.threshold;
-            let w = self.knee_width;
-            let slope = if self.ratio >= 20.0 {
+            let t = *self.threshold.value();
+            let w = *self.knee_width.value();
+            let slope = if *self.ratio.value() >= 20.0 {
                 1.0
             } else {
-                1.0 - 1.0 / self.ratio
+                1.0 - 1.0 / *self.ratio.value()
             };
 
             let gr_db = if w > 0.0 && envelope > (t - w / 2.0) && envelope < (t + w / 2.0) {
@@ -361,7 +352,7 @@ impl Effect for CompressorEffect {
             };
 
             // Apply gain to delayed signal
-            let total_gain_db = self.makeup_gain - gr_db;
+            let total_gain_db = *self.makeup_gain.value() - gr_db;
             let total_gain = db_to_linear(total_gain_db);
 
             out_frame[0] = delayed_frame[0] * total_gain;
@@ -369,42 +360,27 @@ impl Effect for CompressorEffect {
         }
     }
 
-    fn process_message(&mut self, message: &EffectMessagePayload) {
-        if let Some(message) = message.payload().downcast_ref::<CompressorEffectMessage>() {
-            let old_lookahead = self.lookahead_time;
-            match message {
-                CompressorEffectMessage::Init(
-                    threshold,
-                    ratio,
-                    attack_time,
-                    release_time,
-                    makeup_gain,
-                    knee_width,
-                    lookahead_time,
-                ) => {
-                    self.threshold = *threshold;
-                    self.ratio = *ratio;
-                    self.attack_time = *attack_time;
-                    self.release_time = *release_time;
-                    self.makeup_gain = *makeup_gain;
-                    self.knee_width = *knee_width;
-                    self.lookahead_time = *lookahead_time;
-                }
-                CompressorEffectMessage::SetThreshold(v) => self.threshold = *v,
-                CompressorEffectMessage::SetRatio(v) => self.ratio = *v,
-                CompressorEffectMessage::SetAttack(v) => self.attack_time = *v,
-                CompressorEffectMessage::SetRelease(v) => self.release_time = *v,
-                CompressorEffectMessage::SetMakeupGain(v) => self.makeup_gain = *v,
-                CompressorEffectMessage::SetKnee(v) => self.knee_width = *v,
-                CompressorEffectMessage::SetLookahead(v) => self.lookahead_time = *v,
-            }
-            self.update_coeffs();
-            if self.lookahead_time != old_lookahead && self.sample_rate > 0 {
-                self.delay_line
-                    .initialize(self.sample_rate, self.lookahead_time);
-            }
-        } else {
-            log::error!("CompressorEffect: Invalid/unknown message payload");
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        let old_lookahead = *self.lookahead_time.value();
+        match id {
+            Self::THRESHOLD_ID => self.threshold.apply_update(value),
+            Self::RATIO_ID => self.ratio.apply_update(value),
+            Self::ATTACK_ID => self.attack_time.apply_update(value),
+            Self::RELEASE_ID => self.release_time.apply_update(value),
+            Self::MAKEUP_GAIN_ID => self.makeup_gain.apply_update(value),
+            Self::KNEE_ID => self.knee_width.apply_update(value),
+            Self::LOOKAHEAD_ID => self.lookahead_time.apply_update(value),
+            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
+        self.update_coeffs();
+        if *self.lookahead_time.value() != old_lookahead && self.sample_rate > 0 {
+            self.delay_line
+                .initialize(self.sample_rate, *self.lookahead_time.value());
+        }
+        Ok(())
     }
 }
