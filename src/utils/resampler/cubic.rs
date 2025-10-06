@@ -40,8 +40,8 @@ impl CubicInterpolator {
         channel_index: usize,
         channel_count: usize,
     ) -> (usize, usize) {
-        debug_assert!(input.len() % channel_count == 0);
-        debug_assert!(output.len() % channel_count == 0);
+        debug_assert!(input.len().is_multiple_of(channel_count));
+        debug_assert!(output.len().is_multiple_of(channel_count));
         debug_assert!(channel_index < channel_count);
 
         let num_in = input.len() / channel_count;

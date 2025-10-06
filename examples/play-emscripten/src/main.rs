@@ -181,10 +181,10 @@ impl EmscriptenPlayer {
         {
             // play an octave higher every new bar start
             let sample_speed = speed_from_note(
-                60 + if (self.playback_beat_counter % BEATS_PER_BAR) == 0 {
-                    12
+                if self.playback_beat_counter.is_multiple_of(BEATS_PER_BAR) {
+                    72
                 } else {
-                    0
+                    60
                 },
             );
             // select a new sample every 2 bars

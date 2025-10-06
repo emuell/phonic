@@ -56,7 +56,11 @@ fn main() -> Result<(), Error> {
     // Schedule metronome beats
     for beat in 0..(BEATS_PER_BAR * BARS_TO_PLAY) {
         let sample_time = current_time + beat as u64 * samples_per_beat;
-        let speed = speed_from_note(60 + if beat % BEATS_PER_BAR == 0 { 12 } else { 0 });
+        let speed = speed_from_note(if beat.is_multiple_of(BEATS_PER_BAR) {
+            72
+        } else {
+            60
+        });
         let playback_id = player.play_file_source(
             cowbell.clone(FilePlaybackOptions::default().speed(speed), samples_per_sec)?,
             sample_time,

@@ -189,7 +189,7 @@ pub trait InterleavedBuffer<'a> {
         let buffer = self.buffer();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % channel_count == 0,
+            buffer_len.is_multiple_of(channel_count),
             "channels: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
         (0..channel_count).map(move |i| buffer.iter().skip(i).step_by(channel_count))
@@ -206,7 +206,7 @@ pub trait InterleavedBuffer<'a> {
         let buffer = self.buffer();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % channel_count == 0,
+            buffer_len.is_multiple_of(channel_count),
             "frames: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
         self.buffer()
@@ -224,7 +224,7 @@ pub trait InterleavedBuffer<'a> {
         let buffer = self.buffer();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % CHANNEL_COUNT == 0,
+            buffer_len.is_multiple_of(CHANNEL_COUNT),
             "as_frames: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
         let frames_count = self.buffer().len() / CHANNEL_COUNT;
@@ -276,7 +276,7 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
         let buffer = self.buffer_mut();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % channel_count == 0,
+            buffer_len.is_multiple_of(channel_count),
             "channels_mut: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
         let frame_count = buffer_len / channel_count;
@@ -304,7 +304,7 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
         let buffer = self.buffer_mut();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % channel_count == 0,
+            buffer_len.is_multiple_of(channel_count),
             "frames_mut: buffer length ({buffer_len}) must be divisible by channel count ({channel_count})",
         );
         buffer
@@ -322,7 +322,7 @@ pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
         let buffer = self.buffer_mut();
         let buffer_len = buffer.len();
         assert!(
-            buffer_len % CHANNEL_COUNT == 0,
+            buffer_len.is_multiple_of(CHANNEL_COUNT),
             "as_frames_mut: buffer length ({buffer_len}) must be divisible by N ({CHANNEL_COUNT})",
         );
         let frames_count = self.buffer().len() / CHANNEL_COUNT;
