@@ -2,9 +2,11 @@ use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectTime},
-    parameter::{FloatParameter, FloatParameterValue, Parameter, ParameterValueUpdate},
+    parameter::{
+        FloatParameter, FloatParameterValue, ParameterValueUpdate, SmoothedParameterValue,
+    },
     utils::{buffer::copy_buffers, db_to_linear, InterleavedBuffer, InterleavedBufferMut},
-    Error,
+    ClonableParameter, Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -123,7 +125,7 @@ pub struct CompressorEffect {
     ratio: FloatParameterValue,
     attack_time: FloatParameterValue,
     release_time: FloatParameterValue,
-    makeup_gain: FloatParameterValue,
+    makeup_gain: SmoothedParameterValue,
     knee_width: FloatParameterValue,
     lookahead_time: FloatParameterValue,
     // Internal state
@@ -151,21 +153,63 @@ impl CompressorEffect {
         Self {
             sample_rate: 0,
             channel_count: 0,
-            threshold: FloatParameter::new(Self::THRESHOLD_ID, "Threshold", -60.0..=0.0, -12.0)
-                .into(),
-            ratio: FloatParameter::new(Self::RATIO_ID, "Ratio", 1.0..=20.0, 8.0).into(),
-            attack_time: FloatParameter::new(Self::ATTACK_ID, "Attack", 0.001..=0.5, 0.02).into(),
-            release_time: FloatParameter::new(Self::RELEASE_ID, "Release", 0.1..=2.0, 2.0).into(),
-            makeup_gain: FloatParameter::new(
-                Self::MAKEUP_GAIN_ID,
-                "Makeup Gain",
-                -24.0..=24.0,
-                6.0,
-            )
-            .into(),
-            knee_width: FloatParameter::new(Self::KNEE_ID, "Knee", 0.0..=12.0, 3.0).into(),
-            lookahead_time: FloatParameter::new(Self::LOOKAHEAD_ID, "Lookahead", 0.001..=0.2, 0.04)
-                .into(),
+            threshold: FloatParameterValue::from_description(
+                FloatParameter::new(
+                    Self::THRESHOLD_ID,
+                    "Threshold",
+                    -60.0..=0.0,
+                    -12.0, //
+                )
+                .with_unit("dB"),
+            ),
+            ratio: FloatParameterValue::from_description(FloatParameter::new(
+                Self::RATIO_ID,
+                "Ratio",
+                1.0..=20.0,
+                8.0,
+            )),
+            attack_time: FloatParameterValue::from_description(
+                FloatParameter::new(
+                    Self::ATTACK_ID,
+                    "Attack",
+                    0.001..=0.5,
+                    0.02, //
+                )
+                .with_unit("ms"),
+            ),
+            release_time: FloatParameterValue::from_description(
+                FloatParameter::new(
+                    Self::RELEASE_ID,
+                    "Release",
+                    0.1..=2.0,
+                    2.0, //
+                )
+                .with_unit("ms"),
+            ),
+            makeup_gain: SmoothedParameterValue::from_description(
+                FloatParameter::new(
+                    Self::MAKEUP_GAIN_ID,
+                    "Makeup Gain",
+                    -24.0..=24.0,
+                    6.0, //
+                )
+                .with_unit("dB"),
+            ),
+            knee_width: FloatParameterValue::from_description(FloatParameter::new(
+                Self::KNEE_ID,
+                "Knee",
+                0.0..=12.0,
+                3.0,
+            )),
+            lookahead_time: FloatParameterValue::from_description(
+                FloatParameter::new(
+                    Self::LOOKAHEAD_ID,
+                    "Lookahead",
+                    0.001..=0.2,
+                    0.04, //
+                )
+                .with_unit("ms"),
+            ),
             current_envelope: 0.0,
             attack_coeff: 0.0,
             release_coeff: 0.0,
@@ -197,7 +241,7 @@ impl CompressorEffect {
         compressor.ratio.set_value(ratio);
         compressor.attack_time.set_value(attack_time);
         compressor.release_time.set_value(release_time);
-        compressor.makeup_gain.set_value(makeup_gain);
+        compressor.makeup_gain.init_value(makeup_gain);
         compressor.knee_width.set_value(knee_width);
         compressor.lookahead_time.set_value(lookahead_time);
         compressor
@@ -224,13 +268,13 @@ impl CompressorEffect {
         if self.sample_rate > 0 {
             // Convert time constants to coefficients
             // Using the standard formula: coeff = 1 - exp(-1 / (time * sample_rate))
-            self.attack_coeff = if *self.attack_time.value() > 0.0 {
-                (-1.0 / (*self.attack_time.value() * self.sample_rate as f32)).exp()
+            self.attack_coeff = if self.attack_time.value() > 0.0 {
+                (-1.0 / (self.attack_time.value() * self.sample_rate as f32)).exp()
             } else {
                 0.0
             };
-            self.release_coeff = if *self.release_time.value() > 0.0 {
-                (-1.0 / (*self.release_time.value() * self.sample_rate as f32)).exp()
+            self.release_coeff = if self.release_time.value() > 0.0 {
+                (-1.0 / (self.release_time.value() * self.sample_rate as f32)).exp()
             } else {
                 0.0
             };
@@ -249,15 +293,15 @@ impl Effect for CompressorEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
         vec![
-            Box::new(self.threshold.description().clone()),
-            Box::new(self.ratio.description().clone()),
-            Box::new(self.attack_time.description().clone()),
-            Box::new(self.release_time.description().clone()),
-            Box::new(self.makeup_gain.description().clone()),
-            Box::new(self.knee_width.description().clone()),
-            Box::new(self.lookahead_time.description().clone()),
+            self.threshold.description(),
+            self.ratio.description(),
+            self.attack_time.description(),
+            self.release_time.description(),
+            self.makeup_gain.description(),
+            self.knee_width.description(),
+            self.lookahead_time.description(),
         ]
     }
 
@@ -274,15 +318,18 @@ impl Effect for CompressorEffect {
                 "CompressorEffect only supports stereo I/O".to_string(),
             ));
         }
+
+        self.makeup_gain.set_sample_rate(sample_rate);
+
         self.input_buffer = vec![0.0; max_frames * channel_count];
         self.delay_line
-            .initialize(sample_rate, *self.lookahead_time.value());
-
-        self.current_envelope = if *self.ratio.value() >= 20.0 {
+            .initialize(sample_rate, self.lookahead_time.value());
+        self.current_envelope = if self.ratio.value() >= 20.0 {
             -120.0
         } else {
             0.0
         };
+
         self.update_coeffs();
 
         Ok(())
@@ -301,7 +348,7 @@ impl Effect for CompressorEffect {
             let delayed_frame = self.delay_line.process(in_frame);
 
             // Envelope detection on current (undelayed) input
-            let input_db = if *self.ratio.value() >= 20.0 {
+            let input_db = if self.ratio.value() >= 20.0 {
                 // Limiter mode: use peak from the entire lookahead buffer to prevent overshoots.
                 let lookahead_peak = self.delay_line.peak_value();
                 if lookahead_peak > 1e-6 {
@@ -330,12 +377,12 @@ impl Effect for CompressorEffect {
 
             // Gain reduction calculation
             let envelope = self.current_envelope;
-            let t = *self.threshold.value();
-            let w = *self.knee_width.value();
-            let slope = if *self.ratio.value() >= 20.0 {
+            let t = self.threshold.value();
+            let w = self.knee_width.value();
+            let slope = if self.ratio.value() >= 20.0 {
                 1.0
             } else {
-                1.0 - 1.0 / *self.ratio.value()
+                1.0 - 1.0 / self.ratio.value()
             };
 
             let gr_db = if w > 0.0 && envelope > (t - w / 2.0) && envelope < (t + w / 2.0) {
@@ -352,7 +399,8 @@ impl Effect for CompressorEffect {
             };
 
             // Apply gain to delayed signal
-            let total_gain_db = *self.makeup_gain.value() - gr_db;
+            let makeup_gain = self.makeup_gain.next_value();
+            let total_gain_db = makeup_gain - gr_db;
             let total_gain = db_to_linear(total_gain_db);
 
             out_frame[0] = delayed_frame[0] * total_gain;
@@ -365,7 +413,7 @@ impl Effect for CompressorEffect {
         id: FourCC,
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
-        let old_lookahead = *self.lookahead_time.value();
+        let old_lookahead = self.lookahead_time.value();
         match id {
             Self::THRESHOLD_ID => self.threshold.apply_update(value),
             Self::RATIO_ID => self.ratio.apply_update(value),
@@ -377,9 +425,9 @@ impl Effect for CompressorEffect {
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
         self.update_coeffs();
-        if *self.lookahead_time.value() != old_lookahead && self.sample_rate > 0 {
+        if self.lookahead_time.value() != old_lookahead && self.sample_rate > 0 {
             self.delay_line
-                .initialize(self.sample_rate, *self.lookahead_time.value());
+                .initialize(self.sample_rate, self.lookahead_time.value());
         }
         Ok(())
     }

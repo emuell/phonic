@@ -4,10 +4,11 @@ use strum::{Display, EnumIter, EnumString};
 use crate::{
     effect::{Effect, EffectTime},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, FloatParameterValue, Parameter,
-        ParameterValueUpdate,
+        EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
+        SmoothedParameterValue,
     },
-    Error,
+    utils::{ExponentialSmoothedValue, InterleavedBufferMut, LinearSmoothedValue},
+    ClonableParameter, Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -45,9 +46,10 @@ pub enum DistortionType {
 /// A simple distortion effect with multiple waveshaping algorithms.
 #[derive(Debug)]
 pub struct DistortionEffect {
+    channel_count: usize,
     distortion_type: EnumParameterValue<DistortionType>,
-    drive: FloatParameterValue,
-    mix: FloatParameterValue,
+    drive: SmoothedParameterValue<LinearSmoothedValue>,
+    mix: SmoothedParameterValue<ExponentialSmoothedValue>,
 }
 
 impl DistortionEffect {
@@ -58,11 +60,43 @@ impl DistortionEffect {
 
     /// Creates a new `DistortionEffect` with default parameter values.
     pub fn new() -> Self {
+        let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
+        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
+
+        let channel_count = 0;
+
+        let distortion_type = EnumParameterValue::from_description(EnumParameter::new(
+            Self::TYPE_ID,
+            "Type",
+            DistortionType::Diode,
+        ));
+        let drive = SmoothedParameterValue::from_description(
+            FloatParameter::new(
+                Self::DRIVE_ID,
+                "Drive",
+                0.0..=2.0,
+                0.5, //
+            )
+            .with_unit("x"),
+        )
+        .with_smoother(LinearSmoothedValue::with_step(0.0, 0.01, 44100));
+        let mix = SmoothedParameterValue::from_description(
+            FloatParameter::new(
+                Self::MIX_ID,
+                "Mix",
+                0.0..=1.0,
+                1.0, //
+            )
+            .with_unit("%")
+            .with_display(to_string_percent, from_string_percent),
+        )
+        .with_smoother(ExponentialSmoothedValue::with_inertia(1.0, 0.1, 44100));
+
         Self {
-            distortion_type: EnumParameter::new(Self::TYPE_ID, "Type", DistortionType::Diode)
-                .into(),
-            drive: FloatParameter::new(Self::DRIVE_ID, "Drive", 0.0..=2.0, 0.5).into(),
-            mix: FloatParameter::new(Self::MIX_ID, "Mix", 0.0..=1.0, 1.0).into(),
+            channel_count,
+            distortion_type,
+            drive,
+            mix,
         }
     }
 
@@ -70,8 +104,8 @@ impl DistortionEffect {
     pub fn with_parameters(distortion_type: DistortionType, drive: f32, mix: f32) -> Self {
         let mut distortion = Self::default();
         distortion.distortion_type.set_value(distortion_type);
-        distortion.drive.set_value(drive);
-        distortion.mix.set_value(mix);
+        distortion.drive.init_value(drive);
+        distortion.mix.init_value(mix);
         distortion
     }
 
@@ -123,29 +157,6 @@ impl DistortionEffect {
         };
         1.5 * (saturated + saturated.abs()) * gain_compensation
     }
-
-    /// Process helper function that calls `process_sample` for each sample in a buffer
-    #[inline]
-    pub fn process<'a>(&mut self, output: impl Iterator<Item = &'a mut f32>) {
-        let dist_function = match *self.distortion_type.value() {
-            DistortionType::None => return,
-            DistortionType::SoftClip => Self::soft_clip,
-            DistortionType::HardClip => Self::hard_clip,
-            DistortionType::Diode => Self::diode,
-            DistortionType::Fuzz => Self::fuzz,
-        };
-        if *self.mix.value() >= 1.0 {
-            for sample in output {
-                *sample = dist_function(*sample, *self.drive.value());
-            }
-        } else {
-            for sample in output {
-                let dry = *sample;
-                let wet = dist_function(dry, *self.drive.value());
-                *sample = (1.0 - *self.mix.value()) * dry + *self.mix.value() * wet;
-            }
-        }
-    }
 }
 
 impl Default for DistortionEffect {
@@ -159,28 +170,62 @@ impl Effect for DistortionEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
         vec![
-            Box::new(self.distortion_type.description().clone()),
-            Box::new(self.drive.description().clone()),
-            Box::new(self.mix.description().clone()),
+            self.distortion_type.description(),
+            self.drive.description(),
+            self.mix.description(),
         ]
     }
 
     fn initialize(
         &mut self,
-        _sample_rate: u32,
-        _channel_count: usize,
+        sample_rate: u32,
+        channel_count: usize,
         _max_frames: usize,
     ) -> Result<(), Error> {
+        self.channel_count = channel_count;
+        self.mix.set_sample_rate(sample_rate);
+        self.drive.set_sample_rate(sample_rate);
         Ok(())
     }
 
-    fn process(&mut self, output: &mut [f32], _time: &EffectTime) {
-        if *self.distortion_type.value() == DistortionType::None || *self.mix.value() == 0.0 {
-            return;
+    fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
+        let dist_function = match self.distortion_type.value() {
+            DistortionType::None => return,
+            DistortionType::SoftClip => Self::soft_clip,
+            DistortionType::HardClip => Self::hard_clip,
+            DistortionType::Diode => Self::diode,
+            DistortionType::Fuzz => Self::fuzz,
+        };
+        // process, avoid mixing and ramping if not needed...
+        if !self.mix.value_need_ramp() && self.mix.target_value() == 0.0 {
+            // nothing to do
+        } else if !self.mix.value_need_ramp() && self.mix.target_value() >= 1.0 {
+            if !self.drive.value_need_ramp() {
+                let drive = self.drive.target_value();
+                for sample in output.iter_mut() {
+                    *sample = dist_function(*sample, drive);
+                }
+            } else {
+                for frame in output.frames_mut(self.channel_count) {
+                    let drive = self.drive.next_value();
+                    for sample in frame {
+                        *sample = dist_function(*sample, drive);
+                    }
+                }
+            }
+        } else {
+            for frame in output.frames_mut(self.channel_count) {
+                let drive = self.drive.next_value();
+                let mix = self.mix.next_value();
+                for sample in frame {
+                    let dry = *sample;
+                    let wet = dist_function(dry, drive);
+                    *sample = (1.0 - mix) * dry + mix * wet;
+                }
+            }
         }
-        self.process(output.iter_mut());
     }
 
     fn process_parameter_update(

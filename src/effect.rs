@@ -2,10 +2,7 @@ use std::any::Any;
 
 use four_cc::FourCC;
 
-use crate::{
-    parameter::{Parameter, ParameterValueUpdate},
-    Error, SourceTime,
-};
+use crate::{parameter::ParameterValueUpdate, ClonableParameter, Error, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -18,7 +15,8 @@ pub mod reverb;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Carries [`Effect`] specific payloads/automation, which can't be expressed as [`Parameter`].
+/// Carries [`Effect`] specific payloads/automation, which can't or should not be expressed as
+/// [`Parameter`](crate::Parameter).
 ///
 /// This trait is implemented by message enums specific to each effect. It provides a way to
 /// identify the target effect and access the message payload as a `dyn Any`, which can then be
@@ -70,11 +68,11 @@ pub trait Effect: Send + Sync + 'static {
 
     /// Returns a list of parameter descriptors for this effect.
     ///
-    /// This is used by UIs or automation systems to query available parameters of a specific effect.
-    /// This method may only be called on non-real-time threads: Usually it will be called after
-    /// creating a new effect instance, before adding it to the player's effect chains, in order to
-    /// gather parameter info for generic effect UIs.  
-    fn parameters(&self) -> Vec<Box<dyn Parameter>>;
+    /// This can be used by UIs or automation systems to query available parameters of a specific
+    /// effect. This method may only be called on non-real-time threads: Usually it will be called
+    /// after creating a new effect instance, before adding it to the player's effect chains, in
+    /// order to gather parameter info for generic effect UIs.  
+    fn parameters(&self) -> Vec<&dyn ClonableParameter>;
 
     /// Initializes the effect with the audio output's properties.
     ///

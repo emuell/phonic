@@ -25,8 +25,10 @@ pub enum SvfFilterType {
 // -------------------------------------------------------------------------------------------------
 
 /// The coefficients that hold parameters and necessary data to process the filter.
+///
+/// See [SvfFilter] for more info about the filter implementation.
 #[derive(Default, Clone, PartialEq)]
-pub struct SvfCoefficients {
+pub struct SvfFilterCoefficients {
     filter_type: SvfFilterType,
     sample_rate: u32,
     cutoff: f32,
@@ -40,29 +42,22 @@ pub struct SvfCoefficients {
     m2: f64,
 }
 
-// -------------------------------------------------------------------------------------------------
-
-/// State variable filter (SVF), designed by Andrew Simper of Cytomic.
-/// See <http://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf>
-///
-/// The frequency response of this filter is the same as of BZT filters.
-///
-/// This is a second-order filter. It has a cutoff slope of 12 dB/octave.
-/// Q = 0.707 means no resonant peaking.
-///
-/// This filter will self-oscillate when Q is very high (can be forced by
-/// setting the `k` coefficient to zero).
-///
-/// This filter is stable when modulated at high rates.
-#[derive(Default, Clone)]
-pub struct SvfFilter {
-    coefficients: SvfCoefficients,
-    ic1eq: f64,
-    ic2eq: f64,
-}
-
 #[allow(unused)]
-impl SvfCoefficients {
+impl SvfFilterCoefficients {
+    pub fn new(
+        filter_type: SvfFilterType,
+        sample_rate: u32,
+        cutoff: f32,
+        q: f32,
+        gain: f32,
+    ) -> Result<Self, Error> {
+        let mut coefficients = Self {
+            ..Default::default()
+        };
+        coefficients.set(filter_type, sample_rate, cutoff, q, gain)?;
+        Ok(coefficients)
+    }
+
     /// Get currently applied filter type.
     pub fn filter_type(&self) -> SvfFilterType {
         self.filter_type
@@ -135,19 +130,19 @@ impl SvfCoefficients {
         &mut self,
         filter_type: SvfFilterType,
         sample_rate: u32,
-        cutoff_frequency: f32,
+        cutoff: f32,
         q: f32,
         gain: f32,
     ) -> Result<(), Error> {
         if self.filter_type != filter_type
             || self.sample_rate != sample_rate
-            || self.cutoff != cutoff_frequency
+            || self.cutoff != cutoff
             || self.q != q
             || self.gain != gain
         {
             self.filter_type = filter_type;
             self.sample_rate = sample_rate;
-            self.cutoff = cutoff_frequency;
+            self.cutoff = cutoff;
             self.q = q;
             self.gain = gain;
             self.apply()
@@ -278,39 +273,57 @@ impl SvfCoefficients {
     }
 }
 
+// -------------------------------------------------------------------------------------------------
+
+/// State variable filter (SVF), designed by Andrew Simper of Cytomic.
+/// See <http://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf>
+///
+/// The frequency response of this filter is the same as of BZT filters.
+///
+/// This is a second-order filter. It has a cutoff slope of 12 dB/octave.
+/// Q = 0.707 means no resonant peaking.
+///
+/// This filter will self-oscillate when Q is very high (can be forced by
+/// setting the `k` coefficient to zero).
+///
+/// This filter is stable when modulated at high rates.
+#[derive(Default, Clone)]
+pub struct SvfFilter {
+    ic1eq: f64,
+    ic2eq: f64,
+}
+
 #[allow(unused)]
 impl SvfFilter {
-    /// Sets the filter to an initial response. Use `Svf::default` otherwise.
-    pub fn new(
-        filter_type: SvfFilterType,
-        sample_rate: u32,
-        cutoff: f32,
-        q: f32,
-        gain: f32,
-    ) -> Result<Self, Error> {
-        let mut svf = Self::default();
-        svf.set(filter_type, sample_rate, cutoff, q, gain)?;
-        Ok(svf)
+    pub fn new() -> Self {
+        Self {
+            ic1eq: 0.0,
+            ic2eq: 0.0,
+        }
     }
 
     /// Process helper function that calls `process_sample` for each sample in a buffer
     #[inline]
-    pub fn process<'a>(&mut self, output: impl Iterator<Item = &'a mut f32>) {
+    pub fn process<'a>(
+        &mut self,
+        coefficients: &SvfFilterCoefficients,
+        output: impl Iterator<Item = &'a mut f32>,
+    ) {
         for sample in output {
-            *sample = self.process_sample(*sample as f64) as f32;
+            *sample = self.process_sample(coefficients, *sample as f64) as f32;
         }
     }
 
     /// Apply the filter on a single sample.
     #[inline]
-    pub fn process_sample(&mut self, input: f64) -> f64 {
+    pub fn process_sample(&mut self, coefficients: &SvfFilterCoefficients, input: f64) -> f64 {
         let v0 = input;
         let v3 = v0 - self.ic2eq;
-        let v1 = self.coefficients.a1 * self.ic1eq + self.coefficients.a2 * v3;
-        let v2 = self.ic2eq + self.coefficients.a2 * self.ic1eq + self.coefficients.a3 * v3;
+        let v1 = coefficients.a1 * self.ic1eq + coefficients.a2 * v3;
+        let v2 = self.ic2eq + coefficients.a2 * self.ic1eq + coefficients.a3 * v3;
         self.ic1eq = 2.0 * v1 - self.ic1eq;
         self.ic2eq = 2.0 * v2 - self.ic2eq;
-        self.coefficients.m0 * v0 + self.coefficients.m1 * v1 + self.coefficients.m2 * v2
+        coefficients.m0 * v0 + coefficients.m1 * v1 + coefficients.m2 * v2
     }
 
     /// Reset state of filter.
@@ -319,34 +332,5 @@ impl SvfFilter {
     pub fn reset(&mut self) {
         self.ic1eq = 0.0;
         self.ic2eq = 0.0;
-    }
-
-    /// Set new filter parameters
-    /// Parameters:
-    /// - filter_type: choose one of the filter types, like peak, lowpass or highpass
-    /// - sample_rate: the sample_rate of the audio buffer that the filter should be applied on
-    /// - frequency: the frequency in Hz where the cutoff of the filter should be
-    /// - q: the steepness of the filter
-    /// - gain: the gain boost or decrease of the filter
-    #[inline]
-    pub fn set(
-        &mut self,
-        filter_type: SvfFilterType,
-        sample_rate: u32,
-        cutoff: f32,
-        q: f32,
-        gain: f32,
-    ) -> Result<(), Error> {
-        self.coefficients
-            .set(filter_type, sample_rate, cutoff, q, gain)
-    }
-
-    /// get a reference to the coefficients
-    pub fn coefficients(&self) -> &SvfCoefficients {
-        &self.coefficients
-    }
-    /// get a mutable reference to the coefficients
-    pub fn coefficients_mut(&mut self) -> &mut SvfCoefficients {
-        &mut self.coefficients
     }
 }

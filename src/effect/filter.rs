@@ -3,14 +3,14 @@ use four_cc::FourCC;
 use crate::{
     effect::{Effect, EffectTime},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, FloatParameterValue, Parameter,
-        ParameterValueUpdate,
+        EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
+        SmoothedParameterValue,
     },
     utils::{
-        filter::svf::{SvfFilter, SvfFilterType},
+        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
         InterleavedBufferMut,
     },
-    Error,
+    ClonableParameter, Error,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -26,10 +26,11 @@ pub struct FilterEffect {
     channel_count: usize,
     sample_rate: u32,
     filters: Vec<SvfFilter>,
+    filter_coefficients: SvfFilterCoefficients,
     filter_type: EnumParameterValue<FilterEffectType>,
-    cutoff: FloatParameterValue,
-    q: FloatParameterValue,
-    gain: FloatParameterValue,
+    cutoff: SmoothedParameterValue,
+    q: SmoothedParameterValue,
+    gain: SmoothedParameterValue,
 }
 
 impl FilterEffect {
@@ -41,20 +42,47 @@ impl FilterEffect {
 
     /// Creates a new `FilterEffect` with default parameter values.
     pub fn new() -> Self {
-        let filter_type = SvfFilterType::Lowpass;
-        let cutoff = 22050.0;
-        let q = 0.707;
-        let gain = 0.0;
-        let template_filter = SvfFilter::new(filter_type, 44100, cutoff, q, gain).unwrap();
         Self {
             channel_count: 0,
             sample_rate: 0,
-            filters: vec![template_filter],
-            filter_type: EnumParameter::new(Self::TYPE_ID, "Type", FilterEffectType::Lowpass)
-                .into(),
-            cutoff: FloatParameter::new(Self::CUTOFF_ID, "Cutoff", 20.0..=22050.0, 22050.0).into(),
-            q: FloatParameter::new(Self::Q_ID, "Q", 0.001..=24.0, 0.707).into(),
-            gain: FloatParameter::new(Self::GAIN_ID, "Gain", -24.0..=24.0, 0.0).into(),
+            filters: vec![],
+            filter_coefficients: SvfFilterCoefficients::new(
+                SvfFilterType::Lowpass,
+                44100,
+                22050.0,
+                0.707,
+                0.0,
+            )
+            .expect("Failed to create default filter"),
+            filter_type: EnumParameterValue::from_description(EnumParameter::new(
+                Self::TYPE_ID,
+                "Type",
+                FilterEffectType::Lowpass,
+            )),
+            cutoff: SmoothedParameterValue::from_description(
+                FloatParameter::new(
+                    Self::CUTOFF_ID,
+                    "Cutoff",
+                    20.0..=22050.0,
+                    22050.0, //
+                )
+                .with_unit("Hz"),
+            ),
+            q: SmoothedParameterValue::from_description(FloatParameter::new(
+                Self::Q_ID,
+                "Q",
+                0.001..=24.0,
+                0.707, //
+            )),
+            gain: SmoothedParameterValue::from_description(
+                FloatParameter::new(
+                    Self::GAIN_ID,
+                    "Gain",
+                    -24.0..=24.0,
+                    0.0, //
+                )
+                .with_unit("dB"),
+            ),
         }
     }
 
@@ -62,12 +90,13 @@ impl FilterEffect {
     pub fn with_parameters(filter_type: SvfFilterType, cutoff: f32, q: f32, gain: f32) -> Self {
         let mut filter = Self::new();
         filter.filter_type.set_value(filter_type);
-        filter.cutoff.set_value(cutoff);
-        filter.q.set_value(q);
-        filter.gain.set_value(gain);
-        filter.filters[0]
+        filter.cutoff.init_value(cutoff);
+        filter.q.init_value(q);
+        filter.gain.init_value(gain);
+        filter
+            .filter_coefficients
             .set(filter_type, 44100, cutoff, q, gain)
-            .unwrap();
+            .expect("Invalid filter parameters");
         filter
     }
 }
@@ -83,12 +112,12 @@ impl Effect for FilterEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
         vec![
-            Box::new(self.filter_type.description().clone()),
-            Box::new(self.cutoff.description().clone()),
-            Box::new(self.q.description().clone()),
-            Box::new(self.gain.description().clone()),
+            self.filter_type.description(),
+            self.cutoff.description(),
+            self.q.description(),
+            self.gain.description(),
         ]
     }
 
@@ -101,38 +130,53 @@ impl Effect for FilterEffect {
         self.sample_rate = sample_rate;
         self.channel_count = channel_count;
 
-        let template = self.filters.first().ok_or_else(|| {
-            Error::ParameterError(
-                "FilterEffect must be created with `with_parameters` or `default`".to_string(),
+        // make sure cutoff is still valid
+        self.filter_coefficients
+            .set_cutoff(
+                self.filter_coefficients
+                    .cutoff()
+                    .clamp(20.0, sample_rate as f32 / 2.0),
             )
-        })?;
+            .expect("Failed to set filter parameters");
+        self.filters.resize_with(channel_count, SvfFilter::new);
 
-        let filter_type = template.coefficients().filter_type();
-        let cutoff = template.coefficients().cutoff();
-        let q = template.coefficients().q();
-        let gain = template.coefficients().gain();
+        self.cutoff.set_sample_rate(sample_rate);
+        self.q.set_sample_rate(sample_rate);
+        self.gain.set_sample_rate(sample_rate);
 
-        self.filters.clear();
-        for _channel in 0..channel_count {
-            self.filters.push(SvfFilter::new(
-                filter_type,
-                sample_rate,
-                cutoff.clamp(20.0, sample_rate as f32 / 2.0),
-                q,
-                gain,
-            )?);
-        }
         Ok(())
     }
 
     fn process(&mut self, mut buffer: &mut [f32], _time: &EffectTime) {
-        // Apply filter to each channel
-        for (filter, channel_iter) in self
-            .filters
-            .iter_mut()
-            .zip(buffer.channels_mut(self.channel_count))
+        // Apply filter with parameter ramping
+        if self.cutoff.value_need_ramp() || self.q.value_need_ramp() || self.gain.value_need_ramp()
         {
-            filter.process(channel_iter);
+            for frame in buffer.frames_mut(self.channel_count) {
+                let cutoff = self
+                    .cutoff
+                    .next_value()
+                    .clamp(20.0, self.sample_rate as f32 / 2.0);
+                let q = self.q.next_value();
+                let gain = self.gain.next_value();
+                self.filter_coefficients
+                    .set(self.filter_type.value(), self.sample_rate, cutoff, q, gain)
+                    .expect("Invalid filter parameters");
+                for (sample, filter) in frame.zip(self.filters.iter_mut()) {
+                    *sample = filter.process_sample(
+                        &self.filter_coefficients,
+                        *sample as f64, //
+                    ) as f32;
+                }
+            }
+        } else {
+            // Apply filter without parameter ramping
+            for (filter, channel_iter) in self
+                .filters
+                .iter_mut()
+                .zip(buffer.channels_mut(self.channel_count))
+            {
+                filter.process(&self.filter_coefficients, channel_iter);
+            }
         }
     }
 
@@ -149,18 +193,15 @@ impl Effect for FilterEffect {
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         };
 
-        for filter in &mut self.filters {
-            let coeffs = filter.coefficients_mut();
-            let result = match id {
-                Self::TYPE_ID => coeffs.set_filter_type(*self.filter_type.value()),
-                Self::CUTOFF_ID => coeffs.set_cutoff(*self.cutoff.value()),
-                Self::Q_ID => coeffs.set_q(*self.q.value()),
-                Self::GAIN_ID => coeffs.set_gain(*self.gain.value()),
-                _ => Ok(()),
-            };
-            if let Err(err) = result {
-                log::error!("Failed to apply new filter parameters: {err}");
-            }
+        let result = match id {
+            Self::TYPE_ID => self
+                .filter_coefficients
+                .set_filter_type(self.filter_type.value()),
+            _ => Ok(()),
+        };
+
+        if let Err(err) = result {
+            log::error!("Failed to apply new filter parameters: {err}");
         }
         Ok(())
     }

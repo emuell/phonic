@@ -38,6 +38,27 @@ pub trait Parameter: Debug {
     fn name(&self) -> &'static str;
     /// The type and range of the parameter.
     fn parameter_type(&self) -> ParameterType;
+
+    /// Convert the given normalized parameter value to a string value.
+    fn normalized_value_to_string(&self, value: f32, include_unit: bool) -> String;
+    /// Convert the given string value to a normalized parameter value. Returns `None`
+    /// when conversion failed, else a valid normalized value.
+    fn string_to_normalized_value(&self, string: String) -> Option<f32>;
+}
+
+/// Allows creating `dyn Parameter` clones.
+pub trait ClonableParameter: Parameter {
+    /// Create a dyn Parameter clone, wrapped into a box.  
+    fn dyn_clone(&self) -> Box<dyn Parameter>;
+}
+
+impl<P> ClonableParameter for P
+where
+    P: Parameter + Clone + 'static,
+{
+    fn dyn_clone(&self) -> Box<dyn Parameter> {
+        Box::new(Self::clone(self))
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -55,6 +76,9 @@ pub enum ParameterValueUpdate {
 
 mod float;
 pub use float::{FloatParameter, FloatParameterValue};
+
+mod smoothed;
+pub use smoothed::SmoothedParameterValue;
 
 mod integer;
 pub use integer::{IntegerParameter, IntegerParameterValue};

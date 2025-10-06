@@ -85,10 +85,8 @@ fn main() -> Result<(), Error> {
         // create a new mixer
         tone_mixer_id = player.add_mixer(None)?;
 
-        // // add a chorus effect
-        // player.add_effect(
-        //    Box::new(effects::ChorusEffect::default()), tone_mixer_id,
-        // )?;
+        // add a chorus effect
+        // player.add_effect(effects::ChorusEffect::default(), tone_mixer_id)?;
 
         // add a reverb effect
         player.add_effect(
