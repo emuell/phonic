@@ -1,11 +1,11 @@
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
-    parameter::{FloatParameter, FloatParameterValue, Parameter, ParameterValueUpdate},
+    parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
-        filter::svf::{SvfFilter, SvfFilterType},
-        InterleavedBufferMut,
+        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
+        ExponentialSmoothedValue, InterleavedBufferMut, LinearSmoothedValue,
     },
-    Error,
+    ClonableParameter, Error,
 };
 
 use core::f32;
@@ -37,13 +37,16 @@ impl EffectMessage for ReverbEffectMessage {
 pub struct ReverbEffect {
     sample_rate: u32,
     channel_count: usize,
-    room_size: FloatParameterValue,
-    wet: FloatParameterValue,
+    room_size: SmoothedParameterValue<LinearSmoothedValue>,
+    wet: SmoothedParameterValue<ExponentialSmoothedValue>,
 
+    biquad_a_coefficients: SvfFilterCoefficients,
     biquad_a_l: SvfFilter,
     biquad_a_r: SvfFilter,
+    biquad_b_coefficients: SvfFilterCoefficients,
     biquad_b_l: SvfFilter,
     biquad_b_r: SvfFilter,
+    biquad_c_coefficients: SvfFilterCoefficients,
     biquad_c_l: SvfFilter,
     biquad_c_r: SvfFilter,
 
@@ -180,15 +183,39 @@ impl ReverbEffect {
         const A_LL_SIZE: usize = 3311;
         const A_ML_SIZE: usize = 3111;
 
+        let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
+        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
+
         Self {
             sample_rate: 0,
             channel_count: 0,
-            room_size: FloatParameter::new(Self::ROOM_SIZE_ID, "Room Size", 0.0..=1.0, 0.6).into(),
-            wet: FloatParameter::new(Self::WET_ID, "Wet", 0.0..=1.0, 0.35).into(),
+            room_size: SmoothedParameterValue::from_description(
+                FloatParameter::new(
+                    Self::ROOM_SIZE_ID,
+                    "Room Size",
+                    0.0..=1.0,
+                    0.6, //
+                )
+                .with_unit("%")
+                .with_display(to_string_percent, from_string_percent),
+            ),
+            wet: SmoothedParameterValue::from_description(
+                FloatParameter::new(
+                    Self::WET_ID,
+                    "Wet",
+                    0.0..=1.0,
+                    0.35, //
+                )
+                .with_unit("%")
+                .with_display(to_string_percent, from_string_percent),
+            ),
+            biquad_a_coefficients: SvfFilterCoefficients::default(),
             biquad_a_l: SvfFilter::default(),
             biquad_a_r: SvfFilter::default(),
+            biquad_b_coefficients: SvfFilterCoefficients::default(),
             biquad_b_l: SvfFilter::default(),
             biquad_b_r: SvfFilter::default(),
+            biquad_c_coefficients: SvfFilterCoefficients::default(),
             biquad_c_l: SvfFilter::default(),
             biquad_c_r: SvfFilter::default(),
             a_al: vec![0.0; A_AL_SIZE],
@@ -291,8 +318,8 @@ impl ReverbEffect {
     /// Creates a new `ReverbEffect` with the given parameters.
     pub fn with_parameters(room_size: f32, wet: f32) -> Self {
         let mut reverb = Self::new();
-        reverb.room_size.set_value(room_size);
-        reverb.wet.set_value(wet);
+        reverb.room_size.init_value(room_size);
+        reverb.wet.init_value(wet);
         reverb
     }
 
@@ -341,11 +368,8 @@ impl Effect for ReverbEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
-        vec![
-            Box::new(self.room_size.description().clone()),
-            Box::new(self.wet.description().clone()),
-        ]
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        vec![self.room_size.description(), self.wet.description()]
     }
 
     fn initialize(
@@ -361,12 +385,14 @@ impl Effect for ReverbEffect {
                 "ReverbEffect only supports stereo I/O".to_string(),
             ));
         }
+        self.room_size.set_sample_rate(sample_rate);
+        self.wet.set_sample_rate(sample_rate);
         Ok(())
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        let room_size = *self.room_size.value() as f64;
-        let wet = *self.wet.value() as f64;
+        let room_size = self.room_size.next_value() as f64;
+        let wet = self.wet.next_value() as f64;
         let vib_speed = 0.1;
         let vib_depth = 7.0;
         let size = (room_size.powi(2) * 75.0) + 25.0;
@@ -390,7 +416,7 @@ impl Effect for ReverbEffect {
         self.delay_m = (29.0 * size) as usize;
 
         let cutoff = (10000.0 - (room_size * wet * 3000.0)) as f32;
-        self.biquad_a_l
+        self.biquad_a_coefficients
             .set(
                 SvfFilterType::Lowpass,
                 self.sample_rate,
@@ -399,16 +425,7 @@ impl Effect for ReverbEffect {
                 0.0,
             )
             .unwrap();
-        self.biquad_a_r
-            .set(
-                SvfFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                1.618034,
-                0.0,
-            )
-            .unwrap();
-        self.biquad_b_l
+        self.biquad_b_coefficients
             .set(
                 SvfFilterType::Lowpass,
                 self.sample_rate,
@@ -417,26 +434,7 @@ impl Effect for ReverbEffect {
                 0.0,
             )
             .unwrap();
-        self.biquad_b_r
-            .set(
-                SvfFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                0.618034,
-                0.0,
-            )
-            .unwrap();
-        self.biquad_c_l
-            .set(
-                //
-                SvfFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                0.5,
-                0.0,
-            )
-            .unwrap();
-        self.biquad_c_r
+        self.biquad_c_coefficients
             .set(
                 //
                 SvfFilterType::Lowpass,
@@ -472,8 +470,12 @@ impl Effect for ReverbEffect {
             input_sample_r = self.a_mr[self.count_m];
 
             // Biquad A
-            input_sample_l = self.biquad_a_l.process_sample(input_sample_l);
-            input_sample_r = self.biquad_a_r.process_sample(input_sample_r);
+            input_sample_l = self
+                .biquad_a_l
+                .process_sample(&self.biquad_a_coefficients, input_sample_l);
+            input_sample_r = self
+                .biquad_a_r
+                .process_sample(&self.biquad_a_coefficients, input_sample_r);
 
             input_sample_l = input_sample_l.sin();
             input_sample_r = input_sample_r.sin();
@@ -722,8 +724,12 @@ impl Effect for ReverbEffect {
                 / 8.0;
 
             // Biquad B
-            input_sample_l = self.biquad_b_l.process_sample(input_sample_l);
-            input_sample_r = self.biquad_b_r.process_sample(input_sample_r);
+            input_sample_l = self
+                .biquad_b_l
+                .process_sample(&self.biquad_b_coefficients, input_sample_l);
+            input_sample_r = self
+                .biquad_b_r
+                .process_sample(&self.biquad_b_coefficients, input_sample_r);
 
             input_sample_l = input_sample_l.clamp(-1.0, 1.0);
             input_sample_r = input_sample_r.clamp(-1.0, 1.0);
@@ -732,8 +738,12 @@ impl Effect for ReverbEffect {
             input_sample_r = input_sample_r.asin();
 
             // Biquad C
-            input_sample_l = self.biquad_c_l.process_sample(input_sample_l);
-            input_sample_r = self.biquad_c_r.process_sample(input_sample_r);
+            input_sample_l = self
+                .biquad_c_l
+                .process_sample(&self.biquad_c_coefficients, input_sample_l);
+            input_sample_r = self
+                .biquad_c_r
+                .process_sample(&self.biquad_c_coefficients, input_sample_r);
 
             input_sample_l = dry_sample_l + input_sample_l * wet;
             input_sample_r = dry_sample_r + input_sample_r * wet;

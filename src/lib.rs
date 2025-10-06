@@ -100,7 +100,7 @@ pub use player::{
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
-pub use parameter::{Parameter, ParameterType, ParameterValueUpdate};
+pub use parameter::{ClonableParameter, Parameter, ParameterType, ParameterValueUpdate};
 
 pub use source::{
     file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
@@ -139,7 +139,7 @@ pub mod parameters {
     //! Effect [`Parameter`](super::Parameter) implementations.
     pub use super::parameter::{
         BooleanParameter, BooleanParameterValue, EnumParameter, EnumParameterValue, FloatParameter,
-        FloatParameterValue, IntegerParameter, IntegerParameterValue,
+        FloatParameterValue, IntegerParameter, IntegerParameterValue, SmoothedParameterValue,
     };
 }
 

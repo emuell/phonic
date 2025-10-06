@@ -5,10 +5,10 @@ use std::{f32::consts::PI, time::Duration};
 use four_cc::FourCC;
 use phonic::{
     effects::{CompressorEffect, ReverbEffect},
-    parameters::{FloatParameter, FloatParameterValue},
+    parameters::{FloatParameter, SmoothedParameterValue},
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
     utils::{pitch_from_note, speed_from_note, InterleavedBufferMut},
-    Effect, EffectTime, Error, FilePlaybackOptions, Parameter, ParameterValueUpdate,
+    ClonableParameter, Effect, EffectTime, Error, FilePlaybackOptions, ParameterValueUpdate,
     SynthPlaybackOptions,
 };
 
@@ -30,7 +30,7 @@ mod arguments;
 #[derive(Clone)]
 struct TanhDistortion {
     channel_count: usize,
-    gain: FloatParameterValue,
+    gain: SmoothedParameterValue,
 }
 
 impl TanhDistortion {
@@ -40,13 +40,18 @@ impl TanhDistortion {
     fn new() -> Self {
         Self {
             channel_count: 0,
-            gain: FloatParameter::new(Self::GAIN_ID, "Gain", 0.0..=1.0, 0.7).into(),
+            gain: SmoothedParameterValue::from_description(FloatParameter::new(
+                Self::GAIN_ID,
+                "Gain",
+                0.0..=1.0,
+                0.7,
+            )),
         }
     }
 
     fn with_parameters(gain: f32) -> Self {
         let mut distortion = Self::new();
-        distortion.gain.set_value(gain);
+        distortion.gain.init_value(gain);
         distortion
     }
 }
@@ -62,27 +67,32 @@ impl Effect for TanhDistortion {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
-        vec![Box::new(self.gain.description().clone())]
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        vec![self.gain.description()]
     }
 
     fn initialize(
         &mut self,
-        _sample_rate: u32,
+        sample_rate: u32,
         channel_count: usize,
         _max_frames: usize,
     ) -> Result<(), Error> {
+        // Memorize channel layout
         self.channel_count = channel_count;
+        // Initialize smoothed values
+        self.gain.set_sample_rate(sample_rate);
         Ok(())
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        // Map gain (0-1) to a drive amount.
-        let drive = 1.0 + self.gain.value() * 15.0;
-        let wet_amount = *self.gain.value();
-        let dry_amount = 1.0 - self.gain.value();
-
         for frame in output.frames_mut(self.channel_count) {
+            // Apply parameter smoothing
+            let gain = self.gain.next_value();
+            // Map gain (0-1) to a drive amount.
+            let drive = 1.0 + gain * 15.0;
+            let wet_amount = gain;
+            let dry_amount = 1.0 - gain;
+            // Process
             for sample in frame {
                 let dry = *sample;
                 // Apply drive, waveshape, and apply makeup gain.
@@ -191,7 +201,8 @@ fn main() -> Result<(), Error> {
 
     // Create a sub-mixer for the synth, child of the main mixer.
     let bass_mixer_id = player.add_mixer(None)?;
-    player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer_id)?;
+    let tanh_distortion_id =
+        player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer_id)?;
 
     // Create a sub-mixer for the pad, with a high-pass filter.
     let pad_mixer_id = player.add_mixer(None)?;
@@ -277,7 +288,15 @@ fn main() -> Result<(), Error> {
                 samples_per_sec,
                 None,
             )?;
-            player.play_synth_source(bass, Some(sample_time))?;
+            player.play_synth_source(bass, sample_time)?;
+
+            // Randomize the Tanh dist gain with every note
+            player.set_effect_parameter(
+                tanh_distortion_id,
+                TanhDistortion::GAIN_ID,
+                rand::random_range(0.8..1.0),
+                sample_time,
+            )?;
         }
     }
 

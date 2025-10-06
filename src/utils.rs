@@ -29,7 +29,7 @@ pub use smoothed::{
 pub mod filters {
     pub use super::filter::{
         dc::{DcFilter, DcFilterMode},
-        svf::{SvfCoefficients, SvfFilter, SvfFilterType},
+        svf::{SvfFilterCoefficients, SvfFilter, SvfFilterType},
     };
 }
 

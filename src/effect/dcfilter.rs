@@ -2,7 +2,7 @@ use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectTime},
-    parameter::{EnumParameter, EnumParameterValue, Parameter, ParameterValueUpdate},
+    parameter::{ClonableParameter, EnumParameter, EnumParameterValue, ParameterValueUpdate},
     utils::{
         filter::dc::{DcFilter, DcFilterMode},
         InterleavedBufferMut,
@@ -31,7 +31,11 @@ impl DcFilterEffect {
             channel_count: 0,
             sample_rate: 0,
             filters: Vec::new(),
-            mode: EnumParameter::new(Self::MODE_ID, "Mode", DcFilterMode::Default).into(),
+            mode: EnumParameterValue::from_description(EnumParameter::new(
+                Self::MODE_ID,
+                "Mode",
+                DcFilterMode::Default,
+            )),
         }
     }
 
@@ -54,8 +58,8 @@ impl Effect for DcFilterEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<Box<dyn Parameter>> {
-        vec![Box::new(self.mode.description().clone())]
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        vec![self.mode.description()]
     }
 
     fn initialize(
@@ -70,7 +74,7 @@ impl Effect for DcFilterEffect {
         self.filters.clear();
         for _ in 0..channel_count {
             let mut filter = DcFilter::new();
-            filter.init(sample_rate, *self.mode.value());
+            filter.init(sample_rate, self.mode.value());
             self.filters.push(filter);
         }
         Ok(())
@@ -97,7 +101,7 @@ impl Effect for DcFilterEffect {
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
         for filter in &mut self.filters {
-            filter.init(self.sample_rate, *self.mode.value());
+            filter.init(self.sample_rate, self.mode.value());
         }
         Ok(())
     }
