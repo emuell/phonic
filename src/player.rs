@@ -309,8 +309,9 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("mixer's event queue is full. playback event got skipped!");
-            log::warn!("increase the mixer event queue to prevent this from happening...");
+            log::warn!("Mixer's event queue is full. Failed to play a file source.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
         }
         // return new file's id
         Ok(playback_id)
@@ -387,8 +388,9 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("mixer's event queue is full. playback event got skipped!");
-            log::warn!("increase the mixer event queue to prevent this from happening...");
+            log::warn!("Mixer's event queue is full. Failed to play a synth source.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
         }
         // return new synth's id
         Ok(playback_id)
@@ -422,8 +424,9 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("mixer's event queue is full. add mixer event got skipped!");
-            log::warn!("increase the mixer event queue to prevent this from happening...");
+            log::warn!("Mixer's event queue is full. Failed to add a new mixer.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
         }
 
         self.mixer_event_queues
@@ -432,6 +435,94 @@ impl Player {
             .insert(new_mixer_id, (parent_mixer_id, None));
 
         Ok(new_mixer_id)
+    }
+
+    /// Remove a mixer and all its effects from the parent mixer.
+    pub fn remove_mixer(&mut self, mixer_id: MixerId) -> Result<(), Error> {
+        // Can't remove the main mixer
+        if mixer_id == Self::MAIN_MIXER_ID {
+            return Err(Error::ParameterError(
+                "Cannot remove the main mixer".to_string(),
+            ));
+        }
+
+        // Find the parent mixer
+        let parent_mixer_id = self
+            .mixer_effects
+            .get(&mixer_id)
+            .map(|entry| entry.value().0)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?;
+
+        let parent_mixer_event_queue = self
+            .mixer_event_queues
+            .get(&parent_mixer_id)
+            .ok_or(Error::MixerNotFoundError(parent_mixer_id))?
+            .clone();
+
+        // Send the remove message to parent
+        if parent_mixer_event_queue
+            .push(MixerMessage::RemoveMixer { id: mixer_id })
+            .is_err()
+        {
+            log::warn!("Mixer's event queue is full. Failed to remove a mixer.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
+        }
+
+        // Remove all effects that belong to this mixer
+        let effects_to_remove: Vec<EffectId> = self
+            .mixer_effects
+            .iter()
+            .filter_map(|entry| {
+                let (effect_id, (owner_mixer_id, _)) = (entry.key(), entry.value());
+                if *owner_mixer_id == mixer_id {
+                    Some(*effect_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for effect_id in effects_to_remove {
+            self.mixer_effects.remove(&effect_id);
+        }
+
+        // Remove the mixer from tracking maps
+        self.mixer_event_queues.remove(&mixer_id);
+        self.mixer_effects.remove(&mixer_id);
+
+        Ok(())
+    }
+
+    /// Remove all sub-mixers from the given mixer.
+    /// Use None as mixer_id to remove all sub-mixers from the main mixer.
+    pub fn remove_all_mixers<M: Into<Option<MixerId>>>(
+        &mut self,
+        mixer_id: M,
+    ) -> Result<(), Error> {
+        let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
+
+        // Find all sub-mixers that have this mixer as their parent
+        let sub_mixers_to_remove: Vec<MixerId> = self
+            .mixer_effects
+            .iter()
+            .filter_map(|entry| {
+                let (sub_mixer_id, (parent_mixer_id, effect_name)) = (entry.key(), entry.value());
+                // A mixer entry has None as effect_name
+                if *parent_mixer_id == mixer_id && effect_name.is_none() {
+                    Some(*sub_mixer_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Remove each sub-mixer
+        for sub_mixer_id in sub_mixers_to_remove {
+            self.remove_mixer(sub_mixer_id)?;
+        }
+
+        Ok(())
     }
 
     /// Add an effect to the given mixer's output.
@@ -448,8 +539,8 @@ impl Player {
             .ok_or(Error::MixerNotFoundError(mixer_id))?
             .clone();
 
-        // The mixer uses a temp buffer of this size. This should probably be configurable.
         let channel_count = self.output_channel_count();
+        // The effect's parent mixer uses a temp buffer of size:
         let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
 
         let effect_name = E::name();
@@ -461,11 +552,62 @@ impl Player {
             .push(MixerMessage::AddEffect { id, effect })
             .is_err()
         {
-            log::warn!("mixer's event queue is full. add effect event got skipped!");
-            log::warn!("increase the mixer event queue to prevent this from happening...");
+            log::warn!("Mixer's event queue is full. Failed to add a new effect.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
         }
+
         self.mixer_effects.insert(id, (mixer_id, Some(effect_name)));
+
         Ok(id)
+    }
+
+    /// Remove an effect from the given mixer.
+    pub fn remove_effect(&mut self, effect_id: EffectId) -> Result<(), Error> {
+        // Send the remove message
+        if self
+            .effect_mixer_event_queue(effect_id)?
+            .push(MixerMessage::RemoveEffect { id: effect_id })
+            .is_err()
+        {
+            log::warn!("Mixer's event queue is full. Failed to remove a effect.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
+        }
+
+        // Remove from tracking map
+        self.mixer_effects.remove(&effect_id);
+        Ok(())
+    }
+
+    /// Remove all effects from the given mixer.
+    /// Use None as mixer_id to remove all effects from the main mixer.
+    pub fn remove_all_effects<M: Into<Option<MixerId>>>(
+        &mut self,
+        mixer_id: M,
+    ) -> Result<(), Error> {
+        let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
+
+        // Find all effects belonging to this mixer
+        let effects_to_remove = self
+            .mixer_effects
+            .iter()
+            .filter_map(|entry| {
+                let (effect_id, (owner_mixer_id, _)) = (entry.key(), entry.value());
+                if *owner_mixer_id == mixer_id {
+                    Some(*effect_id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // Remove each effect
+        for effect_id in effects_to_remove {
+            self.remove_effect(effect_id)?;
+        }
+
+        Ok(())
     }
 
     /// Send a message to an effect at a specific sample time or immediately.
@@ -475,13 +617,20 @@ impl Player {
         message: M,
         sample_time: T,
     ) -> Result<(), Error> {
-        let entry = self
+        let message = Owned::new(
+            &self.collector_handle,
+            Box::new(message) as Box<EffectMessagePayload>,
+        );
+        let sample_time = sample_time.into().unwrap_or(0);
+
+        // check if effect name matches
+        let (_, effect_name) = *self
             .mixer_effects
             .get(&effect_id)
-            .ok_or(Error::EffectNotFoundError(effect_id))?;
-        let (mixer_id, effect_name_opt) = entry.value();
-        if let Some(effect_name) = effect_name_opt {
-            if *effect_name != message.effect_name() {
+            .ok_or(Error::EffectNotFoundError(effect_id))?
+            .value();
+        if let Some(effect_name) = effect_name {
+            if effect_name != message.effect_name() {
                 return Err(Error::ParameterError(format!(
                     "Invalid message: Trying to send a `{}` message to effect '{}' (id: {})",
                     message.effect_name(),
@@ -490,15 +639,9 @@ impl Player {
                 )));
             }
         }
-        let message: Owned<Box<EffectMessagePayload>> =
-            Owned::new(&self.collector_handle, Box::new(message));
-        let sample_time = sample_time.into().unwrap_or(0);
-        let mixer_event_queue = self
-            .mixer_event_queues
-            .get(mixer_id)
-            .ok_or(Error::MixerNotFoundError(*mixer_id))?
-            .clone();
-        if mixer_event_queue
+
+        if self
+            .effect_mixer_event_queue(effect_id)?
             .push(MixerMessage::ProcessEffectMessage {
                 effect_id,
                 message,
@@ -506,12 +649,12 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("mixer's event queue is full. effect message got skipped!");
-            log::warn!("increase the mixer event queue to prevent this from happening...");
-            Err(Error::SendError)
-        } else {
-            Ok(())
+            log::warn!("Mixer's event queue is full. Failed to send an effect message.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
         }
+
+        Ok(())
     }
 
     /// Change playback position of the given source at a specific sample time or immediately.
@@ -522,42 +665,49 @@ impl Player {
         position: Duration,
         sample_time: T,
     ) -> Result<(), Error> {
-        match self.playing_sources.get(&playback_id) {
-            Some(entry) => {
-                let playing_source = entry.value();
-                if let Some(sample_time) = sample_time.into() {
-                    // pass stop request to mixer (force push stop events!)
-                    let mixer_queue = self
-                        .mixer_event_queues
-                        .get(&playing_source.mixer_id)
-                        .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
-                        .clone();
-                    if mixer_queue
-                        .push(MixerMessage::SeekSource {
-                            playback_id,
-                            position,
-                            sample_time,
-                        })
-                        .is_err()
-                    {
-                        log::warn!("failed to send seek command to file");
-                        return Err(Error::SendError);
-                    }
-                } else if let PlaybackMessageQueue::File(queue) =
-                    &playing_source.playback_message_queue
+        if let Some(entry) = self.playing_sources.get(&playback_id) {
+            let playing_source = entry.value();
+            if let Some(sample_time) = sample_time.into() {
+                // pass stop request to mixer (force push stop events!)
+                let mixer_queue = self
+                    .mixer_event_queues
+                    .get(&playing_source.mixer_id)
+                    .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
+                    .clone();
+                if mixer_queue
+                    .push(MixerMessage::SeekSource {
+                        playback_id,
+                        position,
+                        sample_time,
+                    })
+                    .is_err()
                 {
-                    if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
-                        log::warn!("failed to send seek command to file");
-                        return Err(Error::SendError);
+                    log::warn!("Mixer's event queue is full. Failed to send a seek event.");
+                    log::warn!("Increase the mixer event queue to prevent this from happening...");
+                    return Err(Error::SendError);
+                }
+
+                Ok(())
+            } else {
+                match &playing_source.playback_message_queue {
+                    PlaybackMessageQueue::File(queue) => {
+                        if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
+                            log::warn!(
+                                "File playback's event queue is full. Failed to send seek command."
+                            );
+                            return Err(Error::SendError);
+                        }
+                        Ok(())
                     }
-                } else {
-                    log::warn!("trying to seek a synth source, which is not supported");
-                    return Err(Error::MediaFileNotFound);
+                    _ => {
+                        log::warn!("Trying to seek a synth source, which is not supported.");
+                        Err(Error::MediaFileNotFound)
+                    }
                 }
             }
-            None => return Err(Error::MediaFileNotFound),
+        } else {
+            Err(Error::MediaFileNotFound)
         }
-        Ok(())
     }
 
     /// Set a playing file source's speed at a given sample time in future or immediately,
@@ -573,24 +723,47 @@ impl Player {
         // check if the given playback id is still know (playing)
         if let Some(entry) = self.playing_sources.get(&playback_id) {
             let playing_source = entry.value();
-            let sample_time = sample_time.into().unwrap_or(0);
-            let mixer_queue = self
-                .mixer_event_queues
-                .get(&playing_source.mixer_id)
-                .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
-                .clone();
-            // pass event to mixer to schedule it
-            if mixer_queue
-                .push(MixerMessage::SetSourceSpeed {
-                    playback_id,
-                    speed,
-                    glide,
-                    sample_time,
-                })
-                .is_err()
-            {
-                log::warn!("mixer's event queue is full. playback event got skipped!");
-                log::warn!("increase the mixer event queue to prevent this from happening...");
+            if let Some(sample_time) = sample_time.into() {
+                // schedule with the mixer
+                let mixer_queue = self
+                    .mixer_event_queues
+                    .get(&playing_source.mixer_id)
+                    .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
+                    .clone();
+                if mixer_queue
+                    .push(MixerMessage::SetSourceSpeed {
+                        playback_id,
+                        speed,
+                        glide,
+                        sample_time,
+                    })
+                    .is_err()
+                {
+                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
+                    log::warn!("Increase the mixer event queue to prevent this from happening...");
+                    return Err(Error::SendError);
+                }
+            } else {
+                // apply immediately
+                match &playing_source.playback_message_queue {
+                    PlaybackMessageQueue::File(queue) => {
+                        if queue
+                            .push(FilePlaybackMessage::SetSpeed(speed, glide))
+                            .is_err()
+                        {
+                            log::warn!(
+                                "File playback's event queue is full. Speed event got skipped."
+                            );
+                            return Err(Error::SendError);
+                        }
+                    }
+                    _ => {
+                        log::warn!(
+                            "Trying to change speed of a synth source, which is not supported."
+                        );
+                        return Err(Error::MediaFileNotFound);
+                    }
+                }
             }
             Ok(())
         } else {
@@ -609,12 +782,12 @@ impl Player {
         if let Some(entry) = self.playing_sources.get(&playback_id) {
             let playing_source = entry.value();
             if let Some(sample_time) = sample_time.into() {
+                // schedule with the mixer
                 let mixer_queue = self
                     .mixer_event_queues
                     .get(&playing_source.mixer_id)
                     .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
                     .clone();
-                // pass event to mixer to schedule it
                 if mixer_queue
                     .push(MixerMessage::SetSourceVolume {
                         playback_id,
@@ -623,8 +796,9 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("mixer's event queue is full. playback event got skipped!");
-                    log::warn!("increase the mixer event queue to prevent this from happening...");
+                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
+                    log::warn!("Increase the mixer event queue to prevent this from happening...");
+                    return Err(Error::SendError);
                 }
             } else {
                 // apply immediately
@@ -633,7 +807,7 @@ impl Player {
                     .push(AmplifiedSourceMessage::SetVolume(volume))
                     .is_err()
                 {
-                    log::warn!("failed to send set volume command to source");
+                    log::warn!("File playback's event queue is full. Volume event got skipped.");
                     return Err(Error::SendError);
                 }
             }
@@ -654,12 +828,12 @@ impl Player {
         if let Some(entry) = self.playing_sources.get(&playback_id) {
             let playing_source = entry.value();
             if let Some(sample_time) = sample_time.into() {
+                // schedule with the mixer
                 let mixer_queue = self
                     .mixer_event_queues
                     .get(&playing_source.mixer_id)
                     .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
                     .clone();
-                // pass event to mixer to schedule it
                 if mixer_queue
                     .push(MixerMessage::SetSourcePanning {
                         playback_id,
@@ -668,8 +842,9 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("mixer's event queue is full. playback event got skipped!");
-                    log::warn!("increase the mixer event queue to prevent this from happening...");
+                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
+                    log::warn!("Increase the mixer event queue to prevent this from happening...");
+                    return Err(Error::SendError);
                 }
             } else {
                 // apply immediately
@@ -678,7 +853,7 @@ impl Player {
                     .push(PannedSourceMessage::SetPanning(panning))
                     .is_err()
                 {
-                    log::warn!("failed to send set panning command to source");
+                    log::warn!("File playback's event queue is full. Panning event got skipped.");
                     return Err(Error::SendError);
                 }
             }
@@ -700,16 +875,25 @@ impl Player {
             Some(entry) => {
                 let playing_source = entry.value();
                 if let Some(sample_time) = stop_time.into() {
-                    // pass stop request to mixer (force push stop events!)
+                    // pass event to mixer to schedule it
                     let mixer_queue = self
                         .mixer_event_queues
                         .get(&playing_source.mixer_id)
                         .ok_or(Error::MixerNotFoundError(playing_source.mixer_id))?
                         .clone();
-                    mixer_queue.force_push(MixerMessage::StopSource {
-                        playback_id,
-                        sample_time,
-                    });
+                    // force push stop events!
+                    if mixer_queue
+                        .force_push(MixerMessage::StopSource {
+                            playback_id,
+                            sample_time,
+                        })
+                        .is_some()
+                    {
+                        log::warn!("Mixer's event queue is full.");
+                        log::warn!(
+                            "Increase the mixer event queue to prevent this from happening..."
+                        );
+                    }
                     // Do not remove from playing_sources, as the event applies somewhen in future.
                     remove_from_playing_sources = false;
                 } else {
@@ -741,9 +925,14 @@ impl Player {
         }
         // remove all upcoming, scheduled sources in all mixers too (force push stop events!)
         for queue in self.mixer_event_queues.iter() {
-            queue
+            if queue
                 .value()
-                .force_push(MixerMessage::RemoveAllPendingSources);
+                .force_push(MixerMessage::RemoveAllPendingSources)
+                .is_some()
+            {
+                log::warn!("Mixer's event queue is full.");
+                log::warn!("Increase the mixer event queue to prevent this from happening...");
+            }
         }
         Ok(())
     }
@@ -808,6 +997,24 @@ impl Player {
                 }
             })
             .expect("failed to spawn audio message thread");
+    }
+
+    fn effect_mixer_event_queue(
+        &self,
+        effect_id: EffectId,
+    ) -> Result<Arc<ArrayQueue<MixerMessage>>, Error> {
+        let (mixer_id, _) = *self
+            .mixer_effects
+            .get(&effect_id)
+            .ok_or(Error::EffectNotFoundError(effect_id))?
+            .value();
+        let event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .value()
+            .clone();
+        Ok(event_queue)
     }
 }
 

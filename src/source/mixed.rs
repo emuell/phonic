@@ -5,7 +5,7 @@ use crossbeam_queue::ArrayQueue;
 
 use crate::{
     effect::{Effect, EffectMessage},
-    player::{EffectId, PlaybackMessageQueue},
+    player::{EffectId, MixerId, PlaybackMessageQueue},
     source::{
         amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
         Source, SourceTime,
@@ -128,6 +128,12 @@ pub(crate) enum MixerMessage {
     #[allow(dead_code)]
     RemoveAllSources,
     RemoveAllPendingSources,
+    RemoveEffect {
+        id: EffectId,
+    },
+    RemoveMixer {
+        id: MixerId,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -254,6 +260,12 @@ impl MixedSource {
                 }
                 MixerMessage::AddMixer { id, mixer } => {
                     self.mixers.push((id, mixer));
+                }
+                MixerMessage::RemoveEffect { id } => {
+                    self.effects.retain(|(effect_id, _)| *effect_id != id);
+                }
+                MixerMessage::RemoveMixer { id } => {
+                    self.mixers.retain(|(mixer_id, _)| *mixer_id != id);
                 }
                 MixerMessage::ProcessEffectMessage {
                     effect_id,
