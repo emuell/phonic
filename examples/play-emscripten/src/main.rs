@@ -3,32 +3,93 @@
 use std::{cell::RefCell, collections::HashMap, ffi};
 
 use dasp::{signal, Frame, Signal};
-
 use emscripten_rs_sys::emscripten_request_animation_frame_loop;
+use four_cc::FourCC;
+use serde::Serialize;
 
 use phonic::{
-    effects::ReverbEffect,
+    effects,
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{db_to_linear, pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Error, FilePlaybackOptions, MixerId, PlaybackId, Player,
-    SynthPlaybackOptions,
+    DefaultOutputDevice, Effect, EffectId, Error, FilePlaybackOptions, MixerId, Parameter,
+    ParameterType, PlaybackId, Player, SynthPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-// Hold the data structures statically so we can bind the Emscripten C method callbacks.
-thread_local!(static PLAYER: RefCell<Option<EmscriptenPlayer>> = const { RefCell::new(None) });
+// Serializable parameter metadata for JavaScript
 
-struct EmscriptenPlayer {
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum ParamTypeInfo {
+    Float,
+    Integer,
+    Enum { values: Vec<String> },
+    Boolean,
+}
+
+#[derive(Serialize)]
+struct ParameterInfo {
+    id: u32,
+    name: String,
+    #[serde(flatten)]
+    param_type: ParamTypeInfo,
+    default: f32,
+}
+
+#[derive(Serialize)]
+struct EffectInfo {
+    name: String,
+    parameters: Vec<ParameterInfo>,
+}
+
+impl From<&dyn Effect> for EffectInfo {
+    fn from(effect: &dyn Effect) -> Self {
+        let params = effect.parameters();
+        let parameters = params
+            .iter()
+            .map(|p| {
+                let id: u32 = p.id().into();
+                let name = p.name().to_string();
+                let param_type = match p.parameter_type() {
+                    ParameterType::Float => ParamTypeInfo::Float,
+                    ParameterType::Integer => ParamTypeInfo::Integer,
+                    ParameterType::Enum { values } => ParamTypeInfo::Enum { values },
+                    ParameterType::Boolean => ParamTypeInfo::Boolean,
+                };
+                let default = p.default_value();
+                ParameterInfo {
+                    id,
+                    name,
+                    param_type,
+                    default,
+                }
+            })
+            .collect();
+
+        EffectInfo {
+            name: effect.name().to_string(),
+            parameters,
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Hold the data structures statically so we can bind the Emscripten C method callbacks.
+thread_local!(static APP: RefCell<Option<App>> = const { RefCell::new(None) });
+
+struct App {
     player: Player,
     playback_beat_counter: u32,
     playback_start_time: u64,
     playing_synth_notes: HashMap<u8, PlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
+    active_effects: HashMap<EffectId, Vec<Box<dyn Parameter>>>,
 }
 
-impl EmscriptenPlayer {
+impl App {
     // Create a new player and preload samples
     pub fn new() -> Result<Self, Error> {
         println!("Initialize audio output...");
@@ -41,9 +102,11 @@ impl EmscriptenPlayer {
         // lower master volume a bit
         player.set_output_volume(db_to_linear(-3.0));
 
-        // create a new mixer for the synth with a reverb effect
+        // create a new mixer for the synth
         let synth_mixer_id = player.add_mixer(None)?;
-        player.add_effect(ReverbEffect::with_parameters(0.6, 0.5), synth_mixer_id)?;
+
+        // maintain added effects
+        let active_effects = HashMap::new();
 
         println!("Preloading sample files...");
         let mut samples = Vec::new();
@@ -78,15 +141,16 @@ impl EmscriptenPlayer {
             playing_synth_notes,
             samples,
             synth_mixer_id,
+            active_effects,
         })
     }
 
     // Animation frame callback which drives the player
     extern "C" fn run_frame(_time: f64, _user_data: *mut ffi::c_void) -> bool {
-        PLAYER.with_borrow_mut(|player| {
+        APP.with_borrow_mut(|app| {
             // is a player running?
-            if let Some(launcher) = player {
-                launcher.run();
+            if let Some(app) = app {
+                app.run();
                 true // continue running
             } else {
                 false // stop running
@@ -153,6 +217,106 @@ impl EmscriptenPlayer {
             let _ = self.player.stop_source(*playback_id, None);
             self.playing_synth_notes.remove(&note);
         }
+    }
+
+    // Get list of available effects
+    fn get_available_effects() -> Vec<String> {
+        vec![
+            "Gain".to_string(),
+            "DcFilter".to_string(),
+            "Filter".to_string(),
+            "Eq5".to_string(),
+            "Reverb".to_string(),
+            "Chorus".to_string(),
+            "Compressor".to_string(),
+            "Distortion".to_string(),
+        ]
+    }
+
+    // Add an effect by name to the synth mixer, returning effect ID and parameter metadata JSON
+    fn add_effect_with_name(&mut self, effect_name: &str) -> Result<(EffectId, String), Error> {
+        match effect_name {
+            "Gain" => self.add_effect(effects::GainEffect::new()),
+            "DcFilter" => self.add_effect(effects::DcFilterEffect::new()),
+            "Filter" => self.add_effect(effects::FilterEffect::new()),
+            "Eq5" => self.add_effect(effects::Eq5Effect::new()),
+            "Reverb" => self.add_effect(effects::ReverbEffect::new()),
+            "Chorus" => self.add_effect(effects::ChorusEffect::new()),
+            "Compressor" => self.add_effect(effects::CompressorEffect::new_compressor()),
+            "Distortion" => self.add_effect(effects::DistortionEffect::new()),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown effect: {}",
+                    effect_name
+                )))
+            }
+        }
+    }
+
+    // Add given effect instance to the synth mixer, returning effect ID and parameter metadata JSON
+    fn add_effect<E: Effect>(&mut self, effect: E) -> Result<(EffectId, String), Error> {
+        // Store parameter metadata
+        let parameters = effect
+            .parameters()
+            .iter()
+            .map(|p| p.dyn_clone())
+            .collect::<Vec<_>>();
+        let info_json = serde_json::to_string(&EffectInfo::from(&effect as &dyn Effect))
+            .unwrap_or_else(|_| "{}".to_string());
+        let effect_id = self.player.add_effect(effect, self.synth_mixer_id)?;
+
+        self.active_effects.insert(effect_id, parameters);
+
+        Ok((effect_id, info_json))
+    }
+
+    // Remove an effect
+    fn remove_effect(&mut self, effect_id: EffectId) -> Result<(), Error> {
+        self.player.remove_effect(effect_id)?;
+        self.active_effects.remove(&effect_id);
+        Ok(())
+    }
+
+    // Set an effect parameter value and update our tracking
+    fn set_effect_parameter_value(
+        &mut self,
+        effect_id: EffectId,
+        param_id: FourCC,
+        normalized_value: f32,
+    ) -> Result<(), Error> {
+        // Send to player
+        self.player.set_effect_parameter_normalized(
+            effect_id,
+            param_id,
+            normalized_value.clamp(0.0, 1.0),
+            None,
+        )
+    }
+
+    // Get an effect parameter's value as a string
+    fn get_effect_parameter_string(
+        &self,
+        effect_id: EffectId,
+        param_id: FourCC,
+        normalized_value: f32,
+    ) -> Result<String, Error> {
+        let parameters = self
+            .active_effects
+            .get(&effect_id)
+            .ok_or(Error::EffectNotFoundError(effect_id))?;
+
+        // Find the parameter
+        let parameter =
+            parameters
+                .iter()
+                .find(|p| p.id() == param_id)
+                .ok_or(Error::ParameterError(format!(
+                    "Parameter {:?} not found in effect {}",
+                    param_id, effect_id
+                )))?;
+
+        // Convert to string using the parameter's method
+        Ok(parameter.value_to_string(normalized_value, true))
     }
 
     // Schedule samples for playback
@@ -224,57 +388,210 @@ fn main() {
     panic!("The main function is not exposed and should never be called");
 }
 
-/// Creates a new `EmscriptenPlayer`
-/// Exported as `_start` function in the WASM.
+// -------------------------------------------------------------------------------------------------
+
+/// Frees a string ptr which got passed to JS after it got consumed. Exported as `_free_cstring`
+/// function in the WASM.
+#[no_mangle]
+pub unsafe extern "C" fn free_cstring(ptr: *mut ffi::c_char) {
+    if !ptr.is_null() {
+        drop(ffi::CString::from_raw(ptr as *mut ffi::c_char))
+    }
+}
+
+/// Creates a new `App` Exported as `_start`
+/// function in the WASM.
 #[no_mangle]
 pub extern "C" fn start() {
-    // create or recreate the player instance
-    println!("Creating new player instance...");
-    match EmscriptenPlayer::new() {
+    println!("Creating new app instance...");
+    match App::new() {
         Err(err) => {
             eprintln!("Failed to create player instance: {}", err);
-            PLAYER.replace(None)
+            APP.replace(None)
         }
-        Ok(player) => {
-            println!("Successfully created a new player instance");
-            PLAYER.replace(Some(player))
+        Ok(app) => {
+            println!("Successfully created a new app instance");
+            APP.replace(Some(app))
         }
     };
 }
 
-/// Destroys `EmscriptenPlayer` when its running.
-/// Exported as `_stop` function in the WASM.
+/// Destroys `App` when its running. Exported as `_stop`
+/// function in the WASM.
 #[no_mangle]
 pub extern "C" fn stop() {
-    // drop the player instance
-    println!("Dropping player instance...");
-    PLAYER.replace(None);
+    println!("Dropping app instance...");
+    APP.replace(None);
 }
 
-/// Play a single synth note when the player is running.
-/// Exported as `_synth_note_on` function in the WASM.
+/// Play a single synth note when the app is running. Exported as `_synth_note_on`
+/// function in the WASM.
 #[no_mangle]
 pub extern "C" fn synth_note_on(key: ffi::c_int) {
-    PLAYER.with_borrow_mut(|player| {
-        // is a player running?
-        if let Some(player) = player {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
             let note = (60 + key).min(127) as u8;
-            player.synth_note_on(note);
+            app.synth_note_on(note);
         }
     });
 }
 
-/// Stop a previously played synth note when the player is running.
-/// Exported as `_synth_note_off` function in the WASM.
+/// Stop a previously played synth note when the player is running. Exported as `_synth_note_off`
+/// function in the WASM.
 #[no_mangle]
 pub extern "C" fn synth_note_off(key: ffi::c_int) {
-    PLAYER.with_borrow_mut(|player| {
-        // is a player running?
-        if let Some(player) = player {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
             let note = (60 + key).min(127) as u8;
-            player.synth_note_off(note);
+            app.synth_note_off(note);
         }
     });
+}
+
+/// Get the list of available effects. Exported as `_get_available_effects` function in the WASM.
+///
+/// Returns a pointer to a JSON array of effect names, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn get_available_effects() -> *const ffi::c_char {
+    let effects = App::get_available_effects();
+    match serde_json::to_string(&effects) {
+        Ok(json) => {
+            let c_str = ffi::CString::new(json).unwrap_or_default();
+            c_str.into_raw()
+        }
+        Err(err) => {
+            eprintln!("Failed to serialize available effects: {}", err);
+            std::ptr::null()
+        }
+    }
+}
+
+/// Add an effect to the synth mixer. Exported as `_add_effect` function in the WASM.
+///
+/// Returns a pointer to a JSON string containing effect ID and parameter metadata, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn add_effect(effect_name: *const ffi::c_char) -> *const ffi::c_char {
+    if effect_name.is_null() {
+        eprintln!("Effect name is null");
+        return std::ptr::null();
+    }
+
+    let effect_name_str = unsafe {
+        match ffi::CStr::from_ptr(effect_name).to_str() {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("Failed to convert effect name to string: {}", err);
+                return std::ptr::null();
+            }
+        }
+    };
+
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            match app.add_effect_with_name(effect_name_str) {
+                Ok((effect_id, params_json)) => {
+                    let result_json =
+                        format!(r#"{{"effectId":{},"params":{}}}"#, effect_id, params_json);
+                    let c_str = ffi::CString::new(result_json).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!("Failed to add {} effect: {}", effect_name_str, err);
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Remove an effect from the synth mixer. Exported as `_remove_effect` function in the WASM.
+///
+/// Returns 0 on success or -1 on error.
+#[no_mangle]
+pub extern "C" fn remove_effect(effect_id: ffi::c_int) -> ffi::c_int {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            match app.remove_effect(effect_id as usize) {
+                Ok(_) => 0,
+                Err(err) => {
+                    eprintln!("Failed to remove effect {}: {}", effect_id, err);
+                    -1
+                }
+            }
+        } else {
+            -1
+        }
+    })
+}
+
+/// Get an effect parameter's value as a string. Exported as `_get_effect_parameter_string`
+/// function in the WASM.
+///
+/// Returns a pointer to a C string containing the parameter value, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn get_effect_parameter_string(
+    effect_id: ffi::c_int,
+    param_id: ffi::c_uint,
+    normalized_value: ffi::c_float,
+) -> *const ffi::c_char {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            match app.get_effect_parameter_string(
+                effect_id as usize,
+                param_fourcc,
+                normalized_value,
+            ) {
+                Ok(value_string) => {
+                    let c_str = ffi::CString::new(value_string).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!(
+                        "Failed to get effect {} parameter {:?} string: {}",
+                        effect_id, param_fourcc, err
+                    );
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Set an effect parameter value (normalized 0.0-1.0). Exported as `_set_effect_parameter_value`
+/// function in the WASM.
+///
+/// Returns 0 on success or -1 on error.
+#[no_mangle]
+pub extern "C" fn set_effect_parameter_value(
+    effect_id: ffi::c_int,
+    param_id: ffi::c_uint,
+    value: ffi::c_float,
+) -> ffi::c_int {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            match app.set_effect_parameter_value(effect_id as usize, param_fourcc, value) {
+                Ok(_) => 0,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to set effect {} parameter {:?} to {}: {}",
+                        effect_id, param_fourcc, value, err
+                    );
+                    -1
+                }
+            }
+        } else {
+            -1
+        }
+    })
 }
 
 // Note: when adding new functions that should be exported in the WASM,
