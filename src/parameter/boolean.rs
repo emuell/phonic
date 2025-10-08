@@ -123,17 +123,19 @@ impl Parameter for BooleanParameter {
     }
 
     fn parameter_type(&self) -> ParameterType {
-        ParameterType::Boolean {
-            default: self.default,
-        }
+        ParameterType::Boolean
     }
 
-    fn normalized_value_to_string(&self, normalized: f32, _include_unit: bool) -> String {
+    fn default_value(&self) -> f32 {
+        self.normalize_value(self.default)
+    }
+
+    fn value_to_string(&self, normalized: f32, _include_unit: bool) -> String {
         let value = self.denormalize_value(normalized.clamp(0.0, 1.0));
         self.value_to_string(value)
     }
 
-    fn string_to_normalized_value(&self, string: String) -> Option<f32> {
+    fn string_to_value(&self, string: String) -> Option<f32> {
         let value = self.string_to_value(&string)?;
         Some(self.normalize_value(value))
     }

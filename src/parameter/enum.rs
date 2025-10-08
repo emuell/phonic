@@ -121,7 +121,7 @@ impl Parameter for EnumParameter {
     fn id(&self) -> FourCC {
         self.id
     }
-    
+
     fn name(&self) -> &'static str {
         self.name
     }
@@ -129,16 +129,19 @@ impl Parameter for EnumParameter {
     fn parameter_type(&self) -> ParameterType {
         ParameterType::Enum {
             values: self.values.clone(),
-            default_index: self.default_index,
         }
     }
 
-    fn normalized_value_to_string(&self, normalized: f32, _include_unit: bool) -> String {
+    fn default_value(&self) -> f32 {
+        self.default_index as f32 / (self.values.len() - 1) as f32
+    }
+
+    fn value_to_string(&self, normalized: f32, _include_unit: bool) -> String {
         let value = self.denormalize_value(normalized.clamp(0.0, 1.0));
         self.value_to_string(value)
     }
-    
-    fn string_to_normalized_value(&self, string: String) -> Option<f32> {
+
+    fn string_to_value(&self, string: String) -> Option<f32> {
         let value = self.string_to_value(&string)?;
         Some(self.normalize_value(&value))
     }
@@ -148,7 +151,7 @@ impl Parameter for EnumParameter {
 
 /// Holds an enum parameter value and its description.
 #[derive(Debug, Clone)]
-pub struct EnumParameterValue<T: Copy + Clone> {
+pub struct EnumParameterValue<T: Clone> {
     /// The parameter's description and constraints.
     description: EnumParameter,
     /// The current value of the parameter.
@@ -222,7 +225,7 @@ where
     }
 }
 
-impl<T: Copy + Clone + FromStr + ToString + 'static> Display for EnumParameterValue<T>
+impl<T: Clone + FromStr + ToString> Display for EnumParameterValue<T>
 where
     <T as FromStr>::Err: Debug,
 {

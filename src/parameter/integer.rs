@@ -145,18 +145,19 @@ impl Parameter for IntegerParameter {
     }
 
     fn parameter_type(&self) -> ParameterType {
-        ParameterType::Integer {
-            range: self.range.clone(),
-            default: self.default,
-        }
+        ParameterType::Integer
     }
 
-    fn normalized_value_to_string(&self, normalized: f32, include_unit: bool) -> String {
+    fn default_value(&self) -> f32 {
+        self.normalize_value(self.default)
+    }
+
+    fn value_to_string(&self, normalized: f32, include_unit: bool) -> String {
         let value = self.denormalize_value(normalized.clamp(0.0, 1.0));
         self.value_to_string(value, include_unit)
     }
-    
-    fn string_to_normalized_value(&self, string: String) -> Option<f32> {
+
+    fn string_to_value(&self, string: String) -> Option<f32> {
         let value = self.string_to_value(&string)?;
         Some(self.normalize_value(value))
     }
