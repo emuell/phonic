@@ -12,13 +12,17 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+pub type DcFilterEffectMode = DcFilterMode;
+
+// -------------------------------------------------------------------------------------------------
+
 /// A filter effect that applies a DC-blocking filter to an audio buffer.
 #[derive(Clone)]
 pub struct DcFilterEffect {
     channel_count: usize,
     sample_rate: u32,
     filters: Vec<DcFilter>,
-    mode: EnumParameterValue<DcFilterMode>,
+    mode: EnumParameterValue<DcFilterEffectMode>,
 }
 
 impl DcFilterEffect {
@@ -34,13 +38,13 @@ impl DcFilterEffect {
             mode: EnumParameterValue::from_description(EnumParameter::new(
                 Self::MODE_ID,
                 "Mode",
-                DcFilterMode::Default,
+                DcFilterEffectMode::Default,
             )),
         }
     }
 
     /// Creates a new `DcFilterEffect` with the given parameter values.
-    pub fn with_parameters(mode: DcFilterMode) -> Self {
+    pub fn with_parameters(mode: DcFilterEffectMode) -> Self {
         let mut filter = Self::default();
         filter.mode.set_value(mode);
         filter

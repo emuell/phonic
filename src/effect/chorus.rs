@@ -192,6 +192,15 @@ impl ChorusEffect {
         let to_string_degrees = |v: f32| v.to_degrees().round().to_string();
         let from_string_degrees = |v: &str| v.parse::<f32>().map(|f| f.to_radians()).ok();
 
+        let mut rate_smoother = LinearSmoothedValue::default();
+        rate_smoother.set_step(0.005);
+
+        let mut phase_smoother = LinearSmoothedValue::default();
+        phase_smoother.set_step(0.001);
+
+        let mut delay_smoother = LinearSmoothedValue::default();
+        delay_smoother.set_step(0.01);
+
         Self {
             sample_rate: 0,
             channel_count: 0,
@@ -204,12 +213,14 @@ impl ChorusEffect {
                     1.0, //
                 )
                 .with_unit("Hz"),
-            ),
+            )
+            .with_smoother(rate_smoother),
             phase: SmoothedParameterValue::from_description(
                 FloatParameter::new(Self::PHASE_ID, "Phase", 0.0..=PI as f32, PI as f32 / 2.0)
                     .with_unit("°")
                     .with_display(to_string_degrees, from_string_degrees),
-            ),
+            )
+            .with_smoother(phase_smoother),
             depth: SmoothedParameterValue::from_description(
                 FloatParameter::new(
                     Self::DEPTH_ID,
@@ -238,7 +249,8 @@ impl ChorusEffect {
                     12.0, //
                 )
                 .with_unit("ms"),
-            ),
+            )
+            .with_smoother(delay_smoother),
             wet_mix: SmoothedParameterValue::from_description(
                 FloatParameter::new(
                     Self::WET_ID,
@@ -406,22 +418,22 @@ impl Effect for ChorusEffect {
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        let delay_ms = self.delay.next_value() as f64;
-        let depth = self.depth.next_value() as f64;
-        let feedback = self.feedback.next_value().clamp(-0.999, 0.999) as f64;
-        let wet_mix = self.wet_mix.next_value() as f64;
-        let wet_amount = wet_mix;
-        let dry_amount = 1.0 - wet_mix;
-
-        // ramp and update lfos, if needed
-        if self.rate.value_need_ramp() || self.phase.value_need_ramp() {
-            self.update_lfos(None);
-        }
-
         assert!(self.channel_count == 2);
         for frame in output.as_frames_mut::<2>() {
             let left_input = frame[0] as f64;
             let right_input = frame[1] as f64;
+
+            let delay_ms = self.delay.next_value() as f64;
+            let depth = self.depth.next_value() as f64;
+            let feedback = self.feedback.next_value().clamp(-0.999, 0.999) as f64;
+            let wet_mix = self.wet_mix.next_value() as f64;
+            let wet_amount = wet_mix;
+            let dry_amount = 1.0 - wet_mix;
+
+            // ramp and update lfos, if needed
+            if self.rate.value_need_ramp() || self.phase.value_need_ramp() {
+                self.update_lfos(None);
+            }
 
             // Filter the inputs
             let (filtered_left, filtered_right) =

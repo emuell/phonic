@@ -123,10 +123,10 @@ pub struct CompressorEffect {
     // Parameters
     threshold: FloatParameterValue,
     ratio: FloatParameterValue,
+    knee_width: FloatParameterValue,
     attack_time: FloatParameterValue,
     release_time: FloatParameterValue,
     makeup_gain: SmoothedParameterValue,
-    knee_width: FloatParameterValue,
     lookahead_time: FloatParameterValue,
     // Internal state
     current_envelope: f32,
@@ -150,6 +150,24 @@ impl CompressorEffect {
 
     /// Creates a new `CompressorEffect` with the default parameters.
     pub fn new_compressor() -> Self {
+        let ratio_to_string = |value: f32| {
+            if value >= 20.0 {
+                "LIMIT".to_string()
+            } else {
+                format!("1:{:.2}", value)
+            }
+        };
+        let string_to_ratio = |string: &str| {
+            let trimmed = string.trim();
+            if trimmed.eq_ignore_ascii_case("LIMIT") {
+                Some(20.0)
+            } else if let Some(ratio_str) = trimmed.strip_prefix("1:") {
+                ratio_str.parse::<f32>().ok()
+            } else {
+                trimmed.parse::<f32>().ok()
+            }
+        };
+
         Self {
             sample_rate: 0,
             channel_count: 0,
@@ -162,11 +180,20 @@ impl CompressorEffect {
                 )
                 .with_unit("dB"),
             ),
-            ratio: FloatParameterValue::from_description(FloatParameter::new(
-                Self::RATIO_ID,
-                "Ratio",
-                1.0..=20.0,
-                8.0,
+            ratio: FloatParameterValue::from_description(
+                FloatParameter::new(
+                    Self::RATIO_ID,
+                    "Ratio",
+                    1.0..=20.0,
+                    8.0, //
+                )
+                .with_display(ratio_to_string, string_to_ratio),
+            ),
+            knee_width: FloatParameterValue::from_description(FloatParameter::new(
+                Self::KNEE_ID,
+                "Knee",
+                0.0..=12.0,
+                3.0,
             )),
             attack_time: FloatParameterValue::from_description(
                 FloatParameter::new(
@@ -195,12 +222,6 @@ impl CompressorEffect {
                 )
                 .with_unit("dB"),
             ),
-            knee_width: FloatParameterValue::from_description(FloatParameter::new(
-                Self::KNEE_ID,
-                "Knee",
-                0.0..=12.0,
-                3.0,
-            )),
             lookahead_time: FloatParameterValue::from_description(
                 FloatParameter::new(
                     Self::LOOKAHEAD_ID,
@@ -230,19 +251,19 @@ impl CompressorEffect {
     pub fn with_compressor_parameters(
         threshold: f32,
         ratio: f32,
+        knee_width: f32,
         attack_time: f32,
         release_time: f32,
         makeup_gain: f32,
-        knee_width: f32,
         lookahead_time: f32,
     ) -> Self {
         let mut compressor = Self::default();
         compressor.threshold.set_value(threshold);
         compressor.ratio.set_value(ratio);
+        compressor.knee_width.set_value(knee_width);
         compressor.attack_time.set_value(attack_time);
         compressor.release_time.set_value(release_time);
         compressor.makeup_gain.init_value(makeup_gain);
-        compressor.knee_width.set_value(knee_width);
         compressor.lookahead_time.set_value(lookahead_time);
         compressor
     }
@@ -250,16 +271,16 @@ impl CompressorEffect {
     /// Creates a new `CompressorEffect` configured as a limiter.
     pub fn with_limiter_parameters(threshold: f32, attack_time: f32, release_time: f32) -> Self {
         let ratio = 20.0;
-        let makeup_gain = 0.0;
         let knee_width = 0.0;
+        let makeup_gain = 0.0;
         let lookahead_time = attack_time;
         Self::with_compressor_parameters(
             threshold,
             ratio,
+            knee_width,
             attack_time,
             release_time,
             makeup_gain,
-            knee_width,
             lookahead_time,
         )
     }
@@ -297,10 +318,10 @@ impl Effect for CompressorEffect {
         vec![
             self.threshold.description(),
             self.ratio.description(),
+            self.knee_width.description(),
             self.attack_time.description(),
             self.release_time.description(),
             self.makeup_gain.description(),
-            self.knee_width.description(),
             self.lookahead_time.description(),
         ]
     }
@@ -417,10 +438,10 @@ impl Effect for CompressorEffect {
         match id {
             Self::THRESHOLD_ID => self.threshold.apply_update(value),
             Self::RATIO_ID => self.ratio.apply_update(value),
+            Self::KNEE_ID => self.knee_width.apply_update(value),
             Self::ATTACK_ID => self.attack_time.apply_update(value),
             Self::RELEASE_ID => self.release_time.apply_update(value),
             Self::MAKEUP_GAIN_ID => self.makeup_gain.apply_update(value),
-            Self::KNEE_ID => self.knee_width.apply_update(value),
             Self::LOOKAHEAD_ID => self.lookahead_time.apply_update(value),
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         }
