@@ -1,7 +1,6 @@
 //! Audio and DSP helper functions to e.g. convert musical units, apply smoothed value changes
 //! and to generate audio waveforms for GUIs.
 
-use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // -------------------------------------------------------------------------------------------------
@@ -59,15 +58,13 @@ pub(crate) fn unique_usize_id() -> usize {
 
 /// Convert a linear volume factor to dB.
 pub fn linear_to_db(value: f32) -> f32 {
-    lazy_static! {
-        static ref LIN_TO_DB_FACTOR: f32 = 20.0f32 / 10.0f32.ln();
-    }
+    const LIN_TO_DB_FACTOR: f32 = 20.0 / std::f32::consts::LN_10;
     if value < 0.0 || value.is_nan() {
         return f32::NAN;
     } else if value == 1.0 {
         return 0.0; // avoid rounding errors at exactly 0 dB
     } else if value > 1e-12f32 {
-        return value.ln() * *LIN_TO_DB_FACTOR;
+        return value.ln() * LIN_TO_DB_FACTOR;
     }
     MINUS_INF_IN_DB
 }
@@ -76,15 +73,13 @@ pub fn linear_to_db(value: f32) -> f32 {
 
 /// Convert volume in dB to a linear volume factor.
 pub fn db_to_linear(value: f32) -> f32 {
-    lazy_static! {
-        static ref DB_TO_LIN_FACTOR: f32 = 10.0f32.ln() / 20.0f32;
-    }
+    const DB_TO_LIN_FACTOR: f32 = std::f32::consts::LN_10 / 20.0;
     if value.is_nan() {
         return f32::NAN;
     } else if value == 0.0 {
         return 1.0f32; // avoid rounding errors at exactly 0 dB
     } else if value > MINUS_INF_IN_DB {
-        return (value * *DB_TO_LIN_FACTOR).exp();
+        return (value * DB_TO_LIN_FACTOR).exp();
     }
     0.0f32
 }
