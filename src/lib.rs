@@ -100,7 +100,9 @@ pub use player::{
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
-pub use parameter::{ClonableParameter, Parameter, ParameterType, ParameterValueUpdate};
+pub use parameter::{
+    ClonableParameter, Parameter, ParameterScaling, ParameterType, ParameterValueUpdate,
+};
 
 pub use source::{
     file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},

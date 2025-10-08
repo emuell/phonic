@@ -6,7 +6,7 @@ use std::{
 
 use four_cc::FourCC;
 
-use super::{Parameter, ParameterType, ParameterValueUpdate};
+use super::{Parameter, ParameterScaling, ParameterType, ParameterValueUpdate};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -17,6 +17,7 @@ pub struct FloatParameter {
     name: &'static str,
     range: RangeInclusive<f32>,
     default: f32,
+    scaling: ParameterScaling,
     unit: &'static str,
     #[allow(clippy::type_complexity)]
     value_to_string: Option<Arc<dyn Fn(f32) -> String + Send + Sync>>,
@@ -54,6 +55,7 @@ impl FloatParameter {
             name,
             range,
             default,
+            scaling: ParameterScaling::Linear,
             unit: "",
             value_to_string: None,
             string_to_value: None,
@@ -63,6 +65,13 @@ impl FloatParameter {
     /// Optional unit for string displays.
     pub const fn with_unit(mut self, unit: &'static str) -> Self {
         self.unit = unit;
+        self
+    }
+
+    /// Optional parameter value scaling.
+    pub const fn with_scaling(mut self, scaling: ParameterScaling) -> Self {
+        scaling.validate();
+        self.scaling = scaling;
         self
     }
 
@@ -91,6 +100,11 @@ impl FloatParameter {
         &self.range
     }
 
+    /// The parameter's value scaling.
+    pub fn scaling(&self) -> &ParameterScaling {
+        &self.scaling
+    }
+
     /// The parameter's default value.
     pub fn default_value(&self) -> f32 {
         self.default
@@ -103,13 +117,15 @@ impl FloatParameter {
 
     /// Normalize the given plain value to a 0.0-1.0 range.
     pub fn normalize_value(&self, value: f32) -> f32 {
-        (value - *self.range.start()) / (*self.range().end() - *self.range.start())
+        let (min, max) = (*self.range.start(), *self.range.end());
+        self.scaling.unscale((value - min) / (max - min))
     }
 
     /// Denormalize a 0.0-1.0 ranged value to the corresponding plain value.
     pub fn denormalize_value(&self, normalized: f32) -> f32 {
         assert!((0.0..=1.0).contains(&normalized));
-        *self.range.start() + normalized * (*self.range().end() - *self.range.start())
+        let (min, max) = (*self.range.start(), *self.range.end());
+        min + self.scaling.scale(normalized) * (max - min)
     }
 
     /// Convert the given plain value to a string, using a custom conversion function if provided.
@@ -136,24 +152,25 @@ impl Parameter for FloatParameter {
     fn id(&self) -> FourCC {
         self.id
     }
-    
+
     fn name(&self) -> &'static str {
         self.name
     }
 
     fn parameter_type(&self) -> ParameterType {
-        ParameterType::Float {
-            range: self.range.clone(),
-            default: self.default,
-        }
+        ParameterType::Float
     }
 
-    fn normalized_value_to_string(&self, normalized: f32, include_unit: bool) -> String {
+    fn default_value(&self) -> f32 {
+        self.normalize_value(self.default)
+    }
+
+    fn value_to_string(&self, normalized: f32, include_unit: bool) -> String {
         let value = self.denormalize_value(normalized.clamp(0.0, 1.0));
         self.value_to_string(value, include_unit)
     }
-    
-    fn string_to_normalized_value(&self, string: String) -> Option<f32> {
+
+    fn string_to_value(&self, string: String) -> Option<f32> {
         let value = self.string_to_value(&string)?;
         Some(self.normalize_value(value))
     }

@@ -1,6 +1,7 @@
 use std::{any::Any, f64::consts::PI};
 
 use four_cc::FourCC;
+use strum::{Display, EnumIter, EnumString};
 
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
@@ -12,7 +13,7 @@ use crate::{
         filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
         InterleavedBufferMut, LinearSmoothedValue,
     },
-    ClonableParameter, Error,
+    ClonableParameter, Error, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -112,7 +113,28 @@ impl EffectMessage for ChorusEffectMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// Filter type used in `ChorusEffect`.
-pub type ChorusEffectFilterType = SvfFilterType;
+#[derive(Default, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
+#[allow(unused)]
+pub enum ChorusEffectFilterType {
+    #[default]
+    None,
+    Lowpass,
+    Bandpass,
+    Bandstop,
+    Highpass,
+}
+
+impl From<ChorusEffectFilterType> for SvfFilterType {
+    fn from(val: ChorusEffectFilterType) -> Self {
+        match val {
+            ChorusEffectFilterType::None => SvfFilterType::Allpass,
+            ChorusEffectFilterType::Lowpass => SvfFilterType::Lowpass,
+            ChorusEffectFilterType::Bandpass => SvfFilterType::Bandpass,
+            ChorusEffectFilterType::Bandstop => SvfFilterType::Notch,
+            ChorusEffectFilterType::Highpass => SvfFilterType::Highpass,
+        }
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -236,15 +258,16 @@ impl ChorusEffect {
                 FloatParameter::new(
                     Self::FILTER_FREQ_ID,
                     "Filter Freq",
-                    20.0..=22050.0,
+                    20.0..=20000.0,
                     400.0, //
                 )
-                .with_unit("Hz"),
+                .with_unit("Hz")
+                .with_scaling(ParameterScaling::Exponential(2.5)),
             ),
             filter_resonance: SmoothedParameterValue::from_description(FloatParameter::new(
                 Self::FILTER_Q_ID,
                 "Filter Q",
-                0.001..=24.0,
+                0.001..=4.0,
                 0.707, //
             )),
 
@@ -370,7 +393,7 @@ impl Effect for ChorusEffect {
         self.delay_buffer_right = InterpolatingDelayBuffer::new(max_buffer_size);
 
         self.filter_coefficients = SvfFilterCoefficients::new(
-            self.filter_type.value(),
+            self.filter_type.value().into(),
             sample_rate,
             self.filter_freq.target_value(),
             self.filter_resonance.target_value() + 0.707,
@@ -406,7 +429,13 @@ impl Effect for ChorusEffect {
                     let cutoff = self.filter_freq.next_value();
                     let q = self.filter_resonance.next_value() + 0.707;
                     self.filter_coefficients
-                        .set(self.filter_type.value(), self.sample_rate, cutoff, q, 0.0)
+                        .set(
+                            self.filter_type.value().into(),
+                            self.sample_rate,
+                            cutoff,
+                            q,
+                            0.0,
+                        )
                         .expect("Failed to set chorus filter parameters");
                     let filtered_left = self
                         .filter_left
@@ -497,7 +526,7 @@ impl Effect for ChorusEffect {
         match id {
             Self::FILTER_TYPE_ID => self
                 .filter_coefficients
-                .set_filter_type(self.filter_type.value()),
+                .set_filter_type(self.filter_type.value().into()),
             _ => Ok(()),
         }
     }

@@ -1,4 +1,5 @@
 use four_cc::FourCC;
+use strum::{Display, EnumIter, EnumString};
 
 use crate::{
     effect::{Effect, EffectTime},
@@ -8,15 +9,34 @@ use crate::{
     },
     utils::{
         filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-        InterleavedBufferMut,
+        InterleavedBufferMut, LinearSmoothedValue,
     },
-    ClonableParameter, Error,
+    ClonableParameter, Error, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// Filter type used in `FilterEffect`.
-pub type FilterEffectType = SvfFilterType;
+#[derive(Default, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
+#[allow(unused)]
+pub enum FilterEffectType {
+    #[default]
+    Lowpass,
+    Bandpass,
+    Bandstop,
+    Highpass,
+}
+
+impl From<FilterEffectType> for SvfFilterType {
+    fn from(val: FilterEffectType) -> Self {
+        match val {
+            FilterEffectType::Lowpass => SvfFilterType::Lowpass,
+            FilterEffectType::Bandpass => SvfFilterType::Bandpass,
+            FilterEffectType::Bandstop => SvfFilterType::Notch,
+            FilterEffectType::Highpass => SvfFilterType::Highpass,
+        }
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -29,16 +49,14 @@ pub struct FilterEffect {
     filter_coefficients: SvfFilterCoefficients,
     filter_type: EnumParameterValue<FilterEffectType>,
     cutoff: SmoothedParameterValue,
-    q: SmoothedParameterValue,
-    gain: SmoothedParameterValue,
+    q: SmoothedParameterValue<LinearSmoothedValue>,
 }
 
 impl FilterEffect {
     pub const EFFECT_NAME: &str = "FilterEffect";
     pub const TYPE_ID: FourCC = FourCC(*b"type");
     pub const CUTOFF_ID: FourCC = FourCC(*b"cuto");
-    pub const Q_ID: FourCC = FourCC(*b"q   ");
-    pub const GAIN_ID: FourCC = FourCC(*b"gain");
+    pub const Q_ID: FourCC = FourCC(*b"fltq");
 
     /// Creates a new `FilterEffect` with default parameter values.
     pub fn new() -> Self {
@@ -63,39 +81,30 @@ impl FilterEffect {
                 FloatParameter::new(
                     Self::CUTOFF_ID,
                     "Cutoff",
-                    20.0..=22050.0,
-                    22050.0, //
+                    20.0..=20000.0,
+                    20000.0, //
                 )
-                .with_unit("Hz"),
+                .with_unit("Hz")
+                .with_scaling(ParameterScaling::Exponential(2.5)),
             ),
             q: SmoothedParameterValue::from_description(FloatParameter::new(
                 Self::Q_ID,
-                "Q",
-                0.001..=24.0,
+                "Resonance",
+                0.001..=4.0,
                 0.707, //
             )),
-            gain: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::GAIN_ID,
-                    "Gain",
-                    -24.0..=24.0,
-                    0.0, //
-                )
-                .with_unit("dB"),
-            ),
         }
     }
 
     /// Creates a new `DistortionEffect` with the given parameter values.
-    pub fn with_parameters(filter_type: SvfFilterType, cutoff: f32, q: f32, gain: f32) -> Self {
+    pub fn with_parameters(filter_type: FilterEffectType, cutoff: f32, q: f32) -> Self {
         let mut filter = Self::new();
         filter.filter_type.set_value(filter_type);
         filter.cutoff.init_value(cutoff);
         filter.q.init_value(q);
-        filter.gain.init_value(gain);
         filter
             .filter_coefficients
-            .set(filter_type, 44100, cutoff, q, gain)
+            .set(filter_type.into(), 44100, cutoff, q, 0.0)
             .expect("Invalid filter parameters");
         filter
     }
@@ -117,7 +126,6 @@ impl Effect for FilterEffect {
             self.filter_type.description(),
             self.cutoff.description(),
             self.q.description(),
-            self.gain.description(),
         ]
     }
 
@@ -142,24 +150,27 @@ impl Effect for FilterEffect {
 
         self.cutoff.set_sample_rate(sample_rate);
         self.q.set_sample_rate(sample_rate);
-        self.gain.set_sample_rate(sample_rate);
 
         Ok(())
     }
 
     fn process(&mut self, mut buffer: &mut [f32], _time: &EffectTime) {
         // Apply filter with parameter ramping
-        if self.cutoff.value_need_ramp() || self.q.value_need_ramp() || self.gain.value_need_ramp()
-        {
+        if self.cutoff.value_need_ramp() || self.q.value_need_ramp() {
             for frame in buffer.frames_mut(self.channel_count) {
                 let cutoff = self
                     .cutoff
                     .next_value()
                     .clamp(20.0, self.sample_rate as f32 / 2.0);
                 let q = self.q.next_value();
-                let gain = self.gain.next_value();
                 self.filter_coefficients
-                    .set(self.filter_type.value(), self.sample_rate, cutoff, q, gain)
+                    .set(
+                        self.filter_type.value().into(),
+                        self.sample_rate,
+                        cutoff,
+                        q,
+                        0.0,
+                    )
                     .expect("Invalid filter parameters");
                 for (sample, filter) in frame.zip(self.filters.iter_mut()) {
                     *sample = filter.process_sample(
@@ -189,14 +200,13 @@ impl Effect for FilterEffect {
             Self::TYPE_ID => self.filter_type.apply_update(value),
             Self::CUTOFF_ID => self.cutoff.apply_update(value),
             Self::Q_ID => self.q.apply_update(value),
-            Self::GAIN_ID => self.gain.apply_update(value),
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
         };
 
         let result = match id {
             Self::TYPE_ID => self
                 .filter_coefficients
-                .set_filter_type(self.filter_type.value()),
+                .set_filter_type(self.filter_type.value().into()),
             _ => Ok(()),
         };
 
