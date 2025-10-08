@@ -14,19 +14,12 @@ use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use lazy_static::lazy_static;
 
 use phonic::{
-    effects,
+    effects::{self, FilterEffectType},
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
     Error, FilePlaybackOptions, MixerId, PlaybackId, Player, ResamplingQuality,
     SynthPlaybackOptions,
 };
-
-const FILTER_TYPES: [effects::FilterEffectType; 4] = [
-    effects::FilterEffectType::Allpass,
-    effects::FilterEffectType::Lowpass,
-    effects::FilterEffectType::Highpass,
-    effects::FilterEffectType::Bandpass,
-];
 
 // -------------------------------------------------------------------------------------------------
 
@@ -63,17 +56,15 @@ fn main() -> Result<(), Error> {
         loop_mixer_id = player.add_mixer(None)?;
 
         // add a filter effect
-        const DEFAULT_FILTER_TYPE: effects::FilterEffectType = effects::FilterEffectType::Allpass;
-        const DEFAULT_FILTER_CUTOFF: f32 = 8000.0;
+        const DEFAULT_FILTER_TYPE: effects::FilterEffectType = effects::FilterEffectType::Lowpass;
+        const DEFAULT_FILTER_CUTOFF: f32 = 20000.0;
         const DEFAULT_FILTER_Q: f32 = 0.707;
-        const DEFAULT_FILTER_GAIN: f32 = 1.0;
 
         loop_filter_effect_id = player.add_effect(
             effects::FilterEffect::with_parameters(
                 DEFAULT_FILTER_TYPE,
                 DEFAULT_FILTER_CUTOFF,
                 DEFAULT_FILTER_Q,
-                DEFAULT_FILTER_GAIN,
             ),
             loop_mixer_id,
         )?;
@@ -121,8 +112,7 @@ fn main() -> Result<(), Error> {
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
-    let current_filter_cutoff = Arc::new(Mutex::new(8000.0));
-    let current_filter_type_idx = Arc::new(Mutex::new(0));
+    let current_filter_cutoff = Arc::new(Mutex::new(20000.0));
 
     // global key state
     let alt_key_pressed = Arc::new(AtomicBool::new(false));
@@ -136,7 +126,7 @@ fn main() -> Result<(), Error> {
     println!("  To play a dasp signal synth, hit key '1'. For a sample based synth hit key '2'.");
     println!();
     println!("  Alt + Arrow 'left/right' to change filter cutoff frequency.");
-    println!("  Alt + 0,1,2,3 to change filter type (OFF,LP,HP,BP).");
+    println!("  Alt + 1,2,3,4 to change filter type (LP,BP,BR,HP).");
     println!();
     println!("  NB: this example uses a HighQuality resampler for the loop. ");
     println!("  In debug builds this may be very slow and may thus cause crackles...");
@@ -166,7 +156,6 @@ fn main() -> Result<(), Error> {
         let current_playmode = Arc::clone(&current_playmode);
         let current_octave = Arc::clone(&current_octave);
         let current_filter_cutoff = Arc::clone(&current_filter_cutoff);
-        let current_filter_type_idx = Arc::clone(&current_filter_type_idx);
 
         let alt_key_pressed = Arc::clone(&alt_key_pressed);
 
@@ -180,37 +169,21 @@ fn main() -> Result<(), Error> {
                     println!("Shutting down...");
                     wait_mutex_cond.1.notify_all();
                 }
-                Keycode::Key0 | Keycode::Key1 | Keycode::Key2 | Keycode::Key3 if alt_key => {
-                    let new_type_idx = match key {
-                        Keycode::Key0 => 0,
-                        Keycode::Key1 => 1,
-                        Keycode::Key2 => 2,
-                        Keycode::Key3 => 3,
+                Keycode::Key1 | Keycode::Key2 | Keycode::Key3 | Keycode::Key4 if alt_key => {
+                    let filter_type = match key {
+                        Keycode::Key1 => FilterEffectType::Lowpass,
+                        Keycode::Key2 => FilterEffectType::Bandpass,
+                        Keycode::Key3 => FilterEffectType::Bandstop,
+                        Keycode::Key4 => FilterEffectType::Highpass,
                         _ => unreachable!(),
                     };
-                    let mut type_idx = current_filter_type_idx.lock().unwrap();
-                    *type_idx = new_type_idx;
-                    let filter_type = FILTER_TYPES[*type_idx];
-                    println!("Filter type: {filter_type:?}");
+                    println!("Filter type: {filter_type}");
                     let mut player = player.lock().unwrap();
                     player
                         .set_effect_parameter(
                             loop_filter_effect_id,
                             effects::FilterEffect::TYPE_ID,
                             filter_type,
-                            None,
-                        )
-                        .unwrap_or_default();
-                    let cutoff = if filter_type == effects::FilterEffectType::Allpass {
-                        player.output_sample_rate() as f32 / 2.0
-                    } else {
-                        *current_filter_cutoff.lock().unwrap()
-                    };
-                    player
-                        .set_effect_parameter(
-                            loop_filter_effect_id,
-                            effects::FilterEffect::CUTOFF_ID,
-                            cutoff,
                             None,
                         )
                         .unwrap_or_default();
@@ -242,7 +215,9 @@ fn main() -> Result<(), Error> {
                 Keycode::Right if alt_key => {
                     let mut player = player.lock().unwrap();
                     let mut cutoff = current_filter_cutoff.lock().unwrap();
-                    *cutoff = (*cutoff * 1.1_f32).min(player.output_sample_rate() as f32 / 2.0);
+                    *cutoff = (*cutoff * 1.1_f32)
+                        .min(20000.0)
+                        .min(player.output_sample_rate() as f32 / 2.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     player
                         .set_effect_parameter(
