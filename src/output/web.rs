@@ -207,18 +207,15 @@ impl WebOutput {
             ));
         }
 
-        let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
         let channel_count = PREFERRED_CHANNELS as usize;
-        let buffer_frames = unsafe { phonic_js_buffer_frames() } as usize;
+        let frame_count = unsafe { phonic_js_buffer_frames() } as usize;
+        let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
 
         let (callback_send, callback_recv) = bounded(16);
 
-        let volume = 1.0;
         let is_running = false;
+        let volume = 1.0;
         let playback_pos = Arc::new(AtomicU64::new(0));
-
-        let mut smoothed_volume = ExponentialSmoothedValue::new(sample_rate);
-        smoothed_volume.init(volume);
 
         let context = Box::new(WebContext {
             callback_recv,
@@ -226,8 +223,8 @@ impl WebOutput {
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
-            smoothed_volume,
-            buffer: vec![0.0; buffer_frames * channel_count],
+            smoothed_volume: ExponentialSmoothedValue::new(volume, sample_rate),
+            buffer: vec![0.0; frame_count * channel_count],
             num_channels: channel_count,
         });
 

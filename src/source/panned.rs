@@ -30,8 +30,7 @@ impl PannedSource {
         InputSource: Source,
     {
         debug_assert!((-1.0..=1.0).contains(&panning), "Invalid panning factor");
-        let mut smoothed_panning = ExponentialSmoothedValue::new(source.sample_rate());
-        smoothed_panning.init(panning);
+        let smoothed_panning = ExponentialSmoothedValue::new(panning, source.sample_rate());
 
         // we're expecting a single message only, as events are already scheduled by the mixer
         const MESSAGE_QUEUE_SIZE: usize = 1;

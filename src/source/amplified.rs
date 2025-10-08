@@ -31,8 +31,7 @@ impl AmplifiedSource {
         InputSource: Source,
     {
         debug_assert!(volume >= 0.0, "Invalid volume factor");
-        let mut smoothed_volume = ExponentialSmoothedValue::new(source.sample_rate());
-        smoothed_volume.init(volume);
+        let smoothed_volume = ExponentialSmoothedValue::new(volume, source.sample_rate());
 
         // we're expecting a single message only, as events are already scheduled by the mixer
         const MESSAGE_QUEUE_SIZE: usize = 1;

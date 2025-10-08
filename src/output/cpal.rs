@@ -88,6 +88,10 @@ impl CpalOutput {
         // Shared playback position counter
         let playback_pos = Arc::new(AtomicU64::new(0));
 
+        // default volume
+        let volume = 1.0;
+
+        // channel to send and receive callback messagess
         let (callback_send, callback_recv) = bounded(16);
 
         let handle = Stream::spawn_with_default_cap("audio_output", {
@@ -103,6 +107,7 @@ impl CpalOutput {
                     config,
                     sample_format,
                     playback_pos,
+                    volume,
                     callback_recv,
                     this,
                 )
@@ -112,8 +117,8 @@ impl CpalOutput {
         Ok(Self {
             channel_count: supported.channels(),
             sample_rate: supported.sample_rate(),
-            volume: 1.0,
             is_running: false,
+            volume,
             playback_pos,
             stream_send: handle.sender(),
             callback_send,
@@ -252,12 +257,10 @@ impl Stream {
         config: cpal::StreamConfig,
         sample_format: cpal::SampleFormat,
         playback_pos: Arc<AtomicU64>,
+        volume: f32,
         callback_recv: Receiver<CallbackMsg>,
         stream_send: Sender<StreamMsg>,
     ) -> Result<Self, Error> {
-        let mut volume = ExponentialSmoothedValue::new(config.sample_rate.0);
-        volume.init(1.0);
-
         let mut callback = StreamCallback {
             stream_send,
             callback_recv,
@@ -269,7 +272,7 @@ impl Stream {
                 &config,
             )),
             state: CallbackState::Paused,
-            volume,
+            volume: ExponentialSmoothedValue::new(volume, config.sample_rate.0),
         };
 
         log::info!("opening output stream: {:?}", &config);

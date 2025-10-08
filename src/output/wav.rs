@@ -73,15 +73,12 @@ impl WavOutput {
         let writer = WavWriter::create(file_path, spec)
             .map_err(|e| Error::OutputDeviceError(Box::new(e)))?;
 
-        let mut smoothed_volume = ExponentialSmoothedValue::new(spec.sample_rate);
-        smoothed_volume.init(1.0);
-
         let stream = Arc::new(Mutex::new(WavStream {
             writer: Some(writer),
             channel_count,
             sample_rate,
             source: Box::new(EmptySource),
-            smoothed_volume,
+            smoothed_volume: ExponentialSmoothedValue::new(1.0, spec.sample_rate),
             buffer: vec![0.0; BUFFER_SIZE_FRAMES * spec.channels as usize],
             started: false,
             finished: false,
