@@ -3,133 +3,14 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>phonic Emscripten Example</title>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.4;
-        }
-
-        h1 {
-            color: #333;
-        }
-
-        p {
-            margin: 20px 20px 0px 0px;
-        }
-
-        .controls {
-            background-color: #f5f5f5;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-
-        button {
-            background-color: #4CAF50;
-            border: none;
-            color: white;
-            padding: 10px 15px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-
-        button:hover {
-            background-color: #45a049;
-        }
-
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-
-        .status {
-            margin: 20px 0;
-            padding: 10px;
-            border-radius: 4px;
-        }
-
-        .log {
-            height: 100px;
-            overflow-y: auto;
-            background-color: #f9f9f9;
-            padding: 10px;
-            border: 1px solid #ddd;
-            font-family: monospace;
-            white-space: pre-wrap;
-            margin-top: 20px;
-        }
-
-        .piano-wrapper {
-            border-radius: 20px;
-        }
-
-        .piano-keys {
-            display: flex;
-            padding: 0px;
-        }
-
-        .piano-keys .key {
-            cursor: pointer;
-            list-style: none;
-            color: #a2a2a2;
-            text-transform: uppercase;
-            position: relative;
-            user-select: none;
-        }
-
-        .piano-keys .black {
-            width: 44px;
-            height: 80px;
-            z-index: 2;
-            margin: 0 -22px 0 -22px;
-            border-radius: 0 0 3px 3px;
-            background: linear-gradient(#333, #000);
-        }
-
-        .piano-keys .black.active {
-            box-shadow: inset -5px 5px 10px rgba(255, 255, 255, 0.1);
-            background: linear-gradient(to bottom, #000, #434343);
-        }
-
-        .piano-keys .white {
-            width: 70px;
-            height: 140px;
-            border-radius: 4px;
-            border: 1px solid #000;
-        }
-
-        .piano-keys .white.active {
-            box-shadow: inset -5px 5px 20px rgba(0, 0, 0, 0.2);
-            background: linear-gradient(to bottom, #fff 0%, #eee 100%);
-        }
-
-        .piano-keys span {
-            position: absolute;
-            bottom: 20px;
-            width: 100%;
-            text-align: center;
-            font-size: 1.13rem;
-        }
-
-        .piano-keys .white {
-            width: 50px;
-        }
-    </style>
+    <title>phonic demo</title>
+    <link rel="stylesheet" href="app.css">
 </head>
 
 <body>
-    <h1>Emscripten Demo</h1>
+    <h1>Phonic Emscripten Demo</h1>
     <p>
-        Hit `Start` to initialize the audio backend and to start a simple player engine.
+        Hit `Start` to initialize the audio backend and start a simple player engine.
     <p>
 
     <div class="controls">
@@ -142,9 +23,11 @@
     <p>
         The example player schedules preloaded sample files in a <a
             href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop">requestAnimationFrame</a>
-        timer.<br>
-        Piano keys interactively play simple <a href="https://docs.rs/dasp/latest/dasp">DASP synth</a> sounds and are
-        routed through a Reverb DSP effect.
+        timer.
+    </p>
+    <p>
+        Piano keys interactively play simple <a href="https://docs.rs/dasp/latest/dasp">DASP synth</a> sounds.
+        You can dynamically add and remove DSP effects to the synth output and change their parameters in real-time.
     <p>
 
     <div class="piano-wrapper">
@@ -169,96 +52,17 @@
         </ul>
     </div>
 
-    <script type="text/javascript">
-        const pianoKeys = document.querySelectorAll(".piano-keys .key");
-        const playNote = (key) => {
-            _synth_note_on(key);
-            const clickedKey = document.querySelector(`[data-key="${key}"]`);
-            clickedKey?.classList.add("active");
-        }
-        const stopNote = (key) => {
-            _synth_note_off(key);
-            const clickedKey = document.querySelector(`[data-key="${key}"]`);
-            clickedKey?.classList.remove("active");
-        }
-        let allPianoKeys = new Map()
-        pianoKeys.forEach(key => {
-            const keyString = key.children[0].innerHTML;
-            const keyValue = key.dataset.key;
-            allPianoKeys.set(keyString, keyValue);
-            key.addEventListener("mousedown", () => playNote(keyValue))
-            key.addEventListener("click", () => stopNote(keyValue))
-        });
-        document.addEventListener("keydown", (e) => {
-            if (!e.repeat && allPianoKeys.has(e.key)) {
-                const keyValue = allPianoKeys.get(e.key);
-                playNote(keyValue);
-            }
-        });
-        document.addEventListener("keyup", (e) => {
-            if (!e.repeat && allPianoKeys.has(e.key)) {
-                const keyValue = allPianoKeys.get(e.key);
-                stopNote(keyValue);
-            }
-        });
-    </script>
+    <div class="effects-section">
+        <div class="add-effect-menu">
+        </div>
+        <div class="effects-chain" id="effectsChain">
+            <div class="empty-message">No effects added yet. Add an effect using the buttons above.</div>
+        </div>
+    </div>
 
-    <h2>Log</h2>
     <div class="log" id="log"></div>
 
-    <script type="text/javascript">
-        // logging helpers
-        function logMessage(message) {
-            const logElement = document.getElementById('log');
-            const timestamp = new Date().toLocaleTimeString();
-            logElement.innerHTML += `[${timestamp}] ${message}\n`;
-            logElement.scrollTop = logElement.scrollHeight;
-        }
-        function setStatus(message, isError = false) {
-            const statusElement = document.getElementById('status');
-            statusElement.textContent = message;
-            statusElement.style.backgroundColor = isError ? '#ffebee' : '#e8f5e9';
-            statusElement.style.color = isError ? '#c62828' : '#2e7d32';
-            logMessage(message)
-        }
-
-        // show window errors
-        window.addEventListener("unhandledrejection", function (event) {
-            setStatus(event.reason, true)
-        });
-        window.onerror = (message, filename, lineno, colno, error) => {
-            setStatus(message, true)
-        };
-
-        // setup emscripten callbacks
-        var Module = {
-            // initialized
-            postRun: () => {
-                setStatus("WASM module loaded successfully");
-                // Enable UI elements
-                const playButton = document.getElementById('playButton');
-                const stopButton = document.getElementById('stopButton');
-                playButton.disabled = false;
-                stopButton.disabled = true;
-                // Set event listeners
-                document.getElementById('playButton').addEventListener('click', async () => {
-                    setStatus("Playing...", false);
-                    playButton.disabled = true;
-                    stopButton.disabled = false;
-                    _start();
-                });
-                document.getElementById('stopButton').addEventListener('click', () => {
-                    setStatus("Stopped", false);
-                    playButton.disabled = false;
-                    stopButton.disabled = true;
-                    _stop();
-                });
-            },
-            print: (...args) => logMessage('[stdout]: ' + args.join(' ')),
-            printErr: (...args) => logMessage('[stderr]: ' + args.join(' ')),
-        }
-    </script>
-
+    <script type="text/javascript" src="app.js"></script>
     <script async type="text/javascript" src="play_emscripten.js"></script>
 </body>
 
