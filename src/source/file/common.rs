@@ -12,6 +12,7 @@ use crate::{
     source::{
         file::{FilePlaybackMessage, FilePlaybackOptions},
         resampled::ResamplingQuality,
+        unique_source_id,
     },
     utils::{
         buffer::TempBuffer,
@@ -19,7 +20,6 @@ use crate::{
         resampler::{
             cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
         },
-        unique_usize_id,
     },
 };
 
@@ -88,7 +88,7 @@ impl FileSourceImpl {
         let resampler_input_buffer = TempBuffer::new(resample_input_buffer_size);
 
         // create new unique file id
-        let file_id = unique_usize_id();
+        let file_id = unique_source_id();
         let file_path = Arc::new(file_path.to_owned());
 
         // create empty context

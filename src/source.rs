@@ -1,4 +1,7 @@
-use std::time::Instant;
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -77,4 +80,12 @@ pub trait Source: Send + Sync + 'static {
     /// final output stream refers to. It can be used to schedule and apply real-time events.
     /// Returns the number of written **samples** (not frames).
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize;
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Generates a unique source id for a program run, by counting atomically upwards from 1.
+pub(crate) fn unique_source_id() -> usize {
+    static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+    ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }

@@ -15,13 +15,16 @@ use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
 
-use super::{common::FileSourceImpl, FilePlaybackMessage, FilePlaybackOptions, FileSource};
+use super::{
+    common::FileSourceImpl, decoder::AudioDecoder, FilePlaybackMessage, FilePlaybackOptions,
+    FileSource,
+};
 
 use crate::{
     error::Error,
     player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
     source::{Source, SourceTime},
-    utils::{buffer::clear_buffer, decoder::AudioDecoder, fader::FaderState},
+    utils::{buffer::clear_buffer, fader::FaderState},
 };
 
 // -------------------------------------------------------------------------------------------------
