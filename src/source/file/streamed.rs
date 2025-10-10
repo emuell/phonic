@@ -5,11 +5,12 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
 use audio_thread_priority::promote_current_thread_to_real_time;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, SendError, Sender, TrySendError};
 use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
@@ -20,17 +21,13 @@ use crate::{
     error::Error,
     player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
     source::{Source, SourceTime},
-    utils::{
-        actor::{Act, Actor, ActorHandle},
-        buffer::clear_buffer,
-        decoder::AudioDecoder,
-        fader::FaderState,
-    },
+    utils::{buffer::clear_buffer, decoder::AudioDecoder, fader::FaderState},
 };
 
 // -------------------------------------------------------------------------------------------------
 
 /// Events to control the decoder thread of a streamed FileSource
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamedFileSourceMessage {
     /// Seek the decoder to a new position
     Seek(Duration),
@@ -44,9 +41,9 @@ pub enum StreamedFileSourceMessage {
 
 /// A [`FileSource`] which streams & decodes an audio file asynchronously in a worker thread.
 pub struct StreamedFileSource {
-    actor: ActorHandle<StreamedFileSourceMessage>,
+    stream_thread: StreamThreadHandle,
     consumer: Consumer<f32>,
-    worker_state: SharedFileWorkerState,
+    worker_state: SharedStreamThreadState,
     signal_spec: SignalSpec,
     file_source: FileSourceImpl,
 }
@@ -79,10 +76,10 @@ impl StreamedFileSource {
 
         // Create a ring-buffer for the decoded samples. Worker thread is producing,
         // we are consuming in the `Source` impl.
-        let buffer = StreamedFileWorker::default_buffer();
+        let buffer = StreamThread::create_buffer();
         let consumer = buffer.consumer();
 
-        let worker_state = SharedFileWorkerState {
+        let worker_state = SharedStreamThreadState {
             // We keep track of the current play-head position by sharing an atomic sample
             // counter with the decoding worker.  Worker is setting this on seek, we are
             // incrementing on reading from the ring-buffer.
@@ -108,11 +105,11 @@ impl StreamedFileSource {
         };
 
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
-        let actor = StreamedFileWorker::spawn_with_default_cap("audio_decoding", {
+        let stream_thread = StreamThread::spawn({
             let shared_state = worker_state.clone();
-            move |this| StreamedFileWorker::new(this, decoder, buffer, shared_state, repeat)
+            move |sender| StreamThread::new(sender, decoder, buffer, shared_state, repeat)
         });
-        actor.send(StreamedFileSourceMessage::Read)?;
+        stream_thread.send(StreamedFileSourceMessage::Read)?;
 
         // create common data
         let file_source = FileSourceImpl::new(
@@ -125,7 +122,7 @@ impl StreamedFileSource {
         )?;
 
         Ok(Self {
-            actor,
+            stream_thread,
             consumer,
             signal_spec,
             worker_state,
@@ -154,7 +151,7 @@ impl StreamedFileSource {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
                     if let Err(err) = self
-                        .actor
+                        .stream_thread
                         .try_send(StreamedFileSourceMessage::Seek(position))
                     {
                         log::warn!("failed to send playback seek event: {err}")
@@ -169,7 +166,7 @@ impl StreamedFileSource {
                     }
                 }
                 FilePlaybackMessage::Stop => {
-                    if let Err(err) = self.actor.try_send(StreamedFileSourceMessage::Stop) {
+                    if let Err(err) = self.stream_thread.try_send(StreamedFileSourceMessage::Stop) {
                         log::warn!("failed to send playback stop event: {err}")
                     }
                 }
@@ -361,14 +358,53 @@ impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
         self.file_source.fade_out_duration = None;
-        let _ = self.actor.send(StreamedFileSourceMessage::Stop);
+        let _ = self.stream_thread.send(StreamedFileSourceMessage::Stop);
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-#[derive(Clone)]
-struct SharedFileWorkerState {
+#[derive(Debug)]
+struct StreamThreadHandle {
+    #[allow(unused)]
+    thread: JoinHandle<()>,
+    sender: Sender<StreamedFileSourceMessage>,
+}
+
+impl StreamThreadHandle {
+    fn send(
+        &self,
+        msg: StreamedFileSourceMessage,
+    ) -> Result<(), SendError<StreamedFileSourceMessage>> {
+        self.sender.send(msg)
+    }
+
+    fn try_send(
+        &self,
+        msg: StreamedFileSourceMessage,
+    ) -> Result<(), TrySendError<StreamedFileSourceMessage>> {
+        self.sender.try_send(msg)
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Thread action of the file stream thread loop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StreamThreadAction {
+    Continue,
+    WaitOr {
+        timeout: Duration,
+        timeout_msg: StreamedFileSourceMessage,
+    },
+    Shutdown,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Shared data of stream thread and file source thread.
+#[derive(Debug, Clone)]
+struct SharedStreamThreadState {
     /// Current position. We update this on seek and EOF only.
     position: Arc<AtomicU64>,
     /// Total number of samples. We set this on EOF.
@@ -385,11 +421,12 @@ struct SharedFileWorkerState {
 
 // -------------------------------------------------------------------------------------------------
 
-struct StreamedFileWorker {
+/// Manages the file's stream thread.
+struct StreamThread {
     /// Sending part of our own actor channel.
-    this: Sender<StreamedFileSourceMessage>,
+    sender: Sender<StreamedFileSourceMessage>,
     /// Decoder we are reading packets/samples from.
-    input: AudioDecoder,
+    decoder: AudioDecoder,
     /// Audio properties of the decoded signal.
     input_spec: SignalSpec,
     /// Sample buffer containing samples read in the last packet.
@@ -399,7 +436,7 @@ struct StreamedFileWorker {
     /// Producing part of the output ring-buffer.
     output_producer: Producer<f32>,
     // Shared state with StreamedFileSource
-    shared_state: SharedFileWorkerState,
+    shared_state: SharedStreamThreadState,
     /// Range of samples in `resampled` that are awaiting flush into `output`.
     samples_to_write: Range<usize>,
     /// Number of samples that should be ignore when reading packages to compensate
@@ -415,34 +452,34 @@ struct StreamedFileWorker {
     loop_range: Option<Range<u64>>,
 }
 
-impl StreamedFileWorker {
-    fn default_buffer() -> SpscRb<f32> {
+impl StreamThread {
+    fn create_buffer() -> SpscRb<f32> {
         const DEFAULT_BUFFER_SIZE: usize = 128 * 1024;
         SpscRb::new(DEFAULT_BUFFER_SIZE)
     }
 
     fn new(
-        this: Sender<StreamedFileSourceMessage>,
-        input: AudioDecoder,
+        sender: Sender<StreamedFileSourceMessage>,
+        decoder: AudioDecoder,
         output: SpscRb<f32>,
-        shared_state: SharedFileWorkerState,
+        shared_state: SharedStreamThreadState,
         repeat: usize,
     ) -> Self {
         const DEFAULT_MAX_FRAMES: u64 = 8 * 1024;
 
-        let max_input_frames = input
+        let max_input_frames = decoder
             .codec_params()
             .max_frames_per_packet
             .unwrap_or(DEFAULT_MAX_FRAMES);
 
         let output_producer = output.producer();
-        let input_packet = SampleBuffer::new(max_input_frames, input.signal_spec());
+        let input_packet = SampleBuffer::new(max_input_frames, decoder.signal_spec());
 
-        let input_spec = input.signal_spec();
+        let input_spec = decoder.signal_spec();
         let channel_count = input_spec.channels.count() as u64;
 
         let mut loop_range = None;
-        if let Some(loop_info) = input.loops().first() {
+        if let Some(loop_info) = decoder.loops().first() {
             // TODO: for now we only support forward loops
             let loop_start = loop_info.start as u64 * channel_count;
             let loop_end = loop_info.end as u64 * channel_count;
@@ -458,7 +495,7 @@ impl StreamedFileWorker {
         let is_reading = false;
 
         // Promote the worker thread to audio priority to prevent buffer under-runs on high CPU usage.
-        if let Err(err) = promote_current_thread_to_real_time(0, input.signal_spec().rate) {
+        if let Err(err) = promote_current_thread_to_real_time(0, decoder.signal_spec().rate) {
             log::warn!("failed to set file worker thread's priority to real-time: {err}");
         }
 
@@ -466,8 +503,8 @@ impl StreamedFileWorker {
             output_producer,
             input_packet,
             input_spec,
-            input,
-            this,
+            decoder,
+            sender,
             output,
             shared_state,
             samples_written,
@@ -478,23 +515,68 @@ impl StreamedFileWorker {
             loop_range,
         }
     }
-}
 
-impl Actor for StreamedFileWorker {
-    type Message = StreamedFileSourceMessage;
-    type Error = Error;
-
-    fn handle(&mut self, msg: StreamedFileSourceMessage) -> Result<Act<Self>, Self::Error> {
-        match msg {
-            StreamedFileSourceMessage::Seek(time) => self.on_seek(time),
-            StreamedFileSourceMessage::Read => self.on_read(),
-            StreamedFileSourceMessage::Stop => self.on_stop(),
+    fn spawn<F>(factory: F) -> StreamThreadHandle
+    where
+        F: FnOnce(Sender<StreamedFileSourceMessage>) -> Self + Send + 'static,
+    {
+        let (sender, receiver) = bounded(64);
+        StreamThreadHandle {
+            sender: sender.clone(),
+            thread: thread::Builder::new()
+                .name("audio_file_decoder".to_string())
+                .spawn(move || {
+                    let this = factory(sender);
+                    this.process_messages(receiver);
+                })
+                .expect("failed to spawn file decoder thread"),
         }
     }
-}
 
-impl StreamedFileWorker {
-    fn on_stop(&mut self) -> Result<Act<Self>, Error> {
+    fn process_messages(mut self, receiver: Receiver<StreamedFileSourceMessage>) {
+        let mut action = StreamThreadAction::Continue;
+        loop {
+            // sleep state
+            let message = match action {
+                StreamThreadAction::Continue => match receiver.recv() {
+                    Ok(msg) => msg,
+                    Err(_) => {
+                        // channel got disconnected
+                        break;
+                    }
+                },
+                StreamThreadAction::WaitOr {
+                    timeout,
+                    timeout_msg,
+                } => match receiver.recv_timeout(timeout) {
+                    Ok(msg) => msg,
+                    Err(RecvTimeoutError::Timeout) => timeout_msg,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        // channel got disconnected
+                        break;
+                    }
+                },
+                StreamThreadAction::Shutdown => {
+                    // stop on errors or shutdown requests
+                    break;
+                }
+            };
+            let result = match message {
+                StreamedFileSourceMessage::Seek(time) => self.on_seek(time),
+                StreamedFileSourceMessage::Read => self.on_read(),
+                StreamedFileSourceMessage::Stop => self.on_stop(),
+            };
+            action = match result {
+                Ok(action) => action,
+                Err(err) => {
+                    log::error!("file worker handler error: {err}");
+                    StreamThreadAction::Shutdown
+                }
+            };
+        }
+    }
+
+    fn on_stop(&mut self) -> Result<StreamThreadAction, Error> {
         if self.shared_state.fade_out_on_stop.load(Ordering::Relaxed) {
             // duration and fade out state will be picked up by our parent source
             self.shared_state
@@ -502,24 +584,24 @@ impl StreamedFileWorker {
                 .store(true, Ordering::Relaxed);
             // keep running until fade-out completed
             if !self.is_reading {
-                self.this.send(StreamedFileSourceMessage::Read)?;
+                self.sender.send(StreamedFileSourceMessage::Read)?;
             }
-            Ok(Act::Continue)
+            Ok(StreamThreadAction::Continue)
         } else {
             // immediately stop reading
             self.is_reading = false;
             self.shared_state.is_playing.store(false, Ordering::Relaxed);
-            Ok(Act::Shutdown)
+            Ok(StreamThreadAction::Shutdown)
         }
     }
 
-    fn on_seek(&mut self, time: Duration) -> Result<Act<Self>, Error> {
-        match self.input.seek(time) {
+    fn on_seek(&mut self, time: Duration) -> Result<StreamThreadAction, Error> {
+        match self.decoder.seek(time) {
             Ok(timestamp) => {
                 if self.is_reading {
                     self.samples_to_write = 0..0;
                 } else {
-                    self.this.send(StreamedFileSourceMessage::Read)?;
+                    self.sender.send(StreamedFileSourceMessage::Read)?;
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
@@ -532,18 +614,18 @@ impl StreamedFileWorker {
                 log::error!("failed to seek: {err}");
             }
         }
-        Ok(Act::Continue)
+        Ok(StreamThreadAction::Continue)
     }
 
-    fn on_read(&mut self) -> Result<Act<Self>, Error> {
+    fn on_read(&mut self) -> Result<StreamThreadAction, Error> {
         // check if we no longer need to run the worker
         if !self.shared_state.is_playing.load(Ordering::Relaxed) {
-            return Ok(Act::Shutdown);
+            return Ok(StreamThreadAction::Shutdown);
         }
 
         // check if we need to fetch more input samples
         if self.samples_to_write.is_empty() {
-            match self.input.read_packet(&mut self.input_packet) {
+            match self.decoder.read_packet(&mut self.input_packet) {
                 Some(_) => {
                     self.samples_to_write = 0..self.input_packet.samples().len();
                     // shift playhead to the exact seek position if needed
@@ -558,11 +640,11 @@ impl StreamedFileWorker {
                     if self.continue_on_loop_boundary() {
                         // continue playing from loop start
                         self.is_reading = true;
-                        self.this.send(StreamedFileSourceMessage::Read)?;
-                        return Ok(Act::Continue);
+                        self.sender.send(StreamedFileSourceMessage::Read)?;
+                        return Ok(StreamThreadAction::Continue);
                     } else {
                         // handle end of file
-                        return Ok(Act::Continue);
+                        return Ok(StreamThreadAction::Continue);
                     }
                 }
             }
@@ -571,8 +653,8 @@ impl StreamedFileWorker {
         if self.samples_to_write.is_empty() {
             // This can happen if a new packet was empty. try next packet...
             self.is_reading = true;
-            self.this.send(StreamedFileSourceMessage::Read)?;
-            return Ok(Act::Continue);
+            self.sender.send(StreamedFileSourceMessage::Read)?;
+            return Ok(StreamThreadAction::Continue);
         }
 
         // We have samples to write.
@@ -598,20 +680,20 @@ impl StreamedFileWorker {
                         // continue playing from loop start
                     } else {
                         // reached end of file
-                        return Ok(Act::Continue);
+                        return Ok(StreamThreadAction::Continue);
                     }
                 }
             }
             self.is_reading = true;
-            self.this.send(StreamedFileSourceMessage::Read)?;
-            Ok(Act::Continue)
+            self.sender.send(StreamedFileSourceMessage::Read)?;
+            Ok(StreamThreadAction::Continue)
         } else {
             // Buffer is full. Wait a bit a try again. We also have to indicate that the
             // read loop is not running at the moment (if we receive a `Seek` while waiting,
             // we need it to explicitly kickstart reading again).
             self.is_reading = false;
-            Ok(Act::WaitOr {
-                timeout: Duration::from_millis(500),
+            Ok(StreamThreadAction::WaitOr {
+                timeout: Duration::from_millis(100),
                 timeout_msg: StreamedFileSourceMessage::Read,
             })
         }
@@ -627,7 +709,7 @@ impl StreamedFileWorker {
             let loop_start = self.loop_range.as_ref().map(|r| r.start).unwrap_or(0);
             let seek_frames = loop_start / self.input_spec.channels.count() as u64;
             let seek_secs = seek_frames as f64 / self.input_spec.rate as f64;
-            match self.input.seek(Duration::from_secs_f64(seek_secs)) {
+            match self.decoder.seek(Duration::from_secs_f64(seek_secs)) {
                 Ok(actual_frame_time) => {
                     // seeking may move to previous packet boundaries:
                     // compensate by skipping samples until we reach the desired exact time

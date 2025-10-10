@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // -------------------------------------------------------------------------------------------------
 
-pub(crate) mod actor;
 pub(crate) mod buffer;
 pub(crate) mod decoder;
 pub(crate) mod event;

@@ -3,6 +3,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    thread::{self, JoinHandle},
     time::Instant,
 };
 
@@ -20,7 +21,6 @@ use crate::{
     output::{AudioHostId, OutputDevice},
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
-        actor::{Act, Actor, ActorHandle},
         buffer::clear_buffer,
         smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
     },
@@ -41,14 +41,15 @@ const PREFERRED_BUFFER_SIZE: cpal::BufferSize = if cfg!(debug_assertions) {
 
 /// Audio output device impl using [cpal](https://github.com/RustAudio/cpal).
 pub struct CpalOutput {
+    is_running: bool,
     channel_count: cpal::ChannelCount,
     sample_rate: cpal::SampleRate,
     volume: f32,
-    is_running: bool,
     playback_pos: Arc<AtomicU64>,
-    callback_send: Sender<CallbackMsg>,
-    stream_send: Sender<StreamMsg>,
-    _handle: ActorHandle<StreamMsg>,
+    callback_sender: Sender<CallbackMessage>,
+    stream_sender: Sender<StreamMessage>,
+    #[allow(unused)]
+    stream_handle: StreamThreadHandle,
 }
 
 impl CpalOutput {
@@ -91,38 +92,44 @@ impl CpalOutput {
         // default volume
         let volume = 1.0;
 
-        // channel to send and receive callback messagess
-        let (callback_send, callback_recv) = bounded(16);
+        // channel to send and receive callback messages
+        let (callback_sender, callback_receiver) = bounded(16);
 
-        let handle = Stream::spawn_with_default_cap("audio_output", {
+        let stream_handle = Stream::spawn({
             let config = cpal::StreamConfig {
                 buffer_size: PREFERRED_BUFFER_SIZE,
                 ..supported.config()
             };
             let sample_format = supported.sample_format();
             let playback_pos = Arc::clone(&playback_pos);
-            move |this| {
+            move |stream_sender| {
                 Stream::open(
                     device,
                     config,
                     sample_format,
                     playback_pos,
                     volume,
-                    callback_recv,
-                    this,
+                    callback_receiver,
+                    stream_sender,
                 )
                 .expect("Failed to open audio stream")
             }
         });
+
+        let is_running = false;
+        let channel_count = supported.channels();
+        let sample_rate = supported.sample_rate();
+        let stream_sender = stream_handle.sender();
+
         Ok(Self {
-            channel_count: supported.channels(),
-            sample_rate: supported.sample_rate(),
-            is_running: false,
+            is_running,
+            channel_count,
+            sample_rate,
             volume,
             playback_pos,
-            stream_send: handle.sender(),
-            callback_send,
-            _handle: handle,
+            stream_sender,
+            callback_sender,
+            stream_handle,
         })
     }
 
@@ -142,14 +149,14 @@ impl CpalOutput {
         Ok(device.default_output_config()?)
     }
 
-    fn send_to_callback(&self, msg: CallbackMsg) {
-        if self.callback_send.send(msg).is_err() {
+    fn send_to_callback(&self, msg: CallbackMessage) {
+        if self.callback_sender.send(msg).is_err() {
             log::error!("output stream actor is dead");
         }
     }
 
-    fn send_to_stream(&self, msg: StreamMsg) {
-        if self.stream_send.send(msg).is_err() {
+    fn send_to_stream(&self, msg: StreamMessage) {
+        if self.stream_sender.send(msg).is_err() {
             log::error!("output stream actor is dead");
         }
     }
@@ -173,7 +180,7 @@ impl OutputDevice for CpalOutput {
     }
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume;
-        self.send_to_callback(CallbackMsg::SetVolume(volume));
+        self.send_to_callback(CallbackMessage::SetVolume(volume));
     }
 
     fn is_suspended(&self) -> bool {
@@ -185,13 +192,13 @@ impl OutputDevice for CpalOutput {
     }
     fn pause(&mut self) {
         self.is_running = false;
-        self.send_to_stream(StreamMsg::Pause);
-        self.send_to_callback(CallbackMsg::Pause);
+        self.send_to_stream(StreamMessage::Pause);
+        self.send_to_callback(CallbackMessage::Pause);
     }
 
     fn resume(&mut self) {
-        self.send_to_stream(StreamMsg::Resume);
-        self.send_to_callback(CallbackMsg::Resume);
+        self.send_to_stream(StreamMessage::Resume);
+        self.send_to_callback(CallbackMessage::Resume);
         self.is_running = true;
     }
 
@@ -200,7 +207,7 @@ impl OutputDevice for CpalOutput {
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
         // send message to activate it in the writer
-        self.send_to_callback(CallbackMsg::PlaySource(source));
+        self.send_to_callback(CallbackMessage::PlaySource(source));
         // auto-start with the first set source
         if !self.is_running {
             self.resume();
@@ -208,18 +215,32 @@ impl OutputDevice for CpalOutput {
     }
 
     fn stop(&mut self) {
-        self.send_to_callback(CallbackMsg::PlaySource(Box::new(EmptySource)));
+        self.send_to_callback(CallbackMessage::PlaySource(Box::new(EmptySource)));
     }
 
     fn close(&mut self) {
-        self.send_to_stream(StreamMsg::Close);
+        self.send_to_stream(StreamMessage::Close);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+struct StreamThreadHandle {
+    sender: Sender<StreamMessage>,
+    #[allow(dead_code)]
+    thread: JoinHandle<()>,
+}
+
+impl StreamThreadHandle {
+    pub fn sender(&self) -> Sender<StreamMessage> {
+        self.sender.clone()
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
 #[derive(PartialEq)]
-enum StreamMsg {
+enum StreamMessage {
     Pause,
     Resume,
     Close,
@@ -227,7 +248,7 @@ enum StreamMsg {
 
 // -------------------------------------------------------------------------------------------------
 
-enum CallbackMsg {
+enum CallbackMessage {
     PlaySource(Box<dyn Source>),
     SetVolume(f32),
     Pause,
@@ -258,12 +279,12 @@ impl Stream {
         sample_format: cpal::SampleFormat,
         playback_pos: Arc<AtomicU64>,
         volume: f32,
-        callback_recv: Receiver<CallbackMsg>,
-        stream_send: Sender<StreamMsg>,
+        callback_receiver: Receiver<CallbackMessage>,
+        stream_sender: Sender<StreamMessage>,
     ) -> Result<Self, Error> {
         let mut callback = StreamCallback {
-            stream_send,
-            callback_recv,
+            stream_sender,
+            callback_receiver,
             source: Box::new(EmptySource),
             playback_pos,
             playback_pos_instant: Instant::now(),
@@ -353,32 +374,44 @@ impl Stream {
             None,
         )
     }
-}
 
-impl Actor for Stream {
-    type Message = StreamMsg;
-    type Error = Error;
+    fn spawn<F>(factory: F) -> StreamThreadHandle
+    where
+        F: FnOnce(Sender<StreamMessage>) -> Self + Send + 'static,
+    {
+        let (send, receiver) = bounded(32);
+        StreamThreadHandle {
+            sender: send.clone(),
+            thread: thread::Builder::new()
+                .name("audio_output".to_string())
+                .spawn(move || {
+                    let this = factory(send);
+                    this.process_messages(receiver);
+                })
+                .expect("failed to spawn audio thread"),
+        }
+    }
 
-    fn handle(&mut self, msg: Self::Message) -> Result<Act<Self>, Self::Error> {
-        match msg {
-            StreamMsg::Pause => {
-                log::debug!("pausing audio output stream");
-                if let Err(err) = self.stream.pause() {
-                    log::error!("failed to stop stream: {err}");
+    fn process_messages(self, receiver: Receiver<StreamMessage>) {
+        while let Ok(msg) = receiver.recv() {
+            match msg {
+                StreamMessage::Pause => {
+                    log::debug!("pausing audio output stream");
+                    if let Err(err) = self.stream.pause() {
+                        log::error!("failed to stop stream: {err}");
+                    }
                 }
-                Ok(Act::Continue)
-            }
-            StreamMsg::Resume => {
-                log::debug!("resuming audio output stream");
-                if let Err(err) = self.stream.play() {
-                    log::error!("failed to start stream: {err}");
+                StreamMessage::Resume => {
+                    log::debug!("resuming audio output stream");
+                    if let Err(err) = self.stream.play() {
+                        log::error!("failed to start stream: {err}");
+                    }
                 }
-                Ok(Act::Continue)
-            }
-            StreamMsg::Close => {
-                log::debug!("closing audio output stream");
-                let _ = self.stream.pause();
-                Ok(Act::Shutdown)
+                StreamMessage::Close => {
+                    log::debug!("closing audio output stream");
+                    let _ = self.stream.pause();
+                    break;
+                }
             }
         }
     }
@@ -388,8 +421,8 @@ impl Actor for Stream {
 
 struct StreamCallback {
     #[allow(dead_code)]
-    stream_send: Sender<StreamMsg>,
-    callback_recv: Receiver<CallbackMsg>,
+    stream_sender: Sender<StreamMessage>,
+    callback_receiver: Receiver<CallbackMessage>,
     source: Box<dyn Source>,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
@@ -448,18 +481,18 @@ impl StreamCallback {
 
     fn process_messages(&mut self) {
         // Process any pending data messages.
-        while let Ok(msg) = self.callback_recv.try_recv() {
+        while let Ok(msg) = self.callback_receiver.try_recv() {
             match msg {
-                CallbackMsg::PlaySource(src) => {
+                CallbackMessage::PlaySource(src) => {
                     self.source = src;
                 }
-                CallbackMsg::SetVolume(volume) => {
+                CallbackMessage::SetVolume(volume) => {
                     self.volume.set_target(volume);
                 }
-                CallbackMsg::Pause => {
+                CallbackMessage::Pause => {
                     self.state = CallbackState::Paused;
                 }
-                CallbackMsg::Resume => {
+                CallbackMessage::Resume => {
                     self.state = CallbackState::Playing;
                 }
             }
