@@ -8,110 +8,10 @@ use crate::{
     utils::{
         buffer::{copy_buffers, InterleavedBuffer, InterleavedBufferMut},
         db_to_linear,
+        dsp::{delay::LookupDelayLine, envelope::EnvelopeFollower},
     },
     ClonableParameter, Error,
 };
-
-// -------------------------------------------------------------------------------------------------
-
-struct DelayLine<const CHANNELS: usize> {
-    buffer: Vec<f32>,
-    write_pos: usize,
-    buffer_mask: usize,
-    delay_frames: usize,
-    peak_value: f32,
-    peak_pos: usize,
-}
-
-impl<const CHANNELS: usize> DelayLine<CHANNELS> {
-    fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            write_pos: 0,
-            buffer_mask: 0,
-            delay_frames: 0,
-            peak_value: 0.0,
-            peak_pos: 0,
-        }
-    }
-
-    fn initialize(&mut self, sample_rate: u32, delay_time: f32) {
-        self.delay_frames = (delay_time * sample_rate as f32).ceil() as usize;
-
-        if self.delay_frames > 0 {
-            let buffer_frames = self.delay_frames.next_power_of_two();
-            self.buffer = vec![0.0; buffer_frames * CHANNELS];
-            self.buffer_mask = buffer_frames - 1;
-        } else {
-            self.buffer.clear();
-            self.buffer_mask = 0;
-        }
-        self.write_pos = 0;
-        self.peak_value = 0.0;
-        self.peak_pos = 0;
-    }
-
-    /// Process one frame. Writes the input frame to the delay line and returns the delayed frame.
-    fn process(&mut self, input_frame: &[f32; CHANNELS]) -> [f32; CHANNELS] {
-        if self.delay_frames == 0 {
-            return *input_frame;
-        }
-
-        // Read delayed frame from buffer
-        let buffer_frames = self.buffer.len() / CHANNELS;
-        let read_frame_index =
-            (self.write_pos + buffer_frames - self.delay_frames) & self.buffer_mask;
-        let read_sample_index = read_frame_index * CHANNELS;
-
-        let mut delayed_frame = [0.0; CHANNELS];
-        delayed_frame
-            .copy_from_slice(&self.buffer[read_sample_index..read_sample_index + CHANNELS]);
-
-        // Write current frame to buffer
-        let write_sample_index = self.write_pos * CHANNELS;
-        self.buffer[write_sample_index..write_sample_index + CHANNELS].copy_from_slice(input_frame);
-
-        // update peak
-        let peak_expired = self.peak_pos == read_frame_index;
-        let new_peak = input_frame
-            .iter()
-            .fold(0.0f32, |max, &val| max.max(val.abs()));
-
-        if new_peak >= self.peak_value {
-            // New frame is the new peak.
-            self.peak_value = new_peak;
-            self.peak_pos = self.write_pos;
-        } else if peak_expired {
-            // Old peak expired and new frame is not the peak, so we must rescan.
-            self.peak_value = 0.0;
-            let buffer_frames = self.buffer.len() / CHANNELS;
-
-            // The lookahead window is the last `delay_frames` that were written.
-            // `write_pos` points to the most recently written frame.
-            for i in 0..self.delay_frames {
-                let frame_index = (self.write_pos + buffer_frames - i) & self.buffer_mask;
-                let sample_index = frame_index * CHANNELS;
-                let frame_peak = self.buffer[sample_index..sample_index + CHANNELS]
-                    .iter()
-                    .fold(0.0f32, |max, &val| max.max(val.abs()));
-                if frame_peak >= self.peak_value {
-                    self.peak_value = frame_peak;
-                    self.peak_pos = frame_index;
-                }
-            }
-        }
-
-        // Increment write position
-        self.write_pos = (self.write_pos + 1) & self.buffer_mask;
-
-        delayed_frame
-    }
-
-    /// Returns the absolute peak value in the delay line.
-    fn peak_value(&self) -> f32 {
-        self.peak_value
-    }
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -132,11 +32,9 @@ pub struct CompressorEffect {
     makeup_gain: SmoothedParameterValue,
     lookahead_time: FloatParameterValue,
     // Internal state
-    current_envelope: f32,
-    attack_coeff: f32,
-    release_coeff: f32,
+    envelope_follower: EnvelopeFollower,
     input_buffer: Vec<f32>,
-    delay_line: DelayLine<2>,
+    delay_line: LookupDelayLine<2>,
 }
 
 impl CompressorEffect {
@@ -234,11 +132,9 @@ impl CompressorEffect {
                 )
                 .with_unit("ms"),
             ),
-            current_envelope: 0.0,
-            attack_coeff: 0.0,
-            release_coeff: 0.0,
+            envelope_follower: EnvelopeFollower::default(),
             input_buffer: Vec::new(),
-            delay_line: DelayLine::<2>::new(),
+            delay_line: LookupDelayLine::<2>::default(),
         }
     }
 
@@ -288,20 +184,12 @@ impl CompressorEffect {
         )
     }
 
-    fn update_coeffs(&mut self) {
+    fn update_envelope_follower(&mut self) {
         if self.sample_rate > 0 {
-            // Convert time constants to coefficients
-            // Using the standard formula: coeff = 1 - exp(-1 / (time * sample_rate))
-            self.attack_coeff = if self.attack_time.value() > 0.0 {
-                (-1.0 / (self.attack_time.value() * self.sample_rate as f32)).exp()
-            } else {
-                0.0
-            };
-            self.release_coeff = if self.release_time.value() > 0.0 {
-                (-1.0 / (self.release_time.value() * self.sample_rate as f32)).exp()
-            } else {
-                0.0
-            };
+            self.envelope_follower
+                .set_attack_time(self.attack_time.value());
+            self.envelope_follower
+                .set_release_time(self.release_time.value());
         }
     }
 }
@@ -346,15 +234,19 @@ impl Effect for CompressorEffect {
         self.makeup_gain.set_sample_rate(sample_rate);
 
         self.input_buffer = vec![0.0; max_frames * channel_count];
-        self.delay_line
-            .initialize(sample_rate, self.lookahead_time.value());
-        self.current_envelope = if self.ratio.value() >= 20.0 {
+        self.delay_line = LookupDelayLine::new(sample_rate, self.lookahead_time.value());
+
+        self.envelope_follower = EnvelopeFollower::new(
+            sample_rate,
+            self.attack_time.value(),
+            self.release_time.value(),
+        );
+        let initial_envelope = if self.ratio.value() >= 20.0 {
             -120.0
         } else {
             0.0
         };
-
-        self.update_coeffs();
+        self.envelope_follower.reset(initial_envelope);
 
         Ok(())
     }
@@ -390,17 +282,10 @@ impl Effect for CompressorEffect {
                 }
             };
 
-            // Envelope follower
-            if input_db > self.current_envelope {
-                self.current_envelope =
-                    input_db + self.attack_coeff * (self.current_envelope - input_db);
-            } else {
-                self.current_envelope =
-                    input_db + self.release_coeff * (self.current_envelope - input_db);
-            }
+            // Process envelope
+            let envelope = self.envelope_follower.process(input_db);
 
             // Gain reduction calculation
-            let envelope = self.current_envelope;
             let t = self.threshold.value();
             let w = self.knee_width.value();
             let slope = if self.ratio.value() >= 20.0 {
@@ -453,10 +338,9 @@ impl Effect for CompressorEffect {
                 )))
             }
         }
-        self.update_coeffs();
+        self.update_envelope_follower();
         if self.lookahead_time.value() != old_lookahead && self.sample_rate > 0 {
-            self.delay_line
-                .initialize(self.sample_rate, self.lookahead_time.value());
+            self.delay_line = LookupDelayLine::new(self.sample_rate, self.lookahead_time.value());
         }
         Ok(())
     }
