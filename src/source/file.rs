@@ -1,7 +1,3 @@
-pub mod common;
-pub mod preloaded;
-pub mod streamed;
-
 use std::{path::Path, sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
@@ -14,6 +10,14 @@ use crate::{
 };
 
 use self::{preloaded::PreloadedFileSource, streamed::StreamedFileSource};
+
+// -------------------------------------------------------------------------------------------------
+
+pub mod common;
+pub mod preloaded;
+pub mod streamed;
+
+pub(crate) mod decoder;
 
 // -------------------------------------------------------------------------------------------------
 

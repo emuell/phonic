@@ -4,7 +4,10 @@ use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use symphonia::core::audio::SampleBuffer;
 
-use super::{common::FileSourceImpl, FilePlaybackMessage, FilePlaybackOptions, FileSource};
+use super::{
+    common::FileSourceImpl, decoder::AudioDecoder, FilePlaybackMessage, FilePlaybackOptions,
+    FileSource,
+};
 
 use crate::{
     error::Error,
@@ -12,7 +15,7 @@ use crate::{
         file::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
         Source, SourceTime,
     },
-    utils::{buffer::clear_buffer, decoder::AudioDecoder, fader::FaderState},
+    utils::{buffer::clear_buffer, fader::FaderState},
 };
 
 // -------------------------------------------------------------------------------------------------
