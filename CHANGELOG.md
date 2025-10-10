@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.0 - 2025/10/10
+
+- finalized effect traits and implemented basic set of stock effects: gain, filter, EQ, reverb, chorus, compressor, limiter and distortion
+- updated emscripten example to test and showcase effects
+
 ## v0.10.0 - 2025/09/27
 
 - only enable audio codecs and format features in symphonia, skip video containers, to reduce bloat
