@@ -1,5 +1,5 @@
-//! **phonic** is a cross-platform audio playback and DSP library for Rust, providing a flexible,
-//! low-latency audio engine and related tools for games and music applications.
+//! **phonic** is a cross-platform audio playback and DSP library for Rust. It provides a flexible,
+//! low-latency audio engine and related tools for desktop and web-based music applications
 //!
 //! ### Overview
 //!
@@ -29,34 +29,37 @@
 //! ```rust,no_run
 //! use phonic::{
 //!     DefaultOutputDevice, Player, FilePlaybackOptions, Error,
-//!     effects::{ReverbEffect, CompressorEffect},
+//!     effects::{ChorusEffect, ReverbEffect, CompressorEffect},
 //! };
 //!
 //! fn main() -> Result<(), Error> {
-//!     // Open the default audio output device.
-//!     let output_device = DefaultOutputDevice::open()?;
-//!     // Create a player for the given output device.
-//!     let mut player = Player::new(output_device, None);
+//!     // Create a player with the default audio output device.
+//!     let mut player = Player::new(DefaultOutputDevice::open()?, None);
 //!
-//!     // Add a new sub-mixer to the main mixer.
-//!     let sub_mixer_id = player.add_mixer(None)?;
-//!     // Add a reverb effect to this mixer.
-//!     player.add_effect(ReverbEffect::default(), sub_mixer_id)?;
+//!     // Add a new sub-mixer with a chorus and reverb effect to the main mixer.
+//!     let sub_mixer_id = {
+//!         let mixer_id = player.add_mixer(None)?;
+//!         player.add_effect(ChorusEffect::default(), mixer_id)?;
+//!         player.add_effect(ReverbEffect::default(), mixer_id)?;
+//!         mixer_id
+//!     };
 //!
 //!     // Add a limiter to the main mixer. All sounds, including the sub mixer's output
 //!     // will be routed through this effect now.
 //!     player.add_effect(CompressorEffect::new_limiter(), None)?;
 //!
-//!     // Play a file with default options on the sub mixer. It will start playing immediately.
+//!     // Play a file with default options on the sub mixer. It will start playing immediately
+//!     // and will be routed through a chorus and reverb effect and the main mixer's limiter.
 //!     player.play_file("path/to/your/file.wav",
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
 //!     )?;
-//!     // Play a file with default options on the main mixer and schedule it to be played
-//!     // two seconds ahead of the current output time.
+//!
+//!     // Play a file with default options on the main mixer and schedule it two seconds ahead
+//!     // of the current output time. It will be routed through the limiter effect only.
+//!     let sample_rate = player.output_sample_rate() as u64;
 //!     player.play_file("path/to/your/some_other_file.wav",
-//!       FilePlaybackOptions::default()
-//!         .start_at_time(player.output_sample_frame_position() +
-//!            2 * player.output_sample_rate() as u64)
+//!       FilePlaybackOptions::default().start_at_time(
+//!         player.output_sample_frame_position() + 2 * sample_rate)
 //!     )?;
 //!
 //!     // The player's audio output stream runs on a separate thread, so we need to keep
@@ -80,7 +83,10 @@
     feature(macro_metavar_expr_concat)
 )]
 
-// private mods (will be partly re-exported)
+// -------------------------------------------------------------------------------------------------
+
+// private mods (partly re-exported)
+
 mod effect;
 mod error;
 mod output;
@@ -111,7 +117,10 @@ pub use source::{
     Source, SourceTime,
 };
 
+// -------------------------------------------------------------------------------------------------
+
 // public, modularized re-exports (common trait impls)
+
 pub mod outputs {
     //! Default [`OutputDevice`](super::OutputDevice) implementations.
 
@@ -129,6 +138,7 @@ pub mod outputs {
 
 pub mod sources {
     //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
+
     pub use super::source::file::{
         common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
     };
@@ -139,6 +149,7 @@ pub mod sources {
 
 pub mod parameters {
     //! Effect [`Parameter`](super::Parameter) implementations.
+
     pub use super::parameter::{
         BooleanParameter, BooleanParameterValue, EnumParameter, EnumParameterValue, FloatParameter,
         FloatParameterValue, IntegerParameter, IntegerParameterValue, SmoothedParameterValue,
@@ -147,6 +158,7 @@ pub mod parameters {
 
 pub mod effects {
     //! Set of basic, common DSP [`Effect`](super::Effect) implementations.
+
     pub use super::effect::{
         chorus::{ChorusEffect, ChorusEffectFilterType, ChorusEffectMessage},
         compressor::CompressorEffect,
@@ -158,5 +170,9 @@ pub mod effects {
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }
+
+// -------------------------------------------------------------------------------------------------
+
+// public mods
 
 pub mod utils;

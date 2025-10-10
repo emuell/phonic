@@ -28,8 +28,8 @@ use crate::{
         panned::{PannedSource, PannedSourceMessage},
         resampled::ResamplingQuality,
         synth::{SynthPlaybackMessage, SynthSource},
+        unique_source_id,
     },
-    utils::unique_usize_id,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -416,7 +416,7 @@ impl Player {
             self.output_sample_rate(),
         ));
         let new_mixer_queue = new_mixer.message_queue();
-        let new_mixer_id = unique_usize_id();
+        let new_mixer_id = unique_source_id();
 
         // Send message to parent mixer
         if parent_mixer_event_queue
@@ -549,7 +549,7 @@ impl Player {
         let mut effect = Box::new(effect);
         effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
 
-        let id = unique_usize_id();
+        let id = unique_source_id();
         if mixer_event_queue
             .push(MixerMessage::AddEffect { id, effect })
             .is_err()

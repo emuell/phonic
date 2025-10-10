@@ -17,7 +17,7 @@ use super::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A synth generator which runs a dasp `Signal` until it is exhausted.
+/// A synth generator which runs a dasp [`Signal`] until it is exhausted.
 pub struct DaspSynthGenerator<SignalType>
 where
     SignalType: Signal<Frame = f64>,
@@ -148,13 +148,14 @@ impl Player {
     /// create one-shots.
     ///
     /// Example one-shot signal:
-    /// ```ignore
-    /// dasp::signal::from_iter(
-    ///     dasp::signal::rate(sample_rate as f64)
+    /// ```rust, no_run
+    /// use dasp::{Signal, signal};
+    /// let signal = signal::from_iter(
+    ///     signal::rate(44100.0)
     ///         .const_hz(440.0)
     ///         .sine()
-    ///         .take(sample_rate as usize * 2),
-    /// )
+    ///         .take(44100 * 2)
+    /// );
     /// ```
     /// which plays a sine wave at 440 hz for 2 seconds.
     #[cfg(feature = "dasp")]

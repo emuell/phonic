@@ -1,17 +1,17 @@
+use four_cc::FourCC;
+use rand::Rng;
+use std::any::Any;
+
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
     parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
-        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-        ExponentialSmoothedValue, InterleavedBufferMut, LinearSmoothedValue,
+        buffer::InterleavedBufferMut,
+        dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        smoothing::{ExponentialSmoothedValue, LinearSmoothedValue},
     },
     ClonableParameter, Error,
 };
-
-use core::f32;
-use four_cc::FourCC;
-use rand::Rng;
-use std::any::Any;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -33,22 +33,22 @@ impl EffectMessage for ReverbEffectMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A stereo reverb effect ported from [Airwindows' "Reverb" plugin](https://www.airwindows.com/reverb/).
+/// Stereo reverb effect ported from [Airwindows' Reverb plugin](https://www.airwindows.com/reverb/).
 pub struct ReverbEffect {
     sample_rate: u32,
     channel_count: usize,
     room_size: SmoothedParameterValue<LinearSmoothedValue>,
     wet: SmoothedParameterValue<ExponentialSmoothedValue>,
 
-    biquad_a_coefficients: SvfFilterCoefficients,
-    biquad_a_l: SvfFilter,
-    biquad_a_r: SvfFilter,
-    biquad_b_coefficients: SvfFilterCoefficients,
-    biquad_b_l: SvfFilter,
-    biquad_b_r: SvfFilter,
-    biquad_c_coefficients: SvfFilterCoefficients,
-    biquad_c_l: SvfFilter,
-    biquad_c_r: SvfFilter,
+    biquad_a_coefficients: BiquadFilterCoefficients,
+    biquad_a_l: BiquadFilter,
+    biquad_a_r: BiquadFilter,
+    biquad_b_coefficients: BiquadFilterCoefficients,
+    biquad_b_l: BiquadFilter,
+    biquad_b_r: BiquadFilter,
+    biquad_c_coefficients: BiquadFilterCoefficients,
+    biquad_c_l: BiquadFilter,
+    biquad_c_r: BiquadFilter,
 
     a_al: Vec<f64>,
     a_ar: Vec<f64>,
@@ -209,15 +209,15 @@ impl ReverbEffect {
                 .with_unit("%")
                 .with_display(to_string_percent, from_string_percent),
             ),
-            biquad_a_coefficients: SvfFilterCoefficients::default(),
-            biquad_a_l: SvfFilter::default(),
-            biquad_a_r: SvfFilter::default(),
-            biquad_b_coefficients: SvfFilterCoefficients::default(),
-            biquad_b_l: SvfFilter::default(),
-            biquad_b_r: SvfFilter::default(),
-            biquad_c_coefficients: SvfFilterCoefficients::default(),
-            biquad_c_l: SvfFilter::default(),
-            biquad_c_r: SvfFilter::default(),
+            biquad_a_coefficients: BiquadFilterCoefficients::default(),
+            biquad_a_l: BiquadFilter::default(),
+            biquad_a_r: BiquadFilter::default(),
+            biquad_b_coefficients: BiquadFilterCoefficients::default(),
+            biquad_b_l: BiquadFilter::default(),
+            biquad_b_r: BiquadFilter::default(),
+            biquad_c_coefficients: BiquadFilterCoefficients::default(),
+            biquad_c_l: BiquadFilter::default(),
+            biquad_c_r: BiquadFilter::default(),
             a_al: vec![0.0; A_AL_SIZE],
             a_ar: vec![0.0; A_AL_SIZE],
             a_bl: vec![0.0; A_BL_SIZE],
@@ -418,7 +418,7 @@ impl Effect for ReverbEffect {
         let cutoff = (10000.0 - (room_size * wet * 3000.0)) as f32;
         self.biquad_a_coefficients
             .set(
-                SvfFilterType::Lowpass,
+                BiquadFilterType::Lowpass,
                 self.sample_rate,
                 cutoff,
                 1.618034,
@@ -427,7 +427,7 @@ impl Effect for ReverbEffect {
             .unwrap();
         self.biquad_b_coefficients
             .set(
-                SvfFilterType::Lowpass,
+                BiquadFilterType::Lowpass,
                 self.sample_rate,
                 cutoff,
                 0.618034,
@@ -437,7 +437,7 @@ impl Effect for ReverbEffect {
         self.biquad_c_coefficients
             .set(
                 //
-                SvfFilterType::Lowpass,
+                BiquadFilterType::Lowpass,
                 self.sample_rate,
                 cutoff,
                 0.5,
@@ -774,7 +774,12 @@ impl Effect for ReverbEffect {
         match id {
             Self::ROOM_SIZE_ID => self.room_size.apply_update(value),
             Self::WET_ID => self.wet.apply_update(value),
-            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
         }
         Ok(())
     }

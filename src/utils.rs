@@ -1,56 +1,20 @@
-//! Audio and DSP helper functions to e.g. convert musical units, apply smoothed value changes
-//! and to generate audio waveforms for GUIs.
-
-use std::sync::atomic::{AtomicUsize, Ordering};
+//! DSP tools, musical unit conversion functions and related UI tools.
 
 // -------------------------------------------------------------------------------------------------
 
-pub(crate) mod buffer;
+pub(crate) mod dsp;
 pub(crate) mod event;
 pub(crate) mod fader;
-pub(crate) mod filter;
 pub(crate) mod resampler;
-pub(crate) mod smoothed;
-pub(crate) mod wave;
 
-/// Interleaved buffer helpers.
-pub use buffer::{InterleavedBuffer, InterleavedBufferMut};
-
-/// Volume and generic value smoothing helpers.
-pub use fader::VolumeFader;
-pub use smoothed::{
-    apply_smoothed_gain, apply_smoothed_panning, ExponentialSmoothedValue, LinearSmoothedValue,
-    SigmoidSmoothedValue, SmoothedValue,
-};
-
-/// Basic DSP filter set for custom effects and sources.
-pub mod filters {
-    pub use super::filter::{
-        dc::{DcFilter, DcFilterMode},
-        svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-    };
-}
-
-/// Convert raw audio buffers to audio waveforms for GUIs.
-pub mod waveform {
-    pub use super::wave::{
-        mixed_down_waveform as mixed_down, multi_channel_waveform as multi_channel,
-        WaveformPoint as Point,
-    };
-}
+pub mod buffer;
+pub mod smoothing;
+pub mod waveform;
 
 // -------------------------------------------------------------------------------------------------
 
 /// dB value, which is treated as zero volume factor  
 const MINUS_INF_IN_DB: f32 = -200.0f32;
-
-// -------------------------------------------------------------------------------------------------
-
-/// Generates a unique usize number, by simply counting atomically upwards from 1.
-pub(crate) fn unique_usize_id() -> usize {
-    static FILE_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
-    FILE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -84,7 +48,7 @@ pub fn db_to_linear(value: f32) -> f32 {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Convert a -1..=1 ranged pan factor to a constant power L/R channel volume factors
+/// Convert a \[-1,1\] ranged pan factor to a constant power L/R channel volume factors
 pub fn panning_factors(pan_factor: f32) -> (f32, f32) {
     const POWER: f32 = std::f32::consts::FRAC_1_SQRT_2; // 1/√2
     let normalized = (pan_factor.clamp(-1.0, 1.0) + 1.0) / 2.0;

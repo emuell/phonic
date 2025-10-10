@@ -1,6 +1,8 @@
+//! Volume fading, de-clicking tools.
+
 use std::time::Duration;
 
-use super::buffer::scale_buffer;
+use crate::utils::buffer::scale_buffer;
 
 // -------------------------------------------------------------------------------------------------
 

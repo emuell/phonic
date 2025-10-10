@@ -1,8 +1,9 @@
 use rubato::{SincFixedIn, SincInterpolationParameters, SincInterpolationType, VecResampler};
 
+use super::{AudioResampler, ResamplingSpecs};
+
 use crate::{
     utils::buffer::{interleaved_to_planar, planar_to_interleaved, TempBuffer},
-    utils::resampler::{AudioResampler, ResamplingSpecs},
     Error,
 };
 

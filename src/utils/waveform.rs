@@ -1,4 +1,4 @@
-//! Helper functions to generate audio waveforms for display purposes.<br>
+//! Helper functions to generate audio waveforms for display purposes.
 //!
 //! ## Example
 //!
@@ -7,7 +7,7 @@
 //!
 //! ```rust no_run
 //! use svg::{node::element::{path::Data, Path}, Document};
-//! use phonic::utils::waveform::mixed_down;
+//! use phonic::utils::waveform;
 //!
 //! # fn main() { || -> Result<(), Box<dyn std::error::Error>> {
 //! #
@@ -25,7 +25,7 @@
 //!     .collect();
 //!
 //! // generate mixed-down, mono waveform data with WIDTH as resolution
-//! let waveform_data = mixed_down(
+//! let waveform_data = waveform::mixed_down(
 //!     &buffer,
 //!     specs.channels as usize,
 //!     specs.sample_rate,
@@ -69,7 +69,7 @@ use std::time::Duration;
 /// the specified time as min/max values.
 /// The slice width is indirectly specified via the resolution parameter when generating the points.
 #[derive(Default, Clone)]
-pub struct WaveformPoint {
+pub struct Point {
     /// Start time this point refers to in the original sample buffer.
     pub time: Duration,
     /// The minimum of all values which are represented by this time slice.
@@ -90,12 +90,12 @@ pub struct WaveformPoint {
 /// downscaled version of the original waveform data.
 ///
 /// The resulting plot point's min/max values have the same range than the input signal.
-pub fn mixed_down_waveform(
+pub fn mixed_down(
     buffer: &[f32],
     channel_count: usize,
     samples_per_sec: u32,
     resolution: usize,
-) -> Vec<WaveformPoint> {
+) -> Vec<Point> {
     let frame_count = buffer.len() / channel_count;
     let mut waveform = Vec::with_capacity(frame_count);
 
@@ -106,7 +106,7 @@ pub fn mixed_down_waveform(
                 .iter()
                 .copied()
                 .fold(0.0, |accum, iter| accum + iter / channel_count as f32);
-            waveform.push(WaveformPoint {
+            waveform.push(Point {
                 time: Duration::from_secs_f32(frame_index as f32 / samples_per_sec as f32),
                 min: mono_value,
                 max: mono_value,
@@ -131,7 +131,7 @@ pub fn mixed_down_waveform(
                 min = min.min(mono_value);
                 max = max.max(mono_value);
             }
-            waveform.push(WaveformPoint {
+            waveform.push(Point {
                 time: Duration::from_secs_f32(
                     slice_start as f32 / channel_count as f32 / samples_per_sec as f32,
                 ),
@@ -148,14 +148,14 @@ pub fn mixed_down_waveform(
 /// Generates display data for waveform plots from the given interleaved buffer with the given
 /// signal specs and resolution.
 ///
-/// See [`mixed_down_waveform`] for more info about the `resolution` parameter.
+/// See [`mixed_down`] for more info about the `resolution` parameter.
 /// The resulting plot point's min/max values are used the same range as the buffer values.
-pub fn multi_channel_waveform(
+pub fn multi_channel(
     buffer: &[f32],
     channel_count: usize,
     samples_per_sec: u32,
     resolution: usize,
-) -> Vec<Vec<WaveformPoint>> {
+) -> Vec<Vec<Point>> {
     let frame_count = buffer.len() / channel_count;
     let mut waveform = vec![Vec::with_capacity(frame_count); channel_count];
 
@@ -164,7 +164,7 @@ pub fn multi_channel_waveform(
         for (frame_index, frame) in buffer.chunks_exact(channel_count).enumerate() {
             let time = Duration::from_secs_f32(frame_index as f32 / samples_per_sec as f32);
             for (channel_index, value) in frame.iter().enumerate() {
-                waveform[channel_index].push(WaveformPoint {
+                waveform[channel_index].push(Point {
                     time,
                     min: *value,
                     max: *value,
@@ -192,7 +192,7 @@ pub fn multi_channel_waveform(
                 slice_start as f32 / channel_count as f32 / samples_per_sec as f32,
             );
             for channel_index in 0..channel_count {
-                waveform[channel_index].push(WaveformPoint {
+                waveform[channel_index].push(Point {
                     time,
                     min: min[channel_index],
                     max: max[channel_index],
@@ -207,8 +207,7 @@ pub fn multi_channel_waveform(
 
 #[cfg(test)]
 mod tests {
-    use super::mixed_down_waveform as mixed_down;
-    use super::multi_channel_waveform as multi_channel;
+    use super::*;
 
     #[test]
     fn waveform() {

@@ -1,8 +1,11 @@
-use super::{Source, SourceTime};
-
-use crate::utils::{
-    buffer::{clear_buffer, TempBuffer},
-    resampler::{cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs},
+use crate::{
+    utils::{
+        buffer::{clear_buffer, TempBuffer},
+        resampler::{
+            cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
+        },
+    },
+    Source, SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------

@@ -156,7 +156,7 @@ pub fn copy_buffers_with_simd<'a, S: Simd>(_simd: S, dest: &'a mut [f32], source
 /// # Examples
 ///
 /// ```
-/// use phonic::utils::InterleavedBuffer;
+/// use phonic::utils::buffer::InterleavedBuffer;
 ///
 /// let buffer: &[f32] = &[
 ///     0.1, 0.2, // Frame 0
@@ -244,19 +244,22 @@ pub trait InterleavedBuffer<'a> {
 /// # Examples
 ///
 /// ```
-/// use phonic::utils::{InterleavedBuffer, InterleavedBufferMut};
+/// use phonic::utils::buffer::{InterleavedBuffer, InterleavedBufferMut};
 ///
 /// let mut buffer: Vec<f32> = vec![
 ///     0.1, 0.2, // Frame 0
 ///     0.3, 0.4, // Frame 1
 /// ];
 ///
-/// // Get mutable access to frames and modify them
+/// // Get mutable access to sample frames and modify them
 /// for frame in buffer.as_frames_mut::<2>() {
 ///     frame[0] *= 2.0; // Double the left channel
 ///     frame[1] *= 0.5; // Halve the right channel
 /// }
-/// assert_eq!(buffer, vec![0.2, 0.1, 0.6, 0.2]);
+/// assert_eq!(buffer, vec![
+///     0.2, 0.1, // Frame 0
+///     0.6, 0.2  // Frame 1
+/// ]);
 /// ```
 pub trait InterleavedBufferMut<'a>: InterleavedBuffer<'a> {
     /// Raw mut access to the buffer slice.
@@ -371,8 +374,7 @@ impl<'a> InterleavedBufferMut<'a> for Vec<f32> {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A preallocated buffer slice with persistent start/end positions and helper functions,
-/// which are useful for temporary interleaved sample buffers.
+/// A preallocated buffer slice with persistent start/end positions and helper functions.
 #[derive(Clone, Debug)]
 pub struct TempBuffer {
     buffer: Vec<f32>,

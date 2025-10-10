@@ -1,7 +1,7 @@
+use assume::assume;
+
 use super::{AudioResampler, ResamplingSpecs};
 use crate::Error;
-
-use assume::assume;
 
 // -------------------------------------------------------------------------------------------------
 

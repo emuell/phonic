@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Display};
 
-use crate::utils::{ExponentialSmoothedValue, SmoothedValue};
+use crate::utils::smoothing::{ExponentialSmoothedValue, SmoothedValue};
 
 use super::{FloatParameter, Parameter, ParameterValueUpdate};
 

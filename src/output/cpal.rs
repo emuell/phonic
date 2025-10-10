@@ -22,7 +22,7 @@ use crate::{
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         buffer::clear_buffer,
-        smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
+        smoothing::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
     },
 };
 

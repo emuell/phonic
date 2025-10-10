@@ -18,7 +18,7 @@ use crate::{
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         buffer::clear_buffer,
-        smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
+        smoothing::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
     },
 };
 
@@ -182,7 +182,7 @@ pub struct WebOutput {
     volume: f32,
     is_running: bool,
     playback_pos: Arc<AtomicU64>,
-    callback_send: Sender<CallbackMessage>,
+    callback_sender: Sender<CallbackMessage>,
     #[allow(dead_code)]
     context_ref: Arc<WebContextRef>,
     channel_count: usize,
@@ -211,14 +211,14 @@ impl WebOutput {
         let frame_count = unsafe { phonic_js_buffer_frames() } as usize;
         let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
 
-        let (callback_send, callback_recv) = bounded(16);
+        let (callback_sender, callback_receiver) = bounded(16);
 
         let is_running = false;
         let volume = 1.0;
         let playback_pos = Arc::new(AtomicU64::new(0));
 
         let context = Box::new(WebContext {
-            callback_recv,
+            callback_receiver,
             source: Box::new(EmptySource),
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
@@ -239,7 +239,7 @@ impl WebOutput {
             volume,
             is_running,
             playback_pos,
-            callback_send,
+            callback_sender,
             context_ref,
             channel_count,
             sample_rate,
@@ -265,7 +265,7 @@ impl OutputDevice for WebOutput {
     }
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume;
-        self.callback_send
+        self.callback_sender
             .send(CallbackMessage::SetVolume(volume))
             .unwrap();
     }
@@ -280,11 +280,11 @@ impl OutputDevice for WebOutput {
 
     fn pause(&mut self) {
         self.is_running = false;
-        self.callback_send.send(CallbackMessage::Pause).unwrap();
+        self.callback_sender.send(CallbackMessage::Pause).unwrap();
     }
 
     fn resume(&mut self) {
-        self.callback_send.send(CallbackMessage::Resume).unwrap();
+        self.callback_sender.send(CallbackMessage::Resume).unwrap();
         self.is_running = true;
     }
 
@@ -293,7 +293,7 @@ impl OutputDevice for WebOutput {
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
         // send message to activate it in the writer
-        self.callback_send
+        self.callback_sender
             .send(CallbackMessage::PlaySource(source))
             .unwrap();
         // auto-start with the first set source
@@ -304,7 +304,7 @@ impl OutputDevice for WebOutput {
 
     fn stop(&mut self) {
         self.is_running = false;
-        self.callback_send
+        self.callback_sender
             .send(CallbackMessage::PlaySource(Box::new(EmptySource)))
             .unwrap();
     }
@@ -348,7 +348,7 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
         let output = &mut state.buffer[..output_samples];
 
         // Process any pending data messages.
-        while let Ok(msg) = state.callback_recv.try_recv() {
+        while let Ok(msg) = state.callback_receiver.try_recv() {
             match msg {
                 CallbackMessage::PlaySource(src) => {
                     state.source = src;
@@ -403,7 +403,7 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
 // -------------------------------------------------------------------------------------------------
 
 struct WebContext {
-    callback_recv: Receiver<CallbackMessage>,
+    callback_receiver: Receiver<CallbackMessage>,
     source: Box<dyn Source>,
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,

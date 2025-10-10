@@ -11,7 +11,7 @@ use crate::{
     error::Error,
     output::OutputDevice,
     source::{empty::EmptySource, Source, SourceTime},
-    utils::smoothed::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
+    utils::smoothing::{apply_smoothed_gain, ExponentialSmoothedValue, SmoothedValue},
 };
 
 use hound::{SampleFormat, WavSpec, WavWriter};

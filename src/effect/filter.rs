@@ -8,8 +8,9 @@ use crate::{
         SmoothedParameterValue,
     },
     utils::{
-        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-        InterleavedBufferMut, LinearSmoothedValue,
+        buffer::InterleavedBufferMut,
+        dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        smoothing::LinearSmoothedValue,
     },
     ClonableParameter, Error, ParameterScaling,
 };
@@ -27,26 +28,26 @@ pub enum FilterEffectType {
     Highpass,
 }
 
-impl From<FilterEffectType> for SvfFilterType {
+impl From<FilterEffectType> for BiquadFilterType {
     fn from(val: FilterEffectType) -> Self {
         match val {
-            FilterEffectType::Lowpass => SvfFilterType::Lowpass,
-            FilterEffectType::Bandpass => SvfFilterType::Bandpass,
-            FilterEffectType::Bandstop => SvfFilterType::Notch,
-            FilterEffectType::Highpass => SvfFilterType::Highpass,
+            FilterEffectType::Lowpass => BiquadFilterType::Lowpass,
+            FilterEffectType::Bandpass => BiquadFilterType::Bandpass,
+            FilterEffectType::Bandstop => BiquadFilterType::Notch,
+            FilterEffectType::Highpass => BiquadFilterType::Highpass,
         }
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-/// A filter effect that applies an SVF biquad filter to an audio buffer.
+/// Multi-channel filter effect tht applies an SVF biquad filter with configurable filter types.
 #[derive(Clone)]
 pub struct FilterEffect {
     channel_count: usize,
     sample_rate: u32,
-    filters: Vec<SvfFilter>,
-    filter_coefficients: SvfFilterCoefficients,
+    filters: Vec<BiquadFilter>,
+    filter_coefficients: BiquadFilterCoefficients,
     filter_type: EnumParameterValue<FilterEffectType>,
     cutoff: SmoothedParameterValue,
     q: SmoothedParameterValue<LinearSmoothedValue>,
@@ -64,8 +65,8 @@ impl FilterEffect {
             channel_count: 0,
             sample_rate: 0,
             filters: vec![],
-            filter_coefficients: SvfFilterCoefficients::new(
-                SvfFilterType::Lowpass,
+            filter_coefficients: BiquadFilterCoefficients::new(
+                BiquadFilterType::Lowpass,
                 44100,
                 22050.0,
                 0.707,
@@ -146,7 +147,7 @@ impl Effect for FilterEffect {
                     .clamp(20.0, sample_rate as f32 / 2.0),
             )
             .expect("Failed to set filter parameters");
-        self.filters.resize_with(channel_count, SvfFilter::new);
+        self.filters.resize_with(channel_count, BiquadFilter::new);
 
         self.cutoff.set_sample_rate(sample_rate);
         self.q.set_sample_rate(sample_rate);
@@ -200,7 +201,12 @@ impl Effect for FilterEffect {
             Self::TYPE_ID => self.filter_type.apply_update(value),
             Self::CUTOFF_ID => self.cutoff.apply_update(value),
             Self::Q_ID => self.q.apply_update(value),
-            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
         };
 
         let result = match id {

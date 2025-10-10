@@ -7,13 +7,16 @@ use crate::{
         EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
         SmoothedParameterValue,
     },
-    utils::{ExponentialSmoothedValue, InterleavedBufferMut, LinearSmoothedValue},
+    utils::{
+        buffer::InterleavedBufferMut,
+        smoothing::{ExponentialSmoothedValue, LinearSmoothedValue},
+    },
     ClonableParameter, Error,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// The type of distortion to apply.
+/// Type of distortion applied in `DistortionEffect`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Display, EnumIter, EnumString)]
 pub enum DistortionType {
     /// No distortion.
@@ -43,7 +46,7 @@ pub enum DistortionType {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A simple distortion effect with multiple waveshaping algorithms.
+/// Multi-channel distortion effect with multiple waveshaping algorithms.
 #[derive(Debug)]
 pub struct DistortionEffect {
     channel_count: usize,
@@ -237,7 +240,12 @@ impl Effect for DistortionEffect {
             Self::TYPE_ID => self.distortion_type.apply_update(value),
             Self::DRIVE_ID => self.drive.apply_update(value),
             Self::MIX_ID => self.mix.apply_update(value),
-            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
         }
         Ok(())
     }
