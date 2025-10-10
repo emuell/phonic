@@ -15,8 +15,4 @@ if (-not $command) {
 # Note: worker threads (emscripten pthreads) need 
 # "Cross-Origin-Embedder-Policy" HTTP header set to "require-corp"
 # "Cross-Origin-Opener-Policy" HTTP header set to "same-origin"
-Write-Host "Starting simple-http-server on web directory..."
-Write-Host "Server will be available at http://localhost:8000"
-Write-Host ""
-
 simple-http-server --index --coep --coop web
