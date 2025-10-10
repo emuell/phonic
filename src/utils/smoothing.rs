@@ -1,6 +1,8 @@
+//! Traits and impls to transition between two values.
+
 use std::fmt::{Debug, Display};
 
-use crate::utils::{buffer::scale_buffer, panning_factors};
+use super::{buffer::scale_buffer, panning_factors};
 
 // -------------------------------------------------------------------------------------------------
 

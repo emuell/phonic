@@ -7,19 +7,17 @@ use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
+
 use crate::{
     player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{Source, SourceTime},
-    utils::{
-        fader::{FaderState, VolumeFader},
-        unique_usize_id,
-    },
+    source::{unique_source_id, Source, SourceTime},
+    utils::fader::{FaderState, VolumeFader},
     Error,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// A generic sample generator for SynthSourceImpl.
+/// A generic sample generator for [`SynthSourceImpl`].
 pub trait SynthSourceGenerator {
     /// Fill passed output with generated samples and return samples generated.
     fn generate(&mut self, output: &mut [f32]) -> usize;
@@ -76,7 +74,7 @@ where
             volume_fader,
             playback_message_queue,
             playback_status_send: event_send,
-            playback_id: unique_usize_id(),
+            playback_id: unique_source_id(),
             playback_status_context: None,
             playback_name: Arc::new(generator_name.to_string()),
             playback_options: options,

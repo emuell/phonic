@@ -1,7 +1,10 @@
+//! DC removal filter.
+
 use strum::{Display, EnumIter, EnumString};
 
 // -------------------------------------------------------------------------------------------------
 
+/// DC filter modes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Display, EnumIter, EnumString)]
 #[allow(unused)]
 pub enum DcFilterMode {
@@ -16,8 +19,8 @@ pub enum DcFilterMode {
 
 // -------------------------------------------------------------------------------------------------
 
-// A simple DC blocker filter based on a one-pole high-pass filter.
-// y(n) = x(n) - x(n-1) + R * y(n-1)
+/// DC blocker filter based on a one-pole high-pass filter.
+/// `y(n) = x(n) - x(n-1) + R * y(n-1)`
 #[derive(Debug, Clone)]
 pub struct DcFilter {
     y1: f64, // previous output

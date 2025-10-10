@@ -7,7 +7,7 @@ use phonic::{
     effects::{CompressorEffect, ReverbEffect},
     parameters::{FloatParameter, SmoothedParameterValue},
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
-    utils::{pitch_from_note, speed_from_note, InterleavedBufferMut},
+    utils::{buffer::InterleavedBufferMut, pitch_from_note, speed_from_note},
     ClonableParameter, Effect, EffectTime, Error, FilePlaybackOptions, ParameterValueUpdate,
     SynthPlaybackOptions,
 };
@@ -26,7 +26,7 @@ mod arguments;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A simple distortion [`Effect`] that uses the `tanh` function for waveshaping.
+/// Simple distortion [`Effect`] that uses the `tanh` function for waveshaping.
 #[derive(Clone)]
 struct TanhDistortion {
     channel_count: usize,
@@ -185,7 +185,7 @@ impl SynthSourceGenerator for SineSynth {
 // -------------------------------------------------------------------------------------------------
 
 /// A [`SynthSource`] which runs a custom `SinSynth`` generator until it is exhausted.
-type SinSynthSource = SynthSourceImpl<SineSynth>;
+type SineSynthSource = SynthSourceImpl<SineSynth>;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -279,7 +279,7 @@ fn main() -> Result<(), Error> {
             let sample_time = output_start_time + beat_in_loop * samples_per_beat;
 
             // Create our custom synth source for the current note
-            let bass = SinSynthSource::new(
+            let bass = SineSynthSource::new(
                 SineSynth::new(*note, note_duration_samples, samples_per_sec),
                 "sin_synth",
                 SynthPlaybackOptions::default()

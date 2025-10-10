@@ -4,8 +4,8 @@ use crate::{
     effect::{Effect, EffectTime},
     parameter::{ClonableParameter, EnumParameter, EnumParameterValue, ParameterValueUpdate},
     utils::{
-        filter::dc::{DcFilter, DcFilterMode},
-        InterleavedBufferMut,
+        buffer::InterleavedBufferMut,
+        dsp::filters::dc::{DcFilter, DcFilterMode},
     },
     Error,
 };
@@ -16,7 +16,7 @@ pub type DcFilterEffectMode = DcFilterMode;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A filter effect that applies a DC-blocking filter to an audio buffer.
+/// Multi channel DC-blocking filter.
 #[derive(Clone)]
 pub struct DcFilterEffect {
     channel_count: usize,
@@ -102,7 +102,12 @@ impl Effect for DcFilterEffect {
     ) -> Result<(), Error> {
         match id {
             Self::MODE_ID => self.mode.apply_update(value),
-            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
         }
         for filter in &mut self.filters {
             filter.init(self.sample_rate, self.mode.value());

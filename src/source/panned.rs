@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use crossbeam_queue::ArrayQueue;
 
-use crate::utils::{
-    apply_smoothed_panning, smoothed::ExponentialSmoothedValue, smoothed::SmoothedValue,
-};
+use crate::utils::smoothing::{apply_smoothed_panning, ExponentialSmoothedValue, SmoothedValue};
 
 use super::{Source, SourceTime};
 

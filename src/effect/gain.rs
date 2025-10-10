@@ -3,13 +3,16 @@ use four_cc::FourCC;
 use crate::{
     effect::{Effect, EffectTime},
     parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
-    utils::{buffer::scale_buffer, db_to_linear, linear_to_db, InterleavedBufferMut},
+    utils::{
+        buffer::{scale_buffer, InterleavedBufferMut},
+        db_to_linear, linear_to_db,
+    },
     ClonableParameter, Error, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// A simple gain effect that only applies a volume factor.
+/// Multi-channel gain effect that only applies a volume factor.
 pub struct GainEffect {
     channel_count: usize,
     gain: SmoothedParameterValue,
@@ -24,6 +27,22 @@ impl GainEffect {
 
     /// Creates a new `GainEffect` with default gain (0dB = unity gain).
     pub fn new() -> Self {
+        let gain_to_string = |v: f32| {
+            let db = linear_to_db(v);
+            if db <= -59.0 {
+                "-INF".to_string()
+            } else {
+                format!("{:.2}", db)
+            }
+        };
+        let string_to_gain = |s: &str| {
+            if s.trim().eq_ignore_ascii_case("-inf") || s.trim().eq_ignore_ascii_case("inf") {
+                Some(db_to_linear(Self::MIN_DB))
+            } else {
+                s.parse::<f32>().ok().map(db_to_linear)
+            }
+        };
+
         Self {
             channel_count: 0,
             gain: SmoothedParameterValue::from_description(
@@ -35,25 +54,7 @@ impl GainEffect {
                 )
                 .with_unit("dB")
                 .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB))
-                .with_display(
-                    |v: f32| {
-                        let db = linear_to_db(v);
-                        if db <= -59.0 {
-                            "-INF".to_string()
-                        } else {
-                            format!("{:.2}", db)
-                        }
-                    },
-                    |s: &str| {
-                        if s.trim().eq_ignore_ascii_case("-inf")
-                            || s.trim().eq_ignore_ascii_case("inf")
-                        {
-                            Some(db_to_linear(Self::MIN_DB))
-                        } else {
-                            s.parse::<f32>().ok().map(db_to_linear)
-                        }
-                    },
-                ),
+                .with_display(gain_to_string, string_to_gain),
             ),
         }
     }
@@ -64,17 +65,6 @@ impl GainEffect {
         let gain_linear = db_to_linear(gain_db.clamp(Self::MIN_DB, Self::MAX_DB));
         effect.gain.init_value(gain_linear);
         effect
-    }
-
-    /// Get the current gain in dB.
-    pub fn gain_db(&self) -> f32 {
-        linear_to_db(self.gain.target_value())
-    }
-
-    /// Set the gain in dB.
-    pub fn set_gain_db(&mut self, gain_db: f32) {
-        let gain_linear = db_to_linear(gain_db.clamp(Self::MIN_DB, Self::MAX_DB));
-        self.gain.set_target_value(gain_linear);
     }
 }
 

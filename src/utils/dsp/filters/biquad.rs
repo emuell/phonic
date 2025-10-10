@@ -9,7 +9,7 @@ use crate::Error;
 /// Available filter types for the State Variable Filter.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Display, EnumIter, EnumString)]
 #[allow(unused)]
-pub enum SvfFilterType {
+pub enum BiquadFilterType {
     #[default]
     Lowpass,
     Highpass,
@@ -26,10 +26,10 @@ pub enum SvfFilterType {
 
 /// The coefficients that hold parameters and necessary data to process the filter.
 ///
-/// See [SvfFilter] for more info about the filter implementation.
+/// See [BiquadFilter] for more info about the filter implementation.
 #[derive(Default, Clone, PartialEq)]
-pub struct SvfFilterCoefficients {
-    filter_type: SvfFilterType,
+pub struct BiquadFilterCoefficients {
+    filter_type: BiquadFilterType,
     sample_rate: u32,
     cutoff: f32,
     q: f32,
@@ -43,26 +43,24 @@ pub struct SvfFilterCoefficients {
 }
 
 #[allow(unused)]
-impl SvfFilterCoefficients {
+impl BiquadFilterCoefficients {
     pub fn new(
-        filter_type: SvfFilterType,
+        filter_type: BiquadFilterType,
         sample_rate: u32,
         cutoff: f32,
         q: f32,
         gain: f32,
     ) -> Result<Self, Error> {
-        let mut coefficients = Self {
-            ..Default::default()
-        };
+        let mut coefficients = BiquadFilterCoefficients::default();
         coefficients.set(filter_type, sample_rate, cutoff, q, gain)?;
         Ok(coefficients)
     }
 
     /// Get currently applied filter type.
-    pub fn filter_type(&self) -> SvfFilterType {
+    pub fn filter_type(&self) -> BiquadFilterType {
         self.filter_type
     }
-    pub fn set_filter_type(&mut self, filter_type: SvfFilterType) -> Result<(), Error> {
+    pub fn set_filter_type(&mut self, filter_type: BiquadFilterType) -> Result<(), Error> {
         if self.filter_type != filter_type {
             self.filter_type = filter_type;
             self.apply()
@@ -128,7 +126,7 @@ impl SvfFilterCoefficients {
     /// Sets new and applies a bach of new filter parameters.
     pub fn set(
         &mut self,
-        filter_type: SvfFilterType,
+        filter_type: BiquadFilterType,
         sample_rate: u32,
         cutoff: f32,
         q: f32,
@@ -173,7 +171,7 @@ impl SvfFilterCoefficients {
             )));
         }
         match self.filter_type {
-            SvfFilterType::Lowpass => {
+            BiquadFilterType::Lowpass => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -183,7 +181,7 @@ impl SvfFilterCoefficients {
                 self.m1 = 0.0;
                 self.m2 = 1.0;
             }
-            SvfFilterType::Highpass => {
+            BiquadFilterType::Highpass => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -193,7 +191,7 @@ impl SvfFilterCoefficients {
                 self.m1 = -k;
                 self.m2 = -1.0;
             }
-            SvfFilterType::Bandpass => {
+            BiquadFilterType::Bandpass => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -203,7 +201,7 @@ impl SvfFilterCoefficients {
                 self.m1 = 1.0;
                 self.m2 = 0.0;
             }
-            SvfFilterType::Notch => {
+            BiquadFilterType::Notch => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -213,7 +211,7 @@ impl SvfFilterCoefficients {
                 self.m1 = -k;
                 self.m2 = 0.0;
             }
-            SvfFilterType::Peak => {
+            BiquadFilterType::Peak => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -223,7 +221,7 @@ impl SvfFilterCoefficients {
                 self.m1 = -k;
                 self.m2 = -2.0;
             }
-            SvfFilterType::Allpass => {
+            BiquadFilterType::Allpass => {
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / self.q as f64;
                 self.a1 = 1.0 / (1.0 + g * (g + k));
@@ -233,7 +231,7 @@ impl SvfFilterCoefficients {
                 self.m1 = -2.0 * k;
                 self.m2 = 0.0;
             }
-            SvfFilterType::Bell => {
+            BiquadFilterType::Bell => {
                 let a = f64::powf(10.0, self.gain as f64 / 40.0);
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64);
                 let k = 1.0 / (self.q as f64 * a);
@@ -244,7 +242,7 @@ impl SvfFilterCoefficients {
                 self.m1 = k * (a * a - 1.0);
                 self.m2 = 0.0;
             }
-            SvfFilterType::Lowshelf => {
+            BiquadFilterType::Lowshelf => {
                 let a = f64::powf(10.0, self.gain as f64 / 40.0);
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64)
                     / f64::sqrt(a);
@@ -256,7 +254,7 @@ impl SvfFilterCoefficients {
                 self.m1 = k * (a - 1.0);
                 self.m2 = a * a - 1.0;
             }
-            SvfFilterType::Highshelf => {
+            BiquadFilterType::Highshelf => {
                 let a = f64::powf(10.0, self.gain as f64 / 40.0);
                 let g = f64::tan(f64::consts::PI * self.cutoff as f64 / self.sample_rate as f64)
                     * f64::sqrt(a);
@@ -275,26 +273,23 @@ impl SvfFilterCoefficients {
 
 // -------------------------------------------------------------------------------------------------
 
-/// State variable filter (SVF), designed by Andrew Simper of Cytomic.
+/// State variable biquad filter, designed by Andrew Simper of Cytomic.
 /// See <http://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf>
 ///
 /// The frequency response of this filter is the same as of BZT filters.
 ///
-/// This is a second-order filter. It has a cutoff slope of 12 dB/octave.
-/// Q = 0.707 means no resonant peaking.
-///
-/// This filter will self-oscillate when Q is very high (can be forced by
-/// setting the `k` coefficient to zero).
+/// This is a second-order filter. It has a cutoff slope of 12 dB/octave. Q = 0.707 means no
+/// resonant peaking. This filter will self-oscillate when Q is very high.
 ///
 /// This filter is stable when modulated at high rates.
 #[derive(Default, Clone)]
-pub struct SvfFilter {
+pub struct BiquadFilter {
     ic1eq: f64,
     ic2eq: f64,
 }
 
 #[allow(unused)]
-impl SvfFilter {
+impl BiquadFilter {
     pub fn new() -> Self {
         Self {
             ic1eq: 0.0,
@@ -306,7 +301,7 @@ impl SvfFilter {
     #[inline]
     pub fn process<'a>(
         &mut self,
-        coefficients: &SvfFilterCoefficients,
+        coefficients: &BiquadFilterCoefficients,
         output: impl Iterator<Item = &'a mut f32>,
     ) {
         for sample in output {
@@ -316,7 +311,7 @@ impl SvfFilter {
 
     /// Apply the filter on a single sample.
     #[inline]
-    pub fn process_sample(&mut self, coefficients: &SvfFilterCoefficients, input: f64) -> f64 {
+    pub fn process_sample(&mut self, coefficients: &BiquadFilterCoefficients, input: f64) -> f64 {
         let v0 = input;
         let v3 = v0 - self.ic2eq;
         let v1 = coefficients.a1 * self.ic1eq + coefficients.a2 * v3;

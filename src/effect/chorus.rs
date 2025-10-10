@@ -10,8 +10,9 @@ use crate::{
         SmoothedParameterValue,
     },
     utils::{
-        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-        InterleavedBufferMut, LinearSmoothedValue,
+        buffer::InterleavedBufferMut,
+        dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        smoothing::LinearSmoothedValue,
     },
     ClonableParameter, Error, ParameterScaling,
 };
@@ -124,21 +125,21 @@ pub enum ChorusEffectFilterType {
     Highpass,
 }
 
-impl From<ChorusEffectFilterType> for SvfFilterType {
+impl From<ChorusEffectFilterType> for BiquadFilterType {
     fn from(val: ChorusEffectFilterType) -> Self {
         match val {
-            ChorusEffectFilterType::None => SvfFilterType::Allpass,
-            ChorusEffectFilterType::Lowpass => SvfFilterType::Lowpass,
-            ChorusEffectFilterType::Bandpass => SvfFilterType::Bandpass,
-            ChorusEffectFilterType::Bandstop => SvfFilterType::Notch,
-            ChorusEffectFilterType::Highpass => SvfFilterType::Highpass,
+            ChorusEffectFilterType::None => BiquadFilterType::Allpass,
+            ChorusEffectFilterType::Lowpass => BiquadFilterType::Lowpass,
+            ChorusEffectFilterType::Bandpass => BiquadFilterType::Bandpass,
+            ChorusEffectFilterType::Bandstop => BiquadFilterType::Notch,
+            ChorusEffectFilterType::Highpass => BiquadFilterType::Highpass,
         }
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-/// A stereo chorus effect with an filtered, interpolated delay-line.
+/// Stereo chorus effect with an filtered, interpolated delay-line.
 pub struct ChorusEffect {
     sample_rate: u32,
     channel_count: usize,
@@ -164,9 +165,9 @@ pub struct ChorusEffect {
     delay_buffer_left: InterpolatingDelayBuffer,
     delay_buffer_right: InterpolatingDelayBuffer,
 
-    filter_coefficients: SvfFilterCoefficients,
-    filter_left: SvfFilter,
-    filter_right: SvfFilter,
+    filter_coefficients: BiquadFilterCoefficients,
+    filter_left: BiquadFilter,
+    filter_right: BiquadFilter,
 }
 
 impl ChorusEffect {
@@ -292,9 +293,9 @@ impl ChorusEffect {
             delay_buffer_left: InterpolatingDelayBuffer::default(),
             delay_buffer_right: InterpolatingDelayBuffer::default(),
 
-            filter_coefficients: SvfFilterCoefficients::default(),
-            filter_left: SvfFilter::default(),
-            filter_right: SvfFilter::default(),
+            filter_coefficients: BiquadFilterCoefficients::default(),
+            filter_left: BiquadFilter::default(),
+            filter_right: BiquadFilter::default(),
         }
     }
 
@@ -404,7 +405,7 @@ impl Effect for ChorusEffect {
         self.delay_buffer_left = InterpolatingDelayBuffer::new(max_buffer_size);
         self.delay_buffer_right = InterpolatingDelayBuffer::new(max_buffer_size);
 
-        self.filter_coefficients = SvfFilterCoefficients::new(
+        self.filter_coefficients = BiquadFilterCoefficients::new(
             self.filter_type.value().into(),
             sample_rate,
             self.filter_freq.target_value(),

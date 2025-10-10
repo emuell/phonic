@@ -1,4 +1,4 @@
-//! AudioResampling trait for resampling interleaved audio (sources).
+//! AudioResampling traits and impls for resampling interleaved audio (sources).
 
 use crate::Error;
 

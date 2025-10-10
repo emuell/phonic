@@ -4,17 +4,18 @@ use crate::{
     effect::{Effect, EffectTime},
     parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
-        filter::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
-        LinearSmoothedValue,
+        dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        smoothing::LinearSmoothedValue,
     },
     ClonableParameter, Error, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-/// A 5-band parametric equalizer.
+/// Multi-channel 5-band parametric equalizer.
 ///
-/// Band 1 using is a low-shelf filter, Band 5 a high shelf filter, the other bands are notch filters.
+/// First band is using a low-shelf filter, last band a high shelf filter, the other bands are
+/// notch filters with configurable band width.
 pub struct Eq5Effect {
     sample_rate: u32,
     channel_count: usize,
@@ -26,9 +27,9 @@ pub struct Eq5Effect {
 
     // Runtime data
     // 5 coefficient sets (one per band)
-    filter_coeffs: [SvfFilterCoefficients; 5],
+    filter_coeffs: [BiquadFilterCoefficients; 5],
     // filters per channel: channel_count * 5 filters
-    filters: Vec<[SvfFilter; 5]>,
+    filters: Vec<[BiquadFilter; 5]>,
 }
 
 impl Eq5Effect {
@@ -167,9 +168,9 @@ impl Eq5Effect {
     fn update_filter_coefficients(&mut self) -> Result<(), Error> {
         for i in 0..5 {
             let filter_type = match i {
-                0 => SvfFilterType::Lowshelf,
-                4 => SvfFilterType::Highshelf,
-                _ => SvfFilterType::Bell,
+                0 => BiquadFilterType::Lowshelf,
+                4 => BiquadFilterType::Highshelf,
+                _ => BiquadFilterType::Bell,
             };
             let cutoff = self.frequencies[i].current_value();
             let q = self.bandwidths[i].current_value();
@@ -183,9 +184,9 @@ impl Eq5Effect {
     fn ramp_filter_coefficients(&mut self) -> Result<(), Error> {
         for i in 0..5 {
             let filter_type = match i {
-                0 => SvfFilterType::Lowshelf,
-                4 => SvfFilterType::Highshelf,
-                _ => SvfFilterType::Bell,
+                0 => BiquadFilterType::Lowshelf,
+                4 => BiquadFilterType::Highshelf,
+                _ => BiquadFilterType::Bell,
             };
             let q = match i {
                 0 | 4 => self.bandwidths[i].next_value(),

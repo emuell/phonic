@@ -5,7 +5,10 @@ use crate::{
     parameter::{
         FloatParameter, FloatParameterValue, ParameterValueUpdate, SmoothedParameterValue,
     },
-    utils::{buffer::copy_buffers, db_to_linear, InterleavedBuffer, InterleavedBufferMut},
+    utils::{
+        buffer::{copy_buffers, InterleavedBuffer, InterleavedBufferMut},
+        db_to_linear,
+    },
     ClonableParameter, Error,
 };
 
@@ -112,7 +115,7 @@ impl<const CHANNELS: usize> DelayLine<CHANNELS> {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A basic stereo compressor effect with lookahead and soft-knee.
+/// Stereo compressor effect with limiter mode, lookahead and soft-knee.
 ///
 /// When ratio is above 20.0 it acts as a hard-limiter.
 /// Note that the compressor will introduce latency when lookahead is used.
@@ -443,7 +446,12 @@ impl Effect for CompressorEffect {
             Self::RELEASE_ID => self.release_time.apply_update(value),
             Self::MAKEUP_GAIN_ID => self.makeup_gain.apply_update(value),
             Self::LOOKAHEAD_ID => self.lookahead_time.apply_update(value),
-            _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown parameter: '{id}' for effect '{}'",
+                    self.name()
+                )))
+            }
         }
         self.update_coeffs();
         if self.lookahead_time.value() != old_lookahead && self.sample_rate > 0 {

@@ -95,7 +95,7 @@ pub trait Effect: Send + Sync + 'static {
     /// This method is called repeatedly on the real-time audio thread. To avoid audio glitches,
     /// it must not block, allocate memory, or perform other time-consuming operations.
     ///
-    /// Use [`InterleavedBufferMut`](crate::utils::InterleavedBufferMut) to get channel/frame
+    /// Use [`InterleavedBufferMut`](crate::utils::buffer::InterleavedBufferMut) to get channel/frame
     /// representations of the given output buffer as needed.
     fn process(&mut self, output: &mut [f32], time: &EffectTime);
 

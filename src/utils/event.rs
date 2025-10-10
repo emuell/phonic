@@ -1,3 +1,5 @@
+//! Manage processing of sample time tagged events.
+
 use std::collections::VecDeque;
 
 // -------------------------------------------------------------------------------------------------
