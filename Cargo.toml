@@ -71,9 +71,6 @@ ctrlc = { version = "^3.4" }
 hound = { version = "^3.5" }
 svg = { version = "^0.18" }
 
-[build-dependencies]
-rustc_version = "^0.4"
-
 [profile.release]
 debug = 1 # debug info for profiling
 
@@ -92,6 +89,7 @@ default = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
 # don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
 no-default-features = true
 features = ["cpal-output", "wav-output", "dasp-synth"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "play-file"

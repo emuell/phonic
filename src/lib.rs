@@ -74,8 +74,8 @@
 //! creating more complex mixer graphs, please see the examples in the `README.md` and the `/examples`
 //! directory of the repository.
 
-// enable feature auto config for docs (see also build.rs)
-#![cfg_attr(all(doc, docsrs), feature(doc_auto_cfg))]
+// enable feature config when building for docs.rs
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // enable experimental ASM features for emscripten js! macros
 #![cfg_attr(
     target_os = "emscripten",
