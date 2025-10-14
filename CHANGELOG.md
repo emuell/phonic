@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.1 - 2025/10/14
+
+- fixed docs.rs builds
+- fixed handling of "past" scheduled source stop events in mixer
+
 ## v0.11.0 - 2025/10/10
 
 - finalized effect traits and implemented basic set of stock effects: gain, filter, EQ, reverb, chorus, compressor, limiter and distortion
