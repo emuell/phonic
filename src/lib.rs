@@ -140,7 +140,9 @@ pub mod sources {
     //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
 
     pub use super::source::file::{
-        common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
+        common::FileSourceImpl,
+        preloaded::{PreloadedFileBuffer, PreloadedFileSource},
+        streamed::StreamedFileSource,
     };
     pub use super::source::synth::common::{SynthSourceGenerator, SynthSourceImpl};
     #[cfg(feature = "dasp")]

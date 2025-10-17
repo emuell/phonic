@@ -21,14 +21,35 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 /// Shared decoded audio file buffer
-struct FileBuffer {
+pub struct PreloadedFileBuffer {
     buffer: Vec<f32>,
     channel_count: usize,
     sample_rate: u32,
     loop_range: Option<Range<usize>>,
 }
 
-impl FileBuffer {
+impl PreloadedFileBuffer {
+    /// Access to the shared sample buffer's raw interleaved sample data.
+    pub fn buffer(&self) -> &[f32] {
+        &self.buffer
+    }
+
+    /// Access to the shared sample buffer's channel layout.
+    pub fn channel_count(&self) -> usize {
+        self.channel_count
+    }
+
+    /// Access to the shared sample buffer's sampling rate.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Access to the shared sample embedded loop points, if any.
+    pub fn loop_range(&self) -> Option<Range<usize>> {
+        self.loop_range.clone()
+    }
+
+    /// Ensure all properties are valid for playback.
     fn validate(&self) -> Result<(), Error> {
         if self.buffer.is_empty() {
             return Err(Error::ParameterError("empty audio file".to_owned()));
@@ -49,7 +70,7 @@ impl FileBuffer {
 /// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
-    file_buffer: Arc<FileBuffer>,
+    file_buffer: Arc<PreloadedFileBuffer>,
     file_source: FileSourceImpl,
     playback_repeat: usize,
     playback_pos: usize,
@@ -141,7 +162,7 @@ impl PreloadedFileSource {
             }
         }
 
-        let file_buffer = Arc::new(FileBuffer {
+        let file_buffer = Arc::new(PreloadedFileBuffer {
             buffer,
             sample_rate,
             channel_count,
@@ -168,7 +189,7 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         let loop_range = None;
 
-        let file_buffer = Arc::new(FileBuffer {
+        let file_buffer = Arc::new(PreloadedFileBuffer {
             buffer,
             sample_rate,
             channel_count,
@@ -188,7 +209,7 @@ impl PreloadedFileSource {
     }
 
     fn from_shared_file_buffer(
-        file_buffer: Arc<FileBuffer>,
+        file_buffer: Arc<PreloadedFileBuffer>,
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
@@ -226,6 +247,11 @@ impl PreloadedFileSource {
             playback_pos,
             playback_pos_eof,
         })
+    }
+
+    /// Access to the shared file buffer.
+    pub fn file_buffer(&self) -> Arc<PreloadedFileBuffer> {
+        Arc::clone(&self.file_buffer)
     }
 
     /// Create a copy of this preloaded source with the given playback options.
