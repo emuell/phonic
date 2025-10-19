@@ -16,19 +16,22 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 assume = { version = "^0.5" }
-byteorder = { version = "^1.5" }
-rand = { version = "0.9" }
+byteorder = { version = "^1.5", default-features = false }
+rand = { version = "^0.9", default-features = false, features = ["thread_rng"] }
 log = { version = "^0.4", features = [
     "max_level_debug",
     "release_max_level_info",
 ] }
-strum = { version = "^0.27", features = ["derive"] }
-four-cc = { version = "0.4" }
+
+strum = { version = "^0.27", default-features = false, features = ["derive"] }
+four-cc = { version = "^0.4", default-features = false }
 lazy_static = { version = "^1.4" }
 crossbeam-channel = { version = "^0.5" }
-crossbeam-queue = { version = "^0.3" }
+crossbeam-queue = { version = "^0.3", default-features = false, features = [
+    "alloc",
+] }
 dashmap = { version = "^6.1" }
-pulp = { version = "^0.21", features = ["macro"] }
+pulp = { version = "^0.21", default-features = false, features = ["macro"] }
 basedrop = { version = "^0.1" }
 audio_thread_priority = { version = "^0.34", default-features = false }
 rubato = { version = "^0.16", default-features = false }
@@ -56,16 +59,14 @@ hound = { version = "^3.5", optional = true }
 
 # Target specific dependencies
 [target.'cfg(target_os = "emscripten")'.dependencies]
-emscripten_rs_sys = { version = "^0.1" }
+emscripten_rs_sys = { version = "^0.1", default-features = false }
 emscripten-rs-macros = { version = "^0.1" }
 
 # Tests & Examples dependencies
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 lazy_static = { version = "^1.4" }
 arg = { version = "^0.4", features = ["std"] }
-simple_logger = { version = "^5.0", default-features = false, features = [
-    "colors",
-] }
+simple_logger = { version = "^5.1", default-features = false }
 device_query = { version = "^4.0" }
 ctrlc = { version = "^3.4" }
 hound = { version = "^3.5" }
