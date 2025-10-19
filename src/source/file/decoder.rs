@@ -177,9 +177,10 @@ impl AudioDecoder {
         const WAVE_ID: ChunkId = ChunkId { value: *b"WAVE" };
         const SMPL_ID: ChunkId = ChunkId { value: *b"smpl" };
 
-        let chunk = Chunk::read(reader, 0).map_err(|_| Error::MediaFileProbeError)?;
-        if chunk.id() != RIFF_ID
-            || chunk
+        // read RIFF_ID chunk
+        let riff_chunk = Chunk::read(reader, 0).map_err(|_| Error::MediaFileProbeError)?;
+        if riff_chunk.id() != RIFF_ID
+            || riff_chunk
                 .read_type(reader)
                 .map_err(|_| Error::MediaFileProbeError)?
                 != WAVE_ID
@@ -187,14 +188,33 @@ impl AudioDecoder {
             return Err(Error::MediaFileProbeError);
         }
 
-        let children = chunk.iter(reader).flatten().collect::<Vec<_>>();
-        if let Some(child) = children.iter().find(|c| c.id() == SMPL_ID) {
-            if let Ok(data) = child.read_contents(reader) {
+        // find SMPL_ID chunk
+        let mut smpl_chunk = None;
+        for child in riff_chunk.iter(reader) {
+            match child {
+                Ok(child) if child.id() == SMPL_ID => {
+                    smpl_chunk = Some(child);
+                    break;
+                }
+                Ok(_) => {
+                    // try next chunk
+                    continue;
+                }
+                Err(_) => {
+                    // stop on errors
+                    break;
+                }
+            }
+        }
+
+        // read SMPL_ID chunk
+        if let Some(chunk) = smpl_chunk {
+            if let Ok(data) = chunk.read_contents(reader) {
                 return Self::parse_smpl_body(&data);
             }
         }
 
-        Err(Error::MediaFileProbeError) // No smpl chunk found
+        Err(Error::MediaFileProbeError) // No smpl chunk found or failed to read
     }
 
     /// Minimal FLAC metadata parser that scans Application blocks for embedded RIFF "smpl" data.
