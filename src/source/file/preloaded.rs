@@ -20,7 +20,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// Shared decoded audio file buffer
+/// Shared, decoded audio file buffer as used in [`PreloadedFileSource`].
+#[derive(PartialEq)]
 pub struct PreloadedFileBuffer {
     buffer: Vec<f32>,
     channel_count: usize,
@@ -29,6 +30,48 @@ pub struct PreloadedFileBuffer {
 }
 
 impl PreloadedFileBuffer {
+    /// Create a new shared sample buffer. Returns an error if buffer properties are invalid.
+    pub fn new(
+        buffer: Vec<f32>,
+        channel_count: usize,
+        sample_rate: u32,
+        loop_range: Option<Range<usize>>,
+    ) -> Result<Self, Error> {
+        if sample_rate == 0 {
+            return Err(Error::ParameterError(
+                "file buffer sample rate must be > 0".to_owned(),
+            ));
+        }
+        if channel_count == 0 {
+            return Err(Error::ParameterError(
+                "file buffer channel count must be > 0".to_owned(),
+            ));
+        }
+        if buffer.is_empty() {
+            return Err(Error::ParameterError(
+                "file buffer must not be empty".to_owned(),
+            ));
+        }
+        if !buffer.len().is_multiple_of(channel_count) {
+            return Err(Error::ParameterError(
+                "file buffer length must be a multiple of the channel count".to_owned(),
+            ));
+        }
+        if let Some(loop_range) = &loop_range {
+            if loop_range.start >= loop_range.end || loop_range.end > buffer.len() {
+                return Err(Error::ParameterError(
+                    "file buffer loop range is out of bounds".to_owned(),
+                ));
+            }
+        }
+        Ok(Self {
+            buffer,
+            channel_count,
+            sample_rate,
+            loop_range,
+        })
+    }
+
     /// Access to the shared sample buffer's raw interleaved sample data.
     pub fn buffer(&self) -> &[f32] {
         &self.buffer
@@ -48,20 +91,9 @@ impl PreloadedFileBuffer {
     pub fn loop_range(&self) -> Option<Range<usize>> {
         self.loop_range.clone()
     }
-
-    /// Ensure all properties are valid for playback.
-    fn validate(&self) -> Result<(), Error> {
-        if self.buffer.is_empty() {
-            return Err(Error::ParameterError("empty audio file".to_owned()));
-        }
-        if let Some(loop_range) = &self.loop_range {
-            if loop_range.start >= loop_range.end || loop_range.end > self.buffer.len() {
-                return Err(Error::ParameterError("invalid loop range".to_owned()));
-            }
-        }
-        Ok(())
-    }
 }
+
+// -------------------------------------------------------------------------------------------------
 
 /// A buffered, clonable [`FileSource`], which decodes the entire file into a buffer before its
 /// played back.
@@ -95,16 +127,16 @@ impl PreloadedFileSource {
         )
     }
 
-    /// Create a new preloaded file source with the given encoded file buffer.
+    /// Create a new preloaded file source with the given raw **encoded** file stream buffer.
     pub fn from_file_buffer(
-        buffer: Vec<u8>,
+        file_buffer: Vec<u8>,
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         Self::from_audio_decoder(
-            AudioDecoder::from_buffer(buffer)?,
+            AudioDecoder::from_buffer(file_buffer)?,
             file_path,
             playback_status_send,
             options,
@@ -162,14 +194,14 @@ impl PreloadedFileSource {
             }
         }
 
-        let file_buffer = Arc::new(PreloadedFileBuffer {
+        let file_buffer = Arc::new(PreloadedFileBuffer::new(
             buffer,
-            sample_rate,
             channel_count,
+            sample_rate,
             loop_range,
-        });
+        )?);
 
-        Self::from_shared_file_buffer(
+        Self::from_shared_buffer(
             file_buffer,
             file_path,
             playback_status_send,
@@ -178,45 +210,14 @@ impl PreloadedFileSource {
         )
     }
 
-    /// Create a new preloaded file source with the given decoded raw buffer.
-    #[cfg(test)]
-    fn from_raw_buffer(
-        buffer: Vec<f32>,
-        sample_rate: u32,
-        channel_count: usize,
-        options: FilePlaybackOptions,
-        output_sample_rate: u32,
-    ) -> Result<Self, Error> {
-        let loop_range = None;
-
-        let file_buffer = Arc::new(PreloadedFileBuffer {
-            buffer,
-            sample_rate,
-            channel_count,
-            loop_range,
-        });
-
-        let file_path = "buffer".to_owned();
-        let playback_status_send = None;
-
-        Self::from_shared_file_buffer(
-            file_buffer,
-            &file_path,
-            playback_status_send,
-            options,
-            output_sample_rate,
-        )
-    }
-
-    fn from_shared_file_buffer(
+    /// Create a new preloaded file source from the given shared, **decoded** file buffer.
+    pub fn from_shared_buffer(
         file_buffer: Arc<PreloadedFileBuffer>,
         file_path: &str,
         playback_status_send: Option<Sender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        // validate data
-        file_buffer.validate()?;
         // validate options
         options.validate()?;
 
@@ -249,11 +250,6 @@ impl PreloadedFileSource {
         })
     }
 
-    /// Access to the shared file buffer.
-    pub fn file_buffer(&self) -> Arc<PreloadedFileBuffer> {
-        Arc::clone(&self.file_buffer)
-    }
-
     /// Create a copy of this preloaded source with the given playback options.
     pub fn clone(
         &self,
@@ -262,13 +258,18 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         let file_buffer = Arc::clone(&self.file_buffer);
         let playback_status_send = self.file_source.playback_status_send.clone();
-        Self::from_shared_file_buffer(
+        Self::from_shared_buffer(
             file_buffer,
             &self.file_source.file_path,
             playback_status_send,
             options,
             output_sample_rate,
         )
+    }
+
+    /// Access to the shared file buffer.
+    pub fn file_buffer(&self) -> Arc<PreloadedFileBuffer> {
+        Arc::clone(&self.file_buffer)
     }
 
     fn process_messages(&mut self) {
@@ -502,40 +503,53 @@ mod tests {
 
     #[test]
     fn resampling() {
-        // add one extra zero sample for cubic resampling
-        let buffer = vec![0.2, 1.0, 0.5, 0.0];
+        let source_sample_rate = 44100;
+        let target_sample_rate = 48000;
+
+        // NB add extra tailing 0.0 sample for the cubic resampler
+        let file_buffer = Arc::new(
+            PreloadedFileBuffer::new(vec![0.2, 1.0, 0.5, 0.0], 1, source_sample_rate, None)
+                .unwrap(),
+        );
 
         // Default
-        let preloaded = PreloadedFileSource::from_raw_buffer(
-            buffer.clone(),
-            44100,
-            1,
+        let mut preloaded = PreloadedFileSource::from_shared_buffer(
+            Arc::clone(&file_buffer),
+            "buffer",
+            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::Default),
-            48000,
-        );
-        assert!(preloaded.is_ok());
-        let mut preloaded = preloaded.unwrap();
+            target_sample_rate,
+        )
+        .unwrap();
         let mut output = vec![0.0; 1024];
         let written = preloaded.write(&mut output, &SourceTime::default());
+        let expected_output =
+            file_buffer.buffer().len() as u32 * source_sample_rate / target_sample_rate;
+        assert!(written as u32 >= expected_output);
+        assert!(
+            (output.iter().sum::<f32>() - file_buffer.buffer().iter().sum::<f32>()).abs() < 0.1
+        );
 
-        assert_eq!(written, buffer.len() - 1);
-        assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.1);
+        // HighQuality
+        let file_buffer =
+            Arc::new(PreloadedFileBuffer::new(vec![0.2, 1.0, 0.5], 1, 48000, None).unwrap());
 
-        // Rubato
-        let preloaded = PreloadedFileSource::from_raw_buffer(
-            buffer.clone(),
-            44100,
-            1,
+        let mut preloaded = PreloadedFileSource::from_shared_buffer(
+            Arc::clone(&file_buffer),
+            "buffer",
+            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::HighQuality),
-            48000,
-        );
-        assert!(preloaded.is_ok());
-        let mut preloaded = preloaded.unwrap();
+            target_sample_rate,
+        )
+        .unwrap();
         let mut output = vec![0.0; 1024];
         let written = preloaded.write(&mut output, &SourceTime::default());
-
-        assert!(written > buffer.len());
-        assert!((output.iter().sum::<f32>() - buffer.iter().sum::<f32>()).abs() < 0.2);
+        let expected_output =
+            file_buffer.buffer().len() as u32 * source_sample_rate / target_sample_rate;
+        assert!(written as u32 >= expected_output);
+        assert!(
+            (output.iter().sum::<f32>() - file_buffer.buffer().iter().sum::<f32>()).abs() < 0.2
+        );
         assert!(output[3..].iter().sum::<f32>() < 0.1);
     }
 }
