@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.2 - 2025/10/19
+
+- fix possible never-ending loop when looking up loop chunk data in broken RIFF files
+- allow accessing shared file buffers of PreloadedFileSources and construction
+ 
 ## v0.11.1 - 2025/10/14
 
 - fixed docs.rs builds
