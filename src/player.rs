@@ -74,6 +74,18 @@ pub enum PlaybackStatusEvent {
 
 // -------------------------------------------------------------------------------------------------
 
+/// How to move an effect within a mixer.
+pub enum EffectMovement {
+    /// Negative value shift the effect towards the start, positive ones towards the end.
+    Direction(i32),
+    /// Move effect to the start of the effect chain.
+    Start,
+    /// Move effect to the end of the effect chain.
+    End,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Wraps File and Synth Playback messages together into one object, allowing to easily stop them.
 #[derive(Clone)]
 pub(crate) enum PlaybackMessageQueue {
@@ -562,6 +574,51 @@ impl Player {
         self.mixer_effects.insert(id, (mixer_id, Some(effect_name)));
 
         Ok(id)
+    }
+
+    /// Move an effect within the given mixer's effect list to reorder the processing chain.
+    pub fn move_effect<M: Into<Option<MixerId>>>(
+        &mut self,
+        movement: EffectMovement,
+        effect_id: EffectId,
+        mixer_id: M,
+    ) -> Result<(), Error> {
+        let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
+
+        // Verify the effect exists and belongs to the specified mixer
+        let (effect_mixer_id, _) = *self
+            .mixer_effects
+            .get(&effect_id)
+            .ok_or(Error::EffectNotFoundError(effect_id))?
+            .value();
+
+        if effect_mixer_id != mixer_id {
+            return Err(Error::ParameterError(format!(
+                "Effect {} does not belong to mixer {}",
+                effect_id, mixer_id
+            )));
+        }
+
+        let mixer_event_queue = self
+            .mixer_event_queues
+            .get(&mixer_id)
+            .ok_or(Error::MixerNotFoundError(mixer_id))?
+            .clone();
+
+        // Send the move message to the mixer
+        if mixer_event_queue
+            .push(MixerMessage::MoveEffect {
+                id: effect_id,
+                movement,
+            })
+            .is_err()
+        {
+            log::warn!("Mixer's event queue is full. Failed to move effect.");
+            log::warn!("Increase the mixer event queue to prevent this from happening...");
+            return Err(Error::SendError);
+        }
+
+        Ok(())
     }
 
     /// Remove an effect from the given mixer.

@@ -7,7 +7,7 @@ use four_cc::FourCC;
 use crate::{
     effect::{Effect, EffectMessage},
     parameter::ParameterValueUpdate,
-    player::{EffectId, PlaybackMessageQueue},
+    player::{EffectId, EffectMovement, PlaybackMessageQueue},
     source::{
         amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
         Source, SourceTime,
@@ -149,6 +149,10 @@ pub(crate) enum MixerMessage {
     RemoveMixer {
         id: MixerId,
     },
+    MoveEffect {
+        id: EffectId,
+        movement: EffectMovement,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -281,6 +285,26 @@ impl MixedSource {
                 }
                 MixerMessage::RemoveMixer { id } => {
                     self.mixers.retain(|(mixer_id, _)| *mixer_id != id);
+                }
+                MixerMessage::MoveEffect { id, movement } => {
+                    if let Some(current_pos) = self
+                        .effects
+                        .iter()
+                        .position(|(effect_id, _)| *effect_id == id)
+                    {
+                        let effect = self.effects.remove(current_pos);
+                        let new_pos = match movement {
+                            EffectMovement::Direction(offset) => {
+                                let target = current_pos as i32 + offset;
+                                target.clamp(0, self.effects.len() as i32) as usize
+                            }
+                            EffectMovement::Start => 0,
+                            EffectMovement::End => self.effects.len(),
+                        };
+                        self.effects.insert(new_pos, effect);
+                    } else {
+                        log::warn!("Effect with id {} not found for move operation", id);
+                    }
                 }
                 MixerMessage::ProcessEffectMessage {
                     effect_id,

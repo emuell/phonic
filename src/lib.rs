@@ -102,7 +102,8 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectId, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent, Player,
+    EffectId, EffectMovement, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
+    Player,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
