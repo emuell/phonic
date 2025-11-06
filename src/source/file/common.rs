@@ -169,22 +169,23 @@ impl FileSourceImpl {
         }
     }
 
-    pub fn samples_to_duration(&self, samples: u64, channel_count: usize) -> Duration {
-        let frames = samples / channel_count as u64;
-        let seconds = frames as f64 / self.output_sample_rate as f64;
-        Duration::from_secs_f64(seconds)
-    }
-
-    pub fn send_playback_position_status(&mut self, position: Duration) {
+    pub fn send_playback_position_status(
+        &mut self,
+        sample_pos: u64,
+        channel_count: usize,
+        sample_rate: u32,
+    ) {
         if let Some(event_send) = &self.playback_status_send {
             if self.should_report_pos() {
                 self.playback_pos_report_instant = Instant::now();
+                let frame_pos = sample_pos / channel_count as u64;
+                let second_pos = frame_pos as f64 / sample_rate as f64;
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.file_id,
                     context: self.playback_status_context.clone(),
                     path: self.file_path.clone(),
-                    position,
+                    position: Duration::from_secs_f64(second_pos),
                 }) {
                     log::warn!("failed to send playback event: {err}")
                 }

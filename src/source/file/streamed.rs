@@ -319,11 +319,11 @@ impl Source for StreamedFileSource {
             .process(&mut output[..total_written]);
 
         // send Position change events, if needed
-        let position = self.written_samples(total_written as u64);
-        let duration = self
-            .file_source
-            .samples_to_duration(position, self.channel_count());
-        self.file_source.send_playback_position_status(duration);
+        self.file_source.send_playback_position_status(
+            self.written_samples(total_written as u64),
+            self.signal_spec.channels.count(),
+            self.signal_spec.rate,
+        );
 
         // check if playback finished and send Stopped events
         let is_playing = self.worker_state.is_playing.load(Ordering::Relaxed);

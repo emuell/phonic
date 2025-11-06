@@ -462,10 +462,11 @@ impl Source for PreloadedFileSource {
             .process(&mut output[..total_written]);
 
         // send Position change events, if needed
-        let position = self
-            .file_source
-            .samples_to_duration(self.playback_pos as u64, self.file_buffer.channel_count);
-        self.file_source.send_playback_position_status(position);
+        self.file_source.send_playback_position_status(
+            self.playback_pos as u64,
+            self.file_buffer.channel_count,
+            self.file_buffer.sample_rate,
+        );
 
         // check if we've finished playing and send Stopped events
         let fade_out_completed = self.file_source.volume_fader.state() == FaderState::Finished
