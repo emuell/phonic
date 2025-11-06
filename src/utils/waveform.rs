@@ -63,12 +63,14 @@
 
 use std::time::Duration;
 
+use super::buffer::InterleavedBuffer;
+
 // -------------------------------------------------------------------------------------------------
 
 /// A single point in a waveform view plot, which represents a condensed view of the audio data at
 /// the specified time as min/max values.
 /// The slice width is indirectly specified via the resolution parameter when generating the points.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Point {
     /// Start time this point refers to in the original sample buffer.
     pub time: Duration,
@@ -101,9 +103,8 @@ pub fn mixed_down(
 
     // upscale
     if frame_count <= resolution {
-        for (frame_index, frame) in buffer.chunks_exact(channel_count).enumerate() {
+        for (frame_index, frame) in buffer.frames(channel_count).enumerate() {
             let mono_value = frame
-                .iter()
                 .copied()
                 .fold(0.0, |accum, iter| accum + iter / channel_count as f32);
             waveform.push(Point {
@@ -119,25 +120,20 @@ pub fn mixed_down(
         for res_index in 0..resolution {
             let mut min = f32::MAX;
             let mut max = f32::MIN;
-            let slice_start = (res_index as f32 * step_size) as usize * channel_count;
+            let frame_index = (res_index as f32 * step_size) as usize;
+            let slice_start = frame_index * channel_count;
             let slice_end =
                 (((res_index + 1) as f32 * step_size) as usize * channel_count).min(buffer.len());
             let slice = &buffer[slice_start..slice_end];
-            for frame in slice.chunks_exact(channel_count) {
+            for frame in slice.frames(channel_count) {
                 let mono_value = frame
-                    .iter()
                     .copied()
                     .fold(0.0, |accum, iter| accum + iter / channel_count as f32);
                 min = min.min(mono_value);
                 max = max.max(mono_value);
             }
-            waveform.push(Point {
-                time: Duration::from_secs_f32(
-                    slice_start as f32 / channel_count as f32 / samples_per_sec as f32,
-                ),
-                min,
-                max,
-            });
+            let time = Duration::from_secs_f32(frame_index as f32 / samples_per_sec as f32);
+            waveform.push(Point { time, min, max });
         }
     }
     waveform
@@ -161,9 +157,9 @@ pub fn multi_channel(
 
     // upscale
     if frame_count <= resolution {
-        for (frame_index, frame) in buffer.chunks_exact(channel_count).enumerate() {
+        for (frame_index, frame) in buffer.frames(channel_count).enumerate() {
             let time = Duration::from_secs_f32(frame_index as f32 / samples_per_sec as f32);
-            for (channel_index, value) in frame.iter().enumerate() {
+            for (channel_index, value) in frame.enumerate() {
                 waveform[channel_index].push(Point {
                     time,
                     min: *value,
@@ -178,19 +174,18 @@ pub fn multi_channel(
         for res_index in 0..resolution {
             let mut min = vec![f32::MAX; channel_count];
             let mut max = vec![f32::MIN; channel_count];
-            let slice_start = (res_index as f32 * step_size) as usize * channel_count;
+            let frame_index = (res_index as f32 * step_size) as usize;
+            let slice_start = frame_index * channel_count;
             let slice_end =
                 (((res_index + 1) as f32 * step_size) as usize * channel_count).min(buffer.len());
             let slice = &buffer[slice_start..slice_end];
-            for frame in slice.chunks_exact(channel_count) {
-                for (channel_index, value) in frame.iter().enumerate() {
+            for frame in slice.frames(channel_count) {
+                for (channel_index, value) in frame.enumerate() {
                     min[channel_index] = min[channel_index].min(*value);
                     max[channel_index] = max[channel_index].max(*value);
                 }
             }
-            let time = Duration::from_secs_f32(
-                slice_start as f32 / channel_count as f32 / samples_per_sec as f32,
-            );
+            let time = Duration::from_secs_f32(frame_index as f32 / samples_per_sec as f32);
             for channel_index in 0..channel_count {
                 waveform[channel_index].push(Point {
                     time,
