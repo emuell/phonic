@@ -1,9 +1,9 @@
 use std::{
+    sync::mpsc::SyncSender,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
@@ -36,7 +36,7 @@ where
     sample_rate: u32,
     volume_fader: VolumeFader,
     playback_message_queue: Arc<ArrayQueue<SynthPlaybackMessage>>,
-    playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     playback_status_context: Option<PlaybackStatusContext>,
     playback_id: PlaybackId,
     playback_name: Arc<String>,
@@ -58,7 +58,7 @@ where
         generator_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,
-        event_send: Option<Sender<PlaybackStatusEvent>>,
+        event_send: Option<SyncSender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
@@ -117,10 +117,10 @@ where
         self.playback_message_queue.clone()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
         self.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
         self.playback_status_send = sender;
     }
 

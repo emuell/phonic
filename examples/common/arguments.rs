@@ -1,7 +1,6 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::mpsc::SyncSender};
 
 use arg::{parse_args, Args};
-use crossbeam_channel::Sender;
 
 use phonic::{outputs::WavOutput, DefaultOutputDevice, Error, PlaybackStatusEvent, Player};
 
@@ -54,7 +53,7 @@ pub fn parse() -> Arguments {
 // -------------------------------------------------------------------------------------------------
 
 // Create a new player instance using the given argument options.
-pub fn new_player<S: Into<Option<Sender<PlaybackStatusEvent>>>>(
+pub fn new_player<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
     args: &Arguments,
     status_sender: S,
 ) -> Result<Player, Error> {

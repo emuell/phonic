@@ -1,6 +1,5 @@
-use std::sync::Arc;
+use std::sync::{mpsc::SyncSender, Arc};
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use dasp::{signal::UntilExhausted, Signal};
 
@@ -74,7 +73,7 @@ where
         signal_name: &str,
         options: SynthPlaybackOptions,
         sample_rate: u32,
-        event_send: Option<Sender<PlaybackStatusEvent>>,
+        event_send: Option<SyncSender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         Ok(Self(SynthSourceImpl::new(
             DaspSynthGenerator::new(signal, sample_rate),
@@ -102,10 +101,10 @@ where
         self.0.playback_message_queue()
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
         self.0.playback_status_sender()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
         self.0.set_playback_status_sender(sender);
     }
 

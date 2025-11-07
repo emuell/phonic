@@ -1,6 +1,5 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::mpsc::SyncSender, sync::Arc, time::Duration};
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
@@ -209,8 +208,8 @@ pub trait FileSource: Source {
     fn playback_message_queue(&self) -> Arc<ArrayQueue<FilePlaybackMessage>>;
 
     /// Channel to receive playback status from the file.
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>>;
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>);
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>>;
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>);
 
     /// Optional context passed along with the playback status.
     fn playback_status_context(&self) -> Option<PlaybackStatusContext>;

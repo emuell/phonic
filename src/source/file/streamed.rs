@@ -3,6 +3,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{sync_channel, Receiver, RecvTimeoutError, SendError, SyncSender, TrySendError},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -10,7 +11,6 @@ use std::{
 };
 
 use audio_thread_priority::promote_current_thread_to_real_time;
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, SendError, Sender, TrySendError};
 use crossbeam_queue::ArrayQueue;
 use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
@@ -54,7 +54,7 @@ pub struct StreamedFileSource {
 impl StreamedFileSource {
     pub fn from_file<P: AsRef<Path>>(
         path: P,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -235,10 +235,10 @@ impl FileSource for StreamedFileSource {
         Arc::clone(&self.file_source.playback_message_queue)
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
         self.file_source.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
         self.file_source.playback_status_send = sender;
     }
 
@@ -371,7 +371,7 @@ impl Drop for StreamedFileSource {
 struct StreamThreadHandle {
     #[allow(unused)]
     thread: JoinHandle<()>,
-    sender: Sender<StreamedFileSourceMessage>,
+    sender: SyncSender<StreamedFileSourceMessage>,
 }
 
 impl StreamThreadHandle {
@@ -427,7 +427,7 @@ struct SharedStreamThreadState {
 /// Manages the file's stream thread.
 struct StreamThread {
     /// Sending part of our own actor channel.
-    sender: Sender<StreamedFileSourceMessage>,
+    sender: SyncSender<StreamedFileSourceMessage>,
     /// Decoder we are reading packets/samples from.
     decoder: AudioDecoder,
     /// Audio properties of the decoded signal.
@@ -462,7 +462,7 @@ impl StreamThread {
     }
 
     fn new(
-        sender: Sender<StreamedFileSourceMessage>,
+        sender: SyncSender<StreamedFileSourceMessage>,
         decoder: AudioDecoder,
         output: SpscRb<f32>,
         shared_state: SharedStreamThreadState,
@@ -521,9 +521,10 @@ impl StreamThread {
 
     fn spawn<F>(factory: F) -> StreamThreadHandle
     where
-        F: FnOnce(Sender<StreamedFileSourceMessage>) -> Self + Send + 'static,
+        F: FnOnce(SyncSender<StreamedFileSourceMessage>) -> Self + Send + 'static,
     {
-        let (sender, receiver) = bounded(64);
+        const MESSAGE_QUEUE_SIZE: usize = 64;
+        let (sender, receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
         StreamThreadHandle {
             sender: sender.clone(),
             thread: thread::Builder::new()

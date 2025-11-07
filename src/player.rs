@@ -3,6 +3,7 @@ use std::{
     any::Any,
     sync::{
         atomic::{self, AtomicBool},
+        mpsc::{sync_channel, SyncSender},
         Arc,
     },
     thread,
@@ -10,7 +11,6 @@ use std::{
 };
 
 use basedrop::{Collector, Handle, Owned};
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
 use four_cc::FourCC;
@@ -143,7 +143,7 @@ pub(crate) struct PlayingSource {
 pub struct Player {
     output_device: Box<dyn OutputDevice>,
     playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
-    playback_status_sender: Sender<PlaybackStatusEvent>,
+    playback_status_sender: SyncSender<PlaybackStatusEvent>,
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
     mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
@@ -157,7 +157,7 @@ impl Player {
     /// Create a new Player for the given [`OutputDevice`].
     /// Param `playback_status_sender` is an optional channel which can be used to receive
     /// playback status events for the currently playing sources.
-    pub fn new<S: Into<Option<Sender<PlaybackStatusEvent>>>>(
+    pub fn new<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
         output_device: impl OutputDevice + 'static,
         playback_status_sender: S,
     ) -> Self {
@@ -232,7 +232,7 @@ impl Player {
 
     /// Get a copy of our playback status sender channel.
     /// Should be used by custom audio sources only.
-    pub fn playback_status_sender(&self) -> Sender<PlaybackStatusEvent> {
+    pub fn playback_status_sender(&self) -> SyncSender<PlaybackStatusEvent> {
         self.playback_status_sender.clone()
     }
 
@@ -1069,23 +1069,13 @@ impl Player {
 /// details
 impl Player {
     fn handle_playback_events(
-        playback_sender: Option<Sender<PlaybackStatusEvent>>,
+        playback_sender: Option<SyncSender<PlaybackStatusEvent>>,
         playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
-    ) -> Sender<PlaybackStatusEvent> {
-        let (playback_send_proxy, playback_recv_proxy) = {
-            // use same capacity in proxy as original one
-            if let Some(playback_sender) = &playback_sender {
-                if let Some(capacity) = playback_sender.capacity() {
-                    crossbeam_channel::bounded::<PlaybackStatusEvent>(capacity)
-                } else {
-                    crossbeam_channel::unbounded::<PlaybackStatusEvent>()
-                }
-            // use a bounded channel with a default cap for playback tracking, when there's no original channel
-            } else {
-                const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 1024;
-                crossbeam_channel::bounded::<PlaybackStatusEvent>(DEFAULT_PLAYBACK_EVENTS_CAPACITY)
-            }
-        };
+    ) -> SyncSender<PlaybackStatusEvent> {
+        // use a relatively big bounded channel for playback status tracking
+        const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 1024;
+        let (playback_send_proxy, playback_recv_proxy) =
+            sync_channel::<PlaybackStatusEvent>(DEFAULT_PLAYBACK_EVENTS_CAPACITY);
 
         std::thread::Builder::new()
             .name("audio_player_messages".to_string())

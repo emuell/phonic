@@ -1,9 +1,8 @@
 use std::{
-    sync::Arc,
+    sync::{mpsc::SyncSender, Arc},
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
@@ -37,7 +36,7 @@ pub struct FileSourceImpl {
     pub output_sample_rate: u32,
     pub output_channel_count: usize,
     pub playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
-    pub playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+    pub playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     pub playback_status_context: Option<PlaybackStatusContext>,
     pub playback_pos_report_instant: Instant,
     pub playback_pos_emit_rate: Option<Duration>,
@@ -58,7 +57,7 @@ impl FileSourceImpl {
         input_sample_rate: u32,
         input_channel_count: usize,
         output_sample_rate: u32,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // create event queue for the player
         let playback_message_queue = Arc::new(ArrayQueue::new(128));

@@ -1,6 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{mpsc::SyncSender, Arc},
+    time::Duration,
+};
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
@@ -142,8 +144,8 @@ pub trait SynthSource: Source {
     fn playback_message_queue(&self) -> Arc<ArrayQueue<SynthPlaybackMessage>>;
 
     /// Channel to receive file playback status from the synth.
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>>;
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>);
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>>;
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>);
 
     /// Optional context passed along with the playback status.
     fn playback_status_context(&self) -> Option<PlaybackStatusContext>;
