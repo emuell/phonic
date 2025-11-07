@@ -14,7 +14,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Sample,
 };
-use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use crate::{
     error::Error,
@@ -46,8 +46,8 @@ pub struct CpalOutput {
     sample_rate: cpal::SampleRate,
     volume: f32,
     playback_pos: Arc<AtomicU64>,
-    callback_sender: Sender<CallbackMessage>,
-    stream_sender: Sender<StreamMessage>,
+    callback_sender: SyncSender<CallbackMessage>,
+    stream_sender: SyncSender<StreamMessage>,
     #[allow(unused)]
     stream_handle: StreamThreadHandle,
 }
@@ -93,7 +93,8 @@ impl CpalOutput {
         let volume = 1.0;
 
         // channel to send and receive callback messages
-        let (callback_sender, callback_receiver) = bounded(16);
+        const MESSAGE_QUEUE_SIZE: usize = 16;
+        let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
 
         let stream_handle = Stream::spawn({
             let config = cpal::StreamConfig {
@@ -151,13 +152,13 @@ impl CpalOutput {
 
     fn send_to_callback(&self, msg: CallbackMessage) {
         if self.callback_sender.send(msg).is_err() {
-            log::error!("output stream actor is dead");
+            log::error!("callback queue is full or disconnected");
         }
     }
 
     fn send_to_stream(&self, msg: StreamMessage) {
         if self.stream_sender.send(msg).is_err() {
-            log::error!("output stream actor is dead");
+            log::error!("stream queue is full or disconnected");
         }
     }
 }
@@ -226,13 +227,13 @@ impl OutputDevice for CpalOutput {
 // -------------------------------------------------------------------------------------------------
 
 struct StreamThreadHandle {
-    sender: Sender<StreamMessage>,
+    sender: SyncSender<StreamMessage>,
     #[allow(dead_code)]
     thread: JoinHandle<()>,
 }
 
 impl StreamThreadHandle {
-    pub fn sender(&self) -> Sender<StreamMessage> {
+    pub fn sender(&self) -> SyncSender<StreamMessage> {
         self.sender.clone()
     }
 }
@@ -280,7 +281,7 @@ impl Stream {
         playback_pos: Arc<AtomicU64>,
         volume: f32,
         callback_receiver: Receiver<CallbackMessage>,
-        stream_sender: Sender<StreamMessage>,
+        stream_sender: SyncSender<StreamMessage>,
     ) -> Result<Self, Error> {
         let mut callback = StreamCallback {
             stream_sender,
@@ -377,9 +378,10 @@ impl Stream {
 
     fn spawn<F>(factory: F) -> StreamThreadHandle
     where
-        F: FnOnce(Sender<StreamMessage>) -> Self + Send + 'static,
+        F: FnOnce(SyncSender<StreamMessage>) -> Self + Send + 'static,
     {
-        let (send, receiver) = bounded(32);
+        const MESSAGE_QUEUE_SIZE: usize = 32;
+        let (send, receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
         StreamThreadHandle {
             sender: send.clone(),
             thread: thread::Builder::new()
@@ -421,7 +423,7 @@ impl Stream {
 
 struct StreamCallback {
     #[allow(dead_code)]
-    stream_sender: Sender<StreamMessage>,
+    stream_sender: SyncSender<StreamMessage>,
     callback_receiver: Receiver<CallbackMessage>,
     source: Box<dyn Source>,
     playback_pos: Arc<AtomicU64>,

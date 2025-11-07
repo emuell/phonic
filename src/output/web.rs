@@ -10,7 +10,7 @@ use std::{
     time::Instant,
 };
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use crate::{
     error::Error,
@@ -182,7 +182,7 @@ pub struct WebOutput {
     volume: f32,
     is_running: bool,
     playback_pos: Arc<AtomicU64>,
-    callback_sender: Sender<CallbackMessage>,
+    callback_sender: SyncSender<CallbackMessage>,
     #[allow(dead_code)]
     context_ref: Arc<WebContextRef>,
     channel_count: usize,
@@ -211,7 +211,8 @@ impl WebOutput {
         let frame_count = unsafe { phonic_js_buffer_frames() } as usize;
         let sample_rate = unsafe { phonic_js_sample_rate() } as u32;
 
-        let (callback_sender, callback_receiver) = bounded(16);
+        const MESSAGE_QUEUE_SIZE: usize = 16;
+        let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
 
         let is_running = false;
         let volume = 1.0;
@@ -265,9 +266,13 @@ impl OutputDevice for WebOutput {
     }
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume;
-        self.callback_sender
+        if self
+            .callback_sender
             .send(CallbackMessage::SetVolume(volume))
-            .unwrap();
+            .is_err()
+        {
+            log::error!("callback queue is full or disconnected");
+        }
     }
 
     fn is_suspended(&self) -> bool {
@@ -280,11 +285,15 @@ impl OutputDevice for WebOutput {
 
     fn pause(&mut self) {
         self.is_running = false;
-        self.callback_sender.send(CallbackMessage::Pause).unwrap();
+        if self.callback_sender.send(CallbackMessage::Pause).is_err() {
+            log::error!("callback queue is full or disconnected");
+        }
     }
 
     fn resume(&mut self) {
-        self.callback_sender.send(CallbackMessage::Resume).unwrap();
+        if self.callback_sender.send(CallbackMessage::Resume).is_err() {
+            log::error!("callback queue is full or disconnected");
+        }
         self.is_running = true;
     }
 
@@ -293,9 +302,13 @@ impl OutputDevice for WebOutput {
         assert_eq!(source.channel_count(), self.channel_count());
         assert_eq!(source.sample_rate(), self.sample_rate());
         // send message to activate it in the writer
-        self.callback_sender
+        if self
+            .callback_sender
             .send(CallbackMessage::PlaySource(source))
-            .unwrap();
+            .is_err()
+        {
+            log::error!("callback queue is full or disconnected");
+        }
         // auto-start with the first set source
         if !self.is_running {
             self.resume();
@@ -304,9 +317,13 @@ impl OutputDevice for WebOutput {
 
     fn stop(&mut self) {
         self.is_running = false;
-        self.callback_sender
+        if self
+            .callback_sender
             .send(CallbackMessage::PlaySource(Box::new(EmptySource)))
-            .unwrap();
+            .is_err()
+        {
+            log::error!("callback queue is full or disconnected");
+        }
     }
 
     fn close(&mut self) {

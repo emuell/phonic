@@ -3,6 +3,7 @@
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::sync_channel,
         Arc,
     },
     time::Duration,
@@ -31,8 +32,7 @@ fn main() -> Result<(), Error> {
     let args = arguments::parse();
 
     // Create a channel for playback status events.
-    // NB: prefer using a bounded channel here to avoid memory allocations in the audio thread.
-    let (status_sender, status_receiver) = crossbeam_channel::bounded(32);
+    let (status_sender, status_receiver) = sync_channel(32);
 
     // Create a player instance with the output device as configured via program arguments
     let mut player = arguments::new_player(&args, status_sender)?;

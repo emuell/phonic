@@ -1,6 +1,5 @@
-use std::{ops::Range, path::Path, sync::Arc};
+use std::{ops::Range, path::Path, sync::mpsc::SyncSender, sync::Arc};
 
-use crossbeam_channel::Sender;
 use crossbeam_queue::ArrayQueue;
 use symphonia::core::audio::SampleBuffer;
 
@@ -112,7 +111,7 @@ pub struct PreloadedFileSource {
 impl PreloadedFileSource {
     pub fn from_file<P: AsRef<Path>>(
         path: P,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -131,7 +130,7 @@ impl PreloadedFileSource {
     pub fn from_file_buffer(
         file_buffer: Vec<u8>,
         file_path: &str,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -147,7 +146,7 @@ impl PreloadedFileSource {
     fn from_audio_decoder(
         mut audio_decoder: AudioDecoder,
         file_path: &str,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -214,7 +213,7 @@ impl PreloadedFileSource {
     pub fn from_shared_buffer(
         file_buffer: Arc<PreloadedFileBuffer>,
         file_path: &str,
-        playback_status_send: Option<Sender<PlaybackStatusEvent>>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -389,10 +388,10 @@ impl FileSource for PreloadedFileSource {
         Arc::clone(&self.file_source.playback_message_queue)
     }
 
-    fn playback_status_sender(&self) -> Option<Sender<PlaybackStatusEvent>> {
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
         self.file_source.playback_status_send.clone()
     }
-    fn set_playback_status_sender(&mut self, sender: Option<Sender<PlaybackStatusEvent>>) {
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
         self.file_source.playback_status_send = sender;
     }
 

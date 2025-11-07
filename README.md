@@ -47,15 +47,16 @@ Play, seek and stop audio files on the default audio output device.
 Monitor playback status of playing files.
 
 ```rust no_run
+use std::sync::mpsc::sync_channel;
+
 use phonic::{
     DefaultOutputDevice, Player, PlaybackStatusEvent, Error, 
     FilePlaybackOptions, SynthPlaybackOptions
 };
 
 fn main() -> Result<(), Error> {
-    // Create a player with the default output device and a channel to receive file playback
-    // status events. Use a bounded channel to avoid allocations in audio thread.
-    let (playback_status_sender, playback_status_receiver) = crossbeam_channel::bounded(32);
+    // Create a player with the default output device and a channel to receive playback events.
+    let (playback_status_sender, playback_status_receiver) = sync_channel(32);
     let mut player = Player::new(DefaultOutputDevice::open()?, playback_status_sender);
 
     // Start playing a file: The file below is going to be "preloaded" because it uses the 
@@ -124,7 +125,7 @@ use phonic::{
 };
 
 fn main() -> Result<(), Error> {
-    // Create a player with the default output device
+    // Create a player with the default output device.
     let mut player = Player::new(DefaultOutputDevice::open()?, None);
 
     // Add a reverb effect to the main mixer. All sounds played without a

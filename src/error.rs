@@ -47,8 +47,8 @@ impl From<io::Error> for Error {
     }
 }
 
-impl<T> From<crossbeam_channel::SendError<T>> for Error {
-    fn from(_: crossbeam_channel::SendError<T>) -> Self {
+impl<T> From<std::sync::mpsc::SendError<T>> for Error {
+    fn from(_: std::sync::mpsc::SendError<T>) -> Self {
         Error::SendError
     }
 }
