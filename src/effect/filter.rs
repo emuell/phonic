@@ -192,6 +192,12 @@ impl Effect for FilterEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Biquad filter has internal state that rings out. 100ms (sample_rate/10) covers
+        // the decay time for most filter configurations.
+        Some(self.sample_rate as usize / 10)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

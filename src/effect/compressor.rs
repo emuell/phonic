@@ -317,6 +317,14 @@ impl Effect for CompressorEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Lookahead delay + envelope follower release time both contribute to tail duration
+        let lookahead_samples =
+            (self.lookahead_time.value() * self.sample_rate as f32).ceil() as usize;
+        let release_samples = (self.release_time.value() * self.sample_rate as f32).ceil() as usize;
+        Some(lookahead_samples + release_samples)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

@@ -108,6 +108,11 @@ impl Effect for GainEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Gain is instantaneous with no memory - no tail
+        Some(0)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

@@ -312,6 +312,12 @@ impl Effect for Eq5Effect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Five cascaded biquad filters ring longer than a single filter.
+        // 200ms (sample_rate/5) is a safe estimate for the combined decay.
+        Some(self.sample_rate as usize / 5)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

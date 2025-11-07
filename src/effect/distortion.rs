@@ -231,6 +231,11 @@ impl Effect for DistortionEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Memoryless waveshaping with no internal state - no tail
+        Some(0)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

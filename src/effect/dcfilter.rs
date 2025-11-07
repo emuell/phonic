@@ -95,6 +95,12 @@ impl Effect for DcFilterEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // One-pole high-pass filter has state that decays. 50ms (sample_rate/20) is a
+        // conservative estimate, especially in Slow mode (~1Hz cutoff) where decay is longest
+        Some(self.sample_rate as usize / 20)
+    }
+
     fn process_parameter_update(
         &mut self,
         id: FourCC,

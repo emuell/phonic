@@ -438,6 +438,28 @@ impl Effect for ChorusEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // Delay lines with feedback: tail depends on actual delay + modulation depth,
+        // multiplied by feedback decay factor
+        let delay_ms = self.delay.target_value();
+        let depth_ms = Self::MAX_APPLIED_RANGE_IN_SAMPLES * 1000.0 / self.sample_rate as f32;
+        let total_delay_ms = delay_ms + depth_ms;
+        let feedback = self.feedback.target_value().abs();
+        if feedback >= 1.0 {
+            Some(usize::MAX) // tail is infinite
+        } else if feedback < 0.001 {
+            // No significant feedback, just the delay time
+            Some((total_delay_ms * self.sample_rate as f32 / 1000.0).ceil() as usize)
+        } else {
+            // Calculate decay time based on feedback
+            const SILENCE: f64 = 0.001; // -60dB threshold
+            let total_delay_samples = total_delay_ms * self.sample_rate as f32 / 1000.0;
+            let decay_time_samples = total_delay_samples
+                + (total_delay_samples as f64 * SILENCE.log10() / (feedback as f64).log10()) as f32;
+            Some(decay_time_samples.ceil() as usize)
+        }
+    }
+
     fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
         if let Some(message) = message.payload().downcast_ref::<ChorusEffectMessage>() {
             match message {
