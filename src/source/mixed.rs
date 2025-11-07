@@ -21,6 +21,14 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+mod effect;
+mod submixer;
+
+use effect::EffectProcessor;
+use submixer::SubMixerProcessor;
+
+// -------------------------------------------------------------------------------------------------
+
 /// Mixer internal struct to keep track of currently playing sources.
 pub(crate) struct PlayingSource {
     is_active: bool,
@@ -160,8 +168,9 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
-    mixers: Vec<(EffectId, Box<MixedSource>)>,
-    effects: Vec<(EffectId, Box<dyn Effect>)>,
+    mixers: Vec<(EffectId, SubMixerProcessor)>,
+    effects: Vec<(EffectId, EffectProcessor)>,
+    effects_bypassed: bool,
     message_queue: Arc<ArrayQueue<MixerMessage>>,
     events: VecDeque<MixerEvent>,
     channel_count: usize,
@@ -183,6 +192,7 @@ impl MixedSource {
         let mixers = Vec::with_capacity(MIXERS_CAPACITY);
         const EFFECTS_CAPACITY: usize = 16;
         let effects = Vec::with_capacity(EFFECTS_CAPACITY);
+        let effects_bypassed = true;
 
         // prealloc event queues
         const MESSAGE_QUEUE_SIZE: usize = 4096;
@@ -198,6 +208,7 @@ impl MixedSource {
             mixers,
             events,
             effects,
+            effects_bypassed,
             message_queue,
             channel_count,
             sample_rate,
@@ -275,13 +286,23 @@ impl MixedSource {
                     );
                 }
                 MixerMessage::AddEffect { id, effect } => {
-                    self.effects.push((id, effect));
+                    self.effects.push((id, EffectProcessor::new(effect)));
+                    self.effects_bypassed = false;
                 }
                 MixerMessage::AddMixer { id, mixer } => {
-                    self.mixers.push((id, mixer));
+                    self.mixers.push((id, SubMixerProcessor::new(mixer)));
                 }
                 MixerMessage::RemoveEffect { id } => {
-                    self.effects.retain(|(effect_id, _)| *effect_id != id);
+                    if let Some(pos) = self
+                        .effects
+                        .iter()
+                        .position(|(effect_id, _)| *effect_id == id)
+                    {
+                        self.effects.remove(pos);
+                        if self.effects.is_empty() {
+                            self.effects_bypassed = true;
+                        }
+                    }
                 }
                 MixerMessage::RemoveMixer { id } => {
                     self.mixers.retain(|(mixer_id, _)| *mixer_id != id);
@@ -400,8 +421,28 @@ impl MixedSource {
         }
     }
 
-    // Write and mix down all playing sources into the given buffer at the given time.
-    fn process_sources(&mut self, output: &mut [f32], time: SourceTime) {
+    // Process all sub-mixers and add their output to the given output buffer.
+    // Returns true if any sub-mixer produced audible output.
+    fn process_sub_mixers(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
+        let mut produced_output = false;
+        for (_, sub_mixer) in &mut self.mixers {
+            let mix_buffer = &mut self.temp_out[..output.len()];
+            let is_audible = sub_mixer.process(
+                output,
+                mix_buffer,
+                self.channel_count,
+                self.sample_rate,
+                time,
+            );
+            produced_output |= is_audible;
+        }
+        produced_output
+    }
+
+    // Write and mix down all playing sources into the given output buffer.
+    // Returns true if any source produced audible output.
+    fn process_sources(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
+        let mut produced_output = false;
         let output_frame_count = output.len() / self.channel_count();
         'all_sources: for playing_source in self.playing_sources.iter_mut() {
             let mut total_written = 0;
@@ -451,6 +492,7 @@ impl MixedSource {
                 let written_out = &self.temp_out[..written];
                 add_buffers(remaining_out, written_out);
                 total_written += written;
+                produced_output |= written > 0;
 
                 // stop processing sources which are now exhausted
                 if source.is_exhausted() {
@@ -459,6 +501,39 @@ impl MixedSource {
                 }
             }
         }
+
+        produced_output
+    }
+
+    // Process all effects with bypass logic based on source activity.
+    fn process_effects(&mut self, output: &mut [f32], time: &SourceTime, input_bypassed: bool) {
+        // Early return if all effects are bypassed and we got no audible input
+        if self.effects_bypassed && input_bypassed {
+            return;
+        }
+
+        // Track if all effects are bypassed
+        let mut all_bypassed = true;
+        let mut input_bypassed = input_bypassed;
+
+        // Apply effects with bypass logic
+        for (_, mixer_effect) in &mut self.effects {
+            let is_active = mixer_effect.process(
+                output,
+                self.channel_count,
+                self.sample_rate,
+                input_bypassed,
+                time,
+            );
+
+            if is_active {
+                input_bypassed = false;
+                all_bypassed = false;
+            }
+        }
+
+        // Update the global bypass flag
+        self.effects_bypassed = all_bypassed;
     }
 }
 
@@ -504,23 +579,15 @@ impl Source for MixedSource {
                 let chunk_time = time.with_added_frames(total_frames_written as u64);
                 let chunk_output = &mut output[total_frames_written * self.channel_count
                     ..(total_frames_written + frames_to_process) * self.channel_count];
-                let chunk_len = chunk_output.len();
 
-                // apply sub-mixers
-                for (_, mixer) in &mut self.mixers {
-                    let temp_output = &mut self.temp_out[..chunk_len];
-                    let written = mixer.write(temp_output, &chunk_time);
-                    // add each sub mixer output to the main output buffer
-                    add_buffers(&mut chunk_output[..written], &temp_output[..written]);
-                }
+                // apply sub-mixers and track if they produced audible output
+                let mut audible_input = self.process_sub_mixers(chunk_output, &chunk_time);
 
                 // apply sources
-                self.process_sources(chunk_output, chunk_time);
+                audible_input |= self.process_sources(chunk_output, &chunk_time);
 
                 // apply effects
-                for (_, effect) in &mut self.effects {
-                    effect.process(chunk_output, &chunk_time);
-                }
+                self.process_effects(chunk_output, &chunk_time, !audible_input);
 
                 total_frames_written += frames_to_process;
             }
@@ -641,9 +708,10 @@ impl EventProcessor for MixedSource {
                 message,
                 sample_time: _,
             } => {
-                if let Some((_, effect)) = self.effects.iter_mut().find(|(id, _)| *id == effect_id)
+                if let Some((_, mixer_effect)) =
+                    self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
-                    if let Err(err) = effect.process_message(&**message) {
+                    if let Err(err) = mixer_effect.effect.process_message(&**message) {
                         log::error!("Failed to process message on effect {effect_id}: {err}");
                     }
                 } else {
@@ -656,9 +724,13 @@ impl EventProcessor for MixedSource {
                 value,
                 sample_time: _,
             } => {
-                if let Some((_, effect)) = self.effects.iter_mut().find(|(id, _)| *id == effect_id)
+                if let Some((_, mixer_effect)) =
+                    self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
-                    if let Err(err) = effect.process_parameter_update(parameter_id, &value) {
+                    if let Err(err) = mixer_effect
+                        .effect
+                        .process_parameter_update(parameter_id, &value)
+                    {
                         log::error!(
                             "Failed to update parameter '{parameter_id}' on effect {effect_id}: {err}",
                         );
