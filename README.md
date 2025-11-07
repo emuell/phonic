@@ -28,8 +28,8 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 - **Custom Synthesis and DSPs**:
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
   - Play completely custom-built synthesizers or use the optional [dasp](https://github.com/RustAudio/dasp) integration for creating synth sources.
-  - Apply custom-built DSP effects or use built-in effects: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
-
+  - Apply custom-built or use built-in DSP effects: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
+  - DSP effects are automatically bypassed to safe CPU cycles, when they receive no audible input.
 
 ### Documentation
 
