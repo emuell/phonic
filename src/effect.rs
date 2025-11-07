@@ -90,6 +90,24 @@ pub trait Effect: Send + Sync + 'static {
         max_frames: usize,
     ) -> Result<(), Error>;
 
+    /// Called in the real-time thread before audio processing starts.
+    ///
+    /// This is invoked by the player immediately before it begins continuously calling `process`
+    /// for the effect. Use this to prepare any real-time state or reset transient conditions.
+    /// Effects are initially stopped, so `process_started` is going to be called before the very
+    /// first `process` call is made.
+    ///
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
+    fn process_started(&mut self) {}
+
+    /// Called in the real-time thread after processing stopped.
+    ///
+    /// This is invoked by the player when it stops calling `process`, such as when auto-bypassing
+    /// effect chains after they received no more input. Use this to clean up real-time state.
+    ///
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
+    fn process_stopped(&mut self) {}
+
     /// Processes an audio buffer in-place, applying the effect.
     ///
     /// This method is called repeatedly on the real-time audio thread. To avoid audio glitches,
@@ -99,29 +117,40 @@ pub trait Effect: Send + Sync + 'static {
     /// representations of the given output buffer as needed.
     fn process(&mut self, output: &mut [f32], time: &EffectTime);
 
-    /// Handles a parameter update sent to the effect.
+    /// Returns the number of audible sample frames this effect will produce, after it received
+    /// silence.
+    ///
+    /// This is used to auto-bypass processing in effect chains, in order to save CPU cycles.
+    /// - `None`: means I don't know. Go figure. Use this as a fallback only as this comes with
+    ///   extra overhead.
+    /// - `Some(X)`: means that the effect will produce at least X sample frames of audible audio.
+    /// - `Some(usize::MAX)`: signals an infinite tail which will never auto-bypass the effect.
+    ///
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
+    fn process_tail(&self) -> Option<usize> {
+        None
+    }
+
+    /// Handles a parameter update in the real-time thread.
     ///
     /// This method is called on the real-time audio thread when a parameter change is scheduled
     /// for processing. The implementation should match on the `id` and update its internal
     /// state accordingly by using the `value` which can be a raw or normalized value.
     ///
-    /// Like `process`, this method must not block, allocate memory, or perform other
-    /// time-consuming operations.
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
     fn process_parameter_update(
         &mut self,
         id: FourCC,
         value: &ParameterValueUpdate,
     ) -> Result<(), Error>;
 
-    /// Handles optional effect specific messages sent to the effect. This can be used to pass effect
-    /// specific non parameter changes to the effect processor.
+    /// Handles optional effect specific messages in the real-time thread. This can be used to pass
+    /// payloads to the effects, which can or should not be expressed as a trivial parameter change.
     ///
-    /// This method is called on the real-time audio thread when a message is scheduled for processing.
     /// The implementation should downcast the `message` payload to its specific message enum type
     /// and update its internal state accordingly.
     ///
-    /// Like `process`, this method must not block, allocate memory, or perform other
-    /// time-consuming operations.
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
     fn process_message(&mut self, _message: &EffectMessagePayload) -> Result<(), Error> {
         Err(Error::ParameterError(format!(
             "{}: Received unexpected message payload.",

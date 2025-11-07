@@ -753,6 +753,26 @@ impl Effect for ReverbEffect {
         }
     }
 
+    fn process_tail(&self) -> Option<usize> {
+        // 8 delay lines in feedback matrix: tail depends on longest delay line,
+        // number of lines (8x), and regeneration factor
+        let room_size = self.room_size.target_value() as f64;
+        let size = (room_size.powi(2) * 75.0) + 25.0;
+        let max_delay = (79.0 * size) as usize;
+        let feedback = 1.0 - (1.0 - (0.82 - (((1.0 - room_size) * 0.7) + (size * 0.002)))).powi(4);
+        if feedback >= 1.0 {
+            Some(usize::MAX) // tail is infinitive
+        } else {
+            let decay_time_samples = if feedback == 0.0 {
+                max_delay
+            } else {
+                const SILENCE: f64 = 0.001; // -60dB
+                max_delay + (max_delay as f64 * SILENCE.log10() / feedback.log10()) as usize
+            };
+            Some(decay_time_samples)
+        }
+    }
+
     fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
         if let Some(message) = message.payload().downcast_ref::<ReverbEffectMessage>() {
             match message {
