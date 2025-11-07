@@ -147,6 +147,31 @@ pub fn copy_buffers_with_simd<'a, S: Simd>(_simd: S, dest: &'a mut [f32], source
     }
 }
 
+#[pulp::with_simd(max_abs_sample = pulp::Arch::new())]
+#[inline(always)]
+/// Find the maximum absolute value in a buffer using SIMD
+pub fn max_abs_sample_with_simd<S: Simd>(simd: S, buffer: &[f32]) -> f32 {
+    let (head, tail) = S::as_simd_f32s(buffer);
+
+    // Process SIMD lanes
+    let mut max_vec = simd.splat_f32s(0.0);
+    for &x in head {
+        let abs_x = simd.abs_f32s(x);
+        max_vec = simd.max_f32s(max_vec, abs_x);
+    }
+
+    // Reduce SIMD vector to scalar
+    let lanes = simd.reduce_max_f32s(max_vec);
+
+    // Process remaining scalar elements
+    let mut max_scalar = lanes;
+    for &x in tail {
+        max_scalar = max_scalar.max(x.abs());
+    }
+
+    max_scalar
+}
+
 // -------------------------------------------------------------------------------------------------
 
 /// Provides safe and efficient methods to access interleaved audio data, such as iterating over
@@ -504,6 +529,67 @@ mod tests {
         interleaved_to_planar(&interleaved_general, &mut planar_general_copy);
         assert_eq!(planar_general, planar_general_copy);
         assert_eq!(interleaved_general, interleaved_general_copy);
+    }
+
+    #[test]
+    fn clear_buffer_simd() {
+        let mut buffer = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
+        clear_buffer(&mut buffer);
+        assert_eq!(
+            buffer,
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn scale_buffer_simd() {
+        let mut buffer = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
+        scale_buffer(&mut buffer, 2.0);
+        assert_eq!(
+            buffer,
+            vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0]
+        );
+
+        scale_buffer(&mut buffer, 0.5);
+        assert_eq!(
+            buffer,
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+        );
+    }
+
+    #[test]
+    fn add_buffers_simd() {
+        let mut dest = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
+        let source = vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5];
+        add_buffers(&mut dest, &source);
+        assert_eq!(
+            dest,
+            vec![1.5, 3.0, 4.5, 6.0, 7.5, 9.0, 10.5, 12.0, 13.5, 15.0, 16.5]
+        );
+    }
+
+    #[test]
+    fn copy_buffers_simd() {
+        let mut dest = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let source = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
+        copy_buffers(&mut dest, &source);
+        assert_eq!(
+            dest,
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+        );
+    }
+
+    #[test]
+    fn max_abs_sample_simd() {
+        let buffer = vec![
+            0.1, -0.5, 0.3, -0.2, 0.15, -0.25, 0.35, -0.45, 0.05, -0.15, 0.25,
+        ];
+        let max = max_abs_sample(&buffer);
+        assert_eq!(max, 0.5);
+
+        let buffer: Vec<f32> = vec![];
+        let max = max_abs_sample(&buffer);
+        assert_eq!(max, 0.0);
     }
 
     #[test]
