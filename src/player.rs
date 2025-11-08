@@ -98,10 +98,10 @@ impl PlaybackMessageQueue {
         match self {
             PlaybackMessageQueue::File(sender) => sender
                 .push(FilePlaybackMessage::Stop)
-                .map_err(|_msg| Error::SendError),
+                .map_err(|_msg| Error::SendError("File playback queue is full".to_string())),
             PlaybackMessageQueue::Synth(sender) => sender
                 .push(SynthPlaybackMessage::Stop)
-                .map_err(|_msg| Error::SendError),
+                .map_err(|_msg| Error::SendError("Synth playback queue is full".to_string())),
         }
     }
 }
@@ -323,12 +323,11 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to play a file source.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("play_file"))
+        } else {
+            // return new file's id
+            Ok(playback_id)
         }
-        // return new file's id
-        Ok(playback_id)
     }
 
     /// Play a self created synth source with the given playback options.
@@ -402,12 +401,11 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to play a synth source.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("play_synth"))
+        } else {
+            // return new synth's id
+            Ok(playback_id)
         }
-        // return new synth's id
-        Ok(playback_id)
     }
 
     /// Add a new mixer to an existing mixer.
@@ -438,17 +436,15 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to add a new mixer.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("add_mixer"))
+        } else {
+            self.mixer_event_queues
+                .insert(new_mixer_id, new_mixer_queue);
+            self.mixer_effects
+                .insert(new_mixer_id, (parent_mixer_id, None));
+
+            Ok(new_mixer_id)
         }
-
-        self.mixer_event_queues
-            .insert(new_mixer_id, new_mixer_queue);
-        self.mixer_effects
-            .insert(new_mixer_id, (parent_mixer_id, None));
-
-        Ok(new_mixer_id)
     }
 
     /// Remove a mixer and all its effects from the parent mixer.
@@ -478,34 +474,32 @@ impl Player {
             .push(MixerMessage::RemoveMixer { id: mixer_id })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to remove a mixer.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("remove_mixer"))
+        } else {
+            // Remove all effects that belong to this mixer
+            let effects_to_remove: Vec<EffectId> = self
+                .mixer_effects
+                .iter()
+                .filter_map(|entry| {
+                    let (effect_id, (owner_mixer_id, _)) = (entry.key(), entry.value());
+                    if *owner_mixer_id == mixer_id {
+                        Some(*effect_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for effect_id in effects_to_remove {
+                self.mixer_effects.remove(&effect_id);
+            }
+
+            // Remove the mixer from tracking maps
+            self.mixer_event_queues.remove(&mixer_id);
+            self.mixer_effects.remove(&mixer_id);
+
+            Ok(())
         }
-
-        // Remove all effects that belong to this mixer
-        let effects_to_remove: Vec<EffectId> = self
-            .mixer_effects
-            .iter()
-            .filter_map(|entry| {
-                let (effect_id, (owner_mixer_id, _)) = (entry.key(), entry.value());
-                if *owner_mixer_id == mixer_id {
-                    Some(*effect_id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for effect_id in effects_to_remove {
-            self.mixer_effects.remove(&effect_id);
-        }
-
-        // Remove the mixer from tracking maps
-        self.mixer_event_queues.remove(&mixer_id);
-        self.mixer_effects.remove(&mixer_id);
-
-        Ok(())
     }
 
     /// Remove all sub-mixers from the given mixer.
@@ -566,14 +560,11 @@ impl Player {
             .push(MixerMessage::AddEffect { id, effect })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to add a new effect.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("add_effect"))
+        } else {
+            self.mixer_effects.insert(id, (mixer_id, Some(effect_name)));
+            Ok(id)
         }
-
-        self.mixer_effects.insert(id, (mixer_id, Some(effect_name)));
-
-        Ok(id)
     }
 
     /// Move an effect within the given mixer's effect list to reorder the processing chain.
@@ -613,12 +604,10 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to move effect.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("move_effect"))
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     /// Remove an effect from the given mixer.
@@ -629,14 +618,12 @@ impl Player {
             .push(MixerMessage::RemoveEffect { id: effect_id })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to remove a effect.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("remove_effect"))
+        } else {
+            // Remove from tracking map
+            self.mixer_effects.remove(&effect_id);
+            Ok(())
         }
-
-        // Remove from tracking map
-        self.mixer_effects.remove(&effect_id);
-        Ok(())
     }
 
     /// Remove all effects from the given mixer.
@@ -696,9 +683,7 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Parameter update got skipped!");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            Err(Error::SendError)
+            Err(Self::mixer_event_queue_error("set_effect_parameter"))
         } else {
             Ok(())
         }
@@ -730,9 +715,7 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Parameter update got skipped!");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            Err(Error::SendError)
+            Err(Self::mixer_event_queue_error("set_effect_parameter"))
         } else {
             Ok(())
         }
@@ -777,12 +760,10 @@ impl Player {
             })
             .is_err()
         {
-            log::warn!("Mixer's event queue is full. Failed to send an effect message.");
-            log::warn!("Increase the mixer event queue to prevent this from happening...");
-            return Err(Error::SendError);
+            Err(Self::mixer_event_queue_error("send_effect_message"))
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     /// Change playback position of the given source at a specific sample time or immediately.
@@ -810,22 +791,18 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("Mixer's event queue is full. Failed to send a seek event.");
-                    log::warn!("Increase the mixer event queue to prevent this from happening...");
-                    return Err(Error::SendError);
+                    Err(Self::mixer_event_queue_error("seek"))
+                } else {
+                    Ok(())
                 }
-
-                Ok(())
             } else {
                 match &playing_source.playback_message_queue {
                     PlaybackMessageQueue::File(queue) => {
                         if queue.push(FilePlaybackMessage::Seek(position)).is_err() {
-                            log::warn!(
-                                "File playback's event queue is full. Failed to send seek command."
-                            );
-                            return Err(Error::SendError);
+                            Err(Self::file_playback_queue_error("seek"))
+                        } else {
+                            Ok(())
                         }
-                        Ok(())
                     }
                     _ => {
                         log::warn!("Trying to seek a synth source, which is not supported.");
@@ -867,9 +844,9 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
-                    log::warn!("Increase the mixer event queue to prevent this from happening...");
-                    return Err(Error::SendError);
+                    Err(Self::mixer_event_queue_error("set_source_speed"))
+                } else {
+                    Ok(())
                 }
             } else {
                 // apply immediately
@@ -879,21 +856,19 @@ impl Player {
                             .push(FilePlaybackMessage::SetSpeed(speed, glide))
                             .is_err()
                         {
-                            log::warn!(
-                                "File playback's event queue is full. Speed event got skipped."
-                            );
-                            return Err(Error::SendError);
+                            Err(Self::file_playback_queue_error("set_speed"))
+                        } else {
+                            Ok(())
                         }
                     }
                     _ => {
                         log::warn!(
                             "Trying to change speed of a synth source, which is not supported."
                         );
-                        return Err(Error::MediaFileNotFound);
+                        Err(Error::MediaFileNotFound)
                     }
                 }
             }
-            Ok(())
         } else {
             Err(Error::MediaFileNotFound)
         }
@@ -924,9 +899,9 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
-                    log::warn!("Increase the mixer event queue to prevent this from happening...");
-                    return Err(Error::SendError);
+                    Err(Self::mixer_event_queue_error("set_volume"))
+                } else {
+                    Ok(())
                 }
             } else {
                 // apply immediately
@@ -935,11 +910,11 @@ impl Player {
                     .push(AmplifiedSourceMessage::SetVolume(volume))
                     .is_err()
                 {
-                    log::warn!("File playback's event queue is full. Volume event got skipped.");
-                    return Err(Error::SendError);
+                    Err(Self::file_playback_queue_error("set_volume"))
+                } else {
+                    Ok(())
                 }
             }
-            Ok(())
         } else {
             Err(Error::MediaFileNotFound)
         }
@@ -970,9 +945,9 @@ impl Player {
                     })
                     .is_err()
                 {
-                    log::warn!("Mixer's event queue is full. Failed to send a set_speed event.");
-                    log::warn!("Increase the mixer event queue to prevent this from happening...");
-                    return Err(Error::SendError);
+                    Err(Self::mixer_event_queue_error("set_panning"))
+                } else {
+                    Ok(())
                 }
             } else {
                 // apply immediately
@@ -981,11 +956,11 @@ impl Player {
                     .push(PannedSourceMessage::SetPanning(panning))
                     .is_err()
                 {
-                    log::warn!("File playback's event queue is full. Panning event got skipped.");
-                    return Err(Error::SendError);
+                    Err(Self::file_playback_queue_error("set_panning"))
+                } else {
+                    Ok(())
                 }
             }
-            Ok(())
         } else {
             Err(Error::MediaFileNotFound)
         }
@@ -1087,15 +1062,15 @@ impl Player {
                     if let Some(sender) = &playback_sender {
                         // NB: send and not try_send: block until sender queue is free
                         if let Err(err) = sender.send(event) {
-                            log::warn!("failed to send file status message: {err}");
+                            log::warn!("Failed to send file status message: {err}");
                         }
                     }
                 } else {
-                    log::info!("playback event loop stopped");
+                    log::info!("Playback event loop stopped");
                     break;
                 }
             })
-            .expect("failed to spawn audio message thread");
+            .expect("Failed to spawn audio message thread");
 
         playback_send_proxy
     }
@@ -1108,13 +1083,13 @@ impl Player {
                     collector.collect();
                     thread::sleep(time::Duration::from_millis(100));
                 }
-                log::info!("audio collector loop stopped");
+                log::info!("Audio collector loop stopped");
                 collector.collect();
                 if collector.try_cleanup().is_err() {
                     log::warn!("Failed to cleanup collector");
                 }
             })
-            .expect("failed to spawn audio message thread");
+            .expect("Failed to spawn audio message thread");
     }
 
     fn effect_mixer_event_queue(
@@ -1133,6 +1108,19 @@ impl Player {
             .value()
             .clone();
         Ok(event_queue)
+    }
+
+    fn mixer_event_queue_error(event_name: &str) -> Error {
+        log::warn!("Mixer's event queue is full. Failed to send a {event_name} event.");
+        log::warn!("Increase the mixer event queue to prevent this from happening...");
+
+        Error::SendError("Mixer queue is full".to_string())
+    }
+
+    fn file_playback_queue_error(event_name: &str) -> Error {
+        log::warn!("File playback event queue is full. Failed to send a {event_name} event.");
+
+        Error::SendError("File playback queue is full".to_string())
     }
 }
 

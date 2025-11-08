@@ -15,8 +15,8 @@ pub enum Error {
     EffectNotFoundError(usize),
     MixerNotFoundError(usize),
     ParameterError(String),
+    SendError(String),
     IoError(io::Error),
-    SendError,
 }
 
 impl error::Error for Error {}
@@ -35,8 +35,8 @@ impl fmt::Display for Error {
                 write!(f, "Effect with id {effect_id} not found")
             }
             Self::ParameterError(str) => write!(f, "Invalid parameter: {str}"),
+            Self::SendError(str) => write!(f, "Failed to send channel message: {str}"),
             Self::IoError(err) => err.fmt(f),
-            Self::SendError => write!(f, "Failed to send message into a channel"),
         }
     }
 }
@@ -48,7 +48,13 @@ impl From<io::Error> for Error {
 }
 
 impl<T> From<std::sync::mpsc::SendError<T>> for Error {
-    fn from(_: std::sync::mpsc::SendError<T>) -> Self {
-        Error::SendError
+    fn from(err: std::sync::mpsc::SendError<T>) -> Self {
+        Error::SendError(err.to_string())
+    }
+}
+
+impl<T> From<std::sync::mpsc::TrySendError<T>> for Error {
+    fn from(err: std::sync::mpsc::TrySendError<T>) -> Self {
+        Error::SendError(err.to_string())
     }
 }

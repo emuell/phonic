@@ -186,7 +186,7 @@ impl FileSourceImpl {
                     path: self.file_path.clone(),
                     position: Duration::from_secs_f64(second_pos),
                 }) {
-                    log::warn!("failed to send playback event: {err}")
+                    log::warn!("Failed to send playback event: {err}")
                 }
             }
         }
@@ -200,7 +200,7 @@ impl FileSourceImpl {
                 path: self.file_path.clone(),
                 exhausted: is_exhausted,
             }) {
-                log::warn!("failed to send playback event: {err}")
+                log::warn!("Failed to send playback event: {err}")
             }
         }
     }

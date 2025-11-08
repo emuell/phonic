@@ -195,7 +195,9 @@ fn main() -> Result<(), Error> {
     player.start();
 
     // Wait until all playback finished
-    event_thread.join().map_err(|_| Error::SendError)?;
+    if let Err(err) = event_thread.join() {
+        std::panic::resume_unwind(err);
+    }
 
     Ok(())
 }

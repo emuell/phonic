@@ -80,7 +80,7 @@ impl CpalOutput {
             .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?;
 
         if let Ok(name) = device.name() {
-            log::info!("using audio device: {name}");
+            log::info!("Using audio device: {name}");
         }
 
         // Get the default device config, so we know what sample format and sample rate
@@ -151,14 +151,14 @@ impl CpalOutput {
     }
 
     fn send_to_callback(&self, msg: CallbackMessage) {
-        if self.callback_sender.send(msg).is_err() {
-            log::error!("callback queue is full or disconnected");
+        if let Err(err) = self.callback_sender.send(msg) {
+            log::error!("Failed to send callback message: {err}");
         }
     }
 
     fn send_to_stream(&self, msg: StreamMessage) {
-        if self.stream_sender.send(msg).is_err() {
-            log::error!("stream queue is full or disconnected");
+        if let Err(err) = self.stream_sender.send(msg) {
+            log::error!("Failed to send stream message: {err}");
         }
     }
 }
@@ -297,7 +297,7 @@ impl Stream {
             volume: ExponentialSmoothedValue::new(volume, config.sample_rate.0),
         };
 
-        log::info!("opening output stream: {:?}", &config);
+        log::info!("Opening output stream: {:?}", &config);
         let stream = match sample_format {
             cpal::SampleFormat::I8 => {
                 Self::build_output_stream::<i8, _>(&device, &config, move |output| {
@@ -370,7 +370,7 @@ impl Stream {
                 writer(output);
             },
             |err| {
-                log::error!("audio output error: {err}");
+                log::error!("Audio output error: {err}");
             },
             None,
         )
@@ -398,20 +398,22 @@ impl Stream {
         while let Ok(msg) = receiver.recv() {
             match msg {
                 StreamMessage::Pause => {
-                    log::debug!("pausing audio output stream");
+                    log::debug!("Pausing audio output stream...");
                     if let Err(err) = self.stream.pause() {
-                        log::error!("failed to stop stream: {err}");
+                        log::error!("Failed to stop stream: {err}");
                     }
                 }
                 StreamMessage::Resume => {
-                    log::debug!("resuming audio output stream");
+                    log::debug!("Resuming audio output stream...");
                     if let Err(err) = self.stream.play() {
-                        log::error!("failed to start stream: {err}");
+                        log::error!("Failed to start stream: {err}");
                     }
                 }
                 StreamMessage::Close => {
-                    log::debug!("closing audio output stream");
-                    let _ = self.stream.pause();
+                    log::debug!("Closing audio output stream...");
+                    if let Err(err) = self.stream.pause() {
+                        log::error!("Failed to pause stream before stopping: {err}");
+                    }
                     break;
                 }
             }
