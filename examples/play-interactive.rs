@@ -131,21 +131,12 @@ fn main() -> Result<(), Error> {
     println!("  NB: this example uses a HighQuality resampler for the loop. ");
     println!("  In debug builds this may be very slow and may thus cause crackles...");
     println!();
-    println!("  To quit press 'Esc' or 'Control/Cmd-C'.");
+    println!("  To quit press 'Esc'.");
     println!();
 
     // run key event handlers to play, stop and modify sounds interactively
     let event_handler = DeviceEventsHandler::new(Duration::from_millis(10))
         .expect("Could not initialize event loop");
-
-    ctrlc::set_handler({
-        let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
-        move || {
-            println!("Shutting down...");
-            wait_mutex_cond.1.notify_all();
-        }
-    })
-    .map_err(|_err| Error::SendError)?;
 
     // key down handler
     let _key_down_guard = event_handler.on_key_down({
