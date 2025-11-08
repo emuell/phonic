@@ -3,7 +3,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{sync_channel, Receiver, RecvTimeoutError, SendError, SyncSender, TrySendError},
+        mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -112,7 +112,8 @@ impl StreamedFileSource {
             let shared_state = worker_state.clone();
             move |sender| StreamThread::new(sender, decoder, buffer, shared_state, repeat)
         });
-        stream_thread.send(StreamedFileSourceMessage::Read)?;
+        // Start stream thread and block until it started running
+        stream_thread.sender.send(StreamedFileSourceMessage::Read)?;
 
         // create common data
         let file_source = FileSourceImpl::new(
@@ -155,9 +156,10 @@ impl StreamedFileSource {
                 FilePlaybackMessage::Seek(position) => {
                     if let Err(err) = self
                         .stream_thread
+                        .sender
                         .try_send(StreamedFileSourceMessage::Seek(position))
                     {
-                        log::warn!("failed to send playback seek event: {err}")
+                        log::warn!("Failed to send playback seek event: {err}")
                     }
                 }
                 FilePlaybackMessage::SetSpeed(speed, glide) => {
@@ -169,8 +171,12 @@ impl StreamedFileSource {
                     }
                 }
                 FilePlaybackMessage::Stop => {
-                    if let Err(err) = self.stream_thread.try_send(StreamedFileSourceMessage::Stop) {
-                        log::warn!("failed to send playback stop event: {err}")
+                    if let Err(err) = self
+                        .stream_thread
+                        .sender
+                        .try_send(StreamedFileSourceMessage::Stop)
+                    {
+                        log::warn!("Failed to send playback stop event: {err}")
                     }
                 }
             }
@@ -361,7 +367,10 @@ impl Drop for StreamedFileSource {
     fn drop(&mut self) {
         // ignore error: channel maybe already is disconnected
         self.file_source.fade_out_duration = None;
-        let _ = self.stream_thread.send(StreamedFileSourceMessage::Stop);
+        let _ = self
+            .stream_thread
+            .sender
+            .try_send(StreamedFileSourceMessage::Stop);
     }
 }
 
@@ -372,22 +381,6 @@ struct StreamThreadHandle {
     #[allow(unused)]
     thread: JoinHandle<()>,
     sender: SyncSender<StreamedFileSourceMessage>,
-}
-
-impl StreamThreadHandle {
-    fn send(
-        &self,
-        msg: StreamedFileSourceMessage,
-    ) -> Result<(), SendError<StreamedFileSourceMessage>> {
-        self.sender.send(msg)
-    }
-
-    fn try_send(
-        &self,
-        msg: StreamedFileSourceMessage,
-    ) -> Result<(), TrySendError<StreamedFileSourceMessage>> {
-        self.sender.try_send(msg)
-    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -499,7 +492,7 @@ impl StreamThread {
 
         // Promote the worker thread to audio priority to prevent buffer under-runs on high CPU usage.
         if let Err(err) = promote_current_thread_to_real_time(0, decoder.signal_spec().rate) {
-            log::warn!("failed to set file worker thread's priority to real-time: {err}");
+            log::warn!("Failed to set file worker thread's priority to real-time: {err}");
         }
 
         Self {
@@ -573,7 +566,7 @@ impl StreamThread {
             action = match result {
                 Ok(action) => action,
                 Err(err) => {
-                    log::error!("file worker handler error: {err}");
+                    log::error!("File worker handler error: {err}");
                     StreamThreadAction::Shutdown
                 }
             };
@@ -588,7 +581,7 @@ impl StreamThread {
                 .store(true, Ordering::Relaxed);
             // keep running until fade-out completed
             if !self.is_reading {
-                self.sender.send(StreamedFileSourceMessage::Read)?;
+                self.send_read_message()?;
             }
             Ok(StreamThreadAction::Continue)
         } else {
@@ -605,7 +598,7 @@ impl StreamThread {
                 if self.is_reading {
                     self.samples_to_write = 0..0;
                 } else {
-                    self.sender.send(StreamedFileSourceMessage::Read)?;
+                    self.send_read_message()?;
                 }
                 let position = timestamp * self.input_spec.channels.count() as u64;
                 self.samples_written = position;
@@ -615,7 +608,7 @@ impl StreamThread {
                 self.output.clear();
             }
             Err(err) => {
-                log::error!("failed to seek: {err}");
+                log::error!("Failed to seek file: {err}");
             }
         }
         Ok(StreamThreadAction::Continue)
@@ -640,11 +633,11 @@ impl StreamThread {
                     }
                 }
                 None => {
-                    // reached EOF:  apply repeat or stop
+                    // reached EOF: apply repeat or stop
                     if self.continue_on_loop_boundary() {
                         // continue playing from loop start
+                        self.send_read_message()?;
                         self.is_reading = true;
-                        self.sender.send(StreamedFileSourceMessage::Read)?;
                         return Ok(StreamThreadAction::Continue);
                     } else {
                         // handle end of file
@@ -657,7 +650,7 @@ impl StreamThread {
         if self.samples_to_write.is_empty() {
             // This can happen if a new packet was empty. try next packet...
             self.is_reading = true;
-            self.sender.send(StreamedFileSourceMessage::Read)?;
+            self.send_read_message()?;
             return Ok(StreamThreadAction::Continue);
         }
 
@@ -689,7 +682,7 @@ impl StreamThread {
                 }
             }
             self.is_reading = true;
-            self.sender.send(StreamedFileSourceMessage::Read)?;
+            self.send_read_message()?;
             Ok(StreamThreadAction::Continue)
         } else {
             // Buffer is full. Wait a bit a try again. We also have to indicate that the
@@ -725,7 +718,7 @@ impl StreamThread {
                     }
                 }
                 Err(err) => {
-                    log::error!("failed to seek: {err}");
+                    log::error!("Failed to seek file: {err}");
                     return false;
                 }
             }
@@ -744,5 +737,19 @@ impl StreamThread {
                 .store(self.samples_written, Ordering::Relaxed);
             false
         }
+    }
+
+    fn send_read_message(&mut self) -> Result<(), Error> {
+        if let Err(err) = self.sender.try_send(StreamedFileSourceMessage::Read) {
+            match err {
+                TrySendError::Disconnected(_) => {
+                    return Err(err.into()); // abort with error
+                }
+                TrySendError::Full(_) => {
+                    log::warn!("Failed to send stream read message: {err}");
+                }
+            }
+        }
+        Ok(())
     }
 }

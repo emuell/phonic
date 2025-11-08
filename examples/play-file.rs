@@ -36,10 +36,10 @@ fn main() -> Result<(), Error> {
     // Create a player instance with the output device as configured via program arguments
     let mut player = arguments::new_player(&args, status_sender)?;
 
-    // pause playback until we've added all sources
+    // Pause playback until we've added all sources
     player.stop();
 
-    // create sound sources and memorize file ids for the playback status
+    // Create sound sources and memorize file ids for the playback status
     let mut playing_file_ids = vec![
         player
             // files are by default not streamed but are preloaded and played buffered.
@@ -65,7 +65,7 @@ fn main() -> Result<(), Error> {
     let mut loop_playback_id = Some(playing_file_ids[1]);
     let is_running = Arc::new(AtomicBool::new(true));
 
-    // handle events from the file sources
+    // Handle events from the file sources
     let event_thread = std::thread::spawn({
         let is_running = is_running.clone();
         move || {
@@ -107,10 +107,10 @@ fn main() -> Result<(), Error> {
         }
     });
 
-    // start playing
+    // Start playing
     player.start();
 
-    // stop (fade-out) the loop after 3 secs
+    // Stop (fade-out) the loop after 3 secs
     let play_time = Instant::now();
     while is_running.load(Ordering::Relaxed) {
         if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(3) {
@@ -120,8 +120,10 @@ fn main() -> Result<(), Error> {
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    // wait until playback finished
-    event_thread.join().map_err(|_| Error::SendError)?;
+    // Wait until playback finished
+    if let Err(err) = event_thread.join() {
+        std::panic::resume_unwind(err);
+    }
 
     Ok(())
 }
