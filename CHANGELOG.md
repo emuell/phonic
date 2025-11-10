@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.0 - 2025/11/10
+
+- auto-bypass DSP effects that receive no input signals to save CPU cycles
+- allow moving DSP effects within the mixer
+- [breaking] use std::mpsc::sync_channel instead of crossbeam_channel for playback event tracking 
+- disable unused dependency features to reduce bloat
+- fix incorrect sample rate used in playback position events
+
 ## v0.11.2 - 2025/10/19
 
 - fix possible never-ending loop when looking up loop chunk data in broken RIFF files
