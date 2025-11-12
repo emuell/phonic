@@ -55,11 +55,25 @@ pub type EffectTime = SourceTime;
 // -------------------------------------------------------------------------------------------------
 
 /// Effects manipulate audio samples in `f32` format and can be `Send` and `Sync`ed across threads.
+/// Buffers are processed in-place in the audio real-time thread.
 ///
-/// Buffers are processed in-place. Effect parameters can be changed at runtime by sending
-/// [`EffectMessage`]s via the player's [`send_effect_message`](crate::Player::send_effect_message).
+/// After an effect got added to a mixer, effect parameters can only be changed by sending parameter
+/// value changes or custom messages via the player's
+/// [`set_effect_parameter`](crate::Player::set_effect_parameter),
+/// [`set_effect_parameter_normalized`](crate::Player::set_effect_parameter_normalized) or
+/// [`send_effect_message`](crate::Player::send_effect_message) functions. This ensures that the
+/// actual effect processing state can not be mutated outside of the audio thread.
 ///
-/// NB: `process` and `process_message` are called in realtime audio threads, so they must not
+/// Non real-time thread clients, such as UIs, can query info about an effect's parameter set via
+/// [`Effect::parameters`] after creating the effect. For reasons mentioned above, the actual
+/// parameter value can not be queried after the effect got added to a mixer, so the initial values
+/// (the default values from the parameter description) must be memorized separately in the UI,
+/// and changes to parameters must be tracked separately in UIs as well.
+///
+/// If you need to pass around custom shared data from the effect to UIs (e.g. playback states,
+/// audio meter values), use channels or atomics instead - as usual in Rust.
+///
+/// NB: all `process_XXX` functions are called in realtime audio threads, so they must not
 /// block! All other functions are called in the main thread to initialize the effect.
 pub trait Effect: Send + Sync + 'static {
     /// A unique, static name for the effect.
