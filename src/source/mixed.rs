@@ -482,6 +482,7 @@ impl MixedSource {
                     if let Err(err) = sender.send_stop() {
                         log::warn!("Failed to send source stop event: {err}")
                     }
+                    playing_source.stop_time = None;
                     samples_until_stop = u64::MAX;
                 }
 
