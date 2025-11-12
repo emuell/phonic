@@ -1,3 +1,5 @@
+use basedrop::Owned;
+
 use crate::{utils::buffer::max_abs_sample, Effect, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
@@ -8,7 +10,7 @@ use crate::{utils::buffer::max_abs_sample, Effect, SourceTime};
 /// calling `process_started` and `process_stopped` on state transitions. Tracks tail duration using
 /// `process_tail` or silence detection for effects that don't implement it.
 pub(super) struct EffectProcessor {
-    pub(super) effect: Box<dyn Effect>,
+    pub(super) effect: Owned<Box<dyn Effect>>,
     bypassed: bool,
     tail_counter: usize,
     silence_counter: usize,
@@ -20,7 +22,7 @@ impl EffectProcessor {
     /// Number of seconds that we should let an effect running before treating it as bypassed
     pub const SILENCE_SECONDS: usize = 2;
 
-    pub fn new(effect: Box<dyn Effect>) -> Self {
+    pub fn new(effect: Owned<Box<dyn Effect>>) -> Self {
         Self {
             effect,
             bypassed: true,

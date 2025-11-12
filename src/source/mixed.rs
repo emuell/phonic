@@ -96,31 +96,13 @@ impl Event for MixerEvent {
 
 /// Messages send from player to mixer to start or stop playing sources.
 pub(crate) enum MixerMessage {
+    // Sources
     AddSource {
         playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageQueue,
         volume_message_queue: Arc<ArrayQueue<AmplifiedSourceMessage>>,
         panning_message_queue: Arc<ArrayQueue<PannedSourceMessage>>,
         source: Owned<Box<dyn Source>>,
-        sample_time: u64,
-    },
-    AddEffect {
-        id: EffectId,
-        effect: Box<dyn Effect>,
-    },
-    AddMixer {
-        id: EffectId,
-        mixer: Box<MixedSource>,
-    },
-    ProcessEffectMessage {
-        effect_id: EffectId,
-        message: Owned<Box<dyn EffectMessage>>,
-        sample_time: u64,
-    },
-    ProcessEffectParameterUpdate {
-        effect_id: EffectId,
-        parameter_id: FourCC,
-        value: Owned<ParameterValueUpdate>,
         sample_time: u64,
     },
     SetSourceSpeed {
@@ -151,15 +133,36 @@ pub(crate) enum MixerMessage {
     #[allow(dead_code)]
     RemoveAllSources,
     RemoveAllPendingSources,
-    RemoveEffect {
-        id: EffectId,
+    // Mixers
+    AddMixer {
+        mixer_id: EffectId,
+        mixer: Box<MixedSource>,
     },
     RemoveMixer {
-        id: MixerId,
+        mixer_id: MixerId,
+    },
+    // Effects
+    AddEffect {
+        effect_id: EffectId,
+        effect: Owned<Box<dyn Effect>>,
     },
     MoveEffect {
-        id: EffectId,
+        effect_id: EffectId,
         movement: EffectMovement,
+    },
+    RemoveEffect {
+        effect_id: EffectId,
+    },
+    ProcessEffectMessage {
+        effect_id: EffectId,
+        message: Owned<Box<dyn EffectMessage>>,
+        sample_time: u64,
+    },
+    ProcessEffectParameterUpdate {
+        effect_id: EffectId,
+        parameter_id: FourCC,
+        value: Owned<ParameterValueUpdate>,
+        sample_time: u64,
     },
 }
 
@@ -248,6 +251,7 @@ impl MixedSource {
     fn process_messages(&mut self, time: &SourceTime) {
         while let Some(event) = self.message_queue.pop() {
             match event {
+                // Sources
                 MixerMessage::AddSource {
                     playback_id,
                     playback_message_queue,
@@ -284,72 +288,6 @@ impl MixedSource {
                             stop_time: None,
                         },
                     );
-                }
-                MixerMessage::AddEffect { id, effect } => {
-                    self.effects.push((id, EffectProcessor::new(effect)));
-                    self.effects_bypassed = false;
-                }
-                MixerMessage::AddMixer { id, mixer } => {
-                    self.mixers.push((id, SubMixerProcessor::new(mixer)));
-                }
-                MixerMessage::RemoveEffect { id } => {
-                    if let Some(pos) = self
-                        .effects
-                        .iter()
-                        .position(|(effect_id, _)| *effect_id == id)
-                    {
-                        self.effects.remove(pos);
-                        if self.effects.is_empty() {
-                            self.effects_bypassed = true;
-                        }
-                    }
-                }
-                MixerMessage::RemoveMixer { id } => {
-                    self.mixers.retain(|(mixer_id, _)| *mixer_id != id);
-                }
-                MixerMessage::MoveEffect { id, movement } => {
-                    if let Some(current_pos) = self
-                        .effects
-                        .iter()
-                        .position(|(effect_id, _)| *effect_id == id)
-                    {
-                        let effect = self.effects.remove(current_pos);
-                        let new_pos = match movement {
-                            EffectMovement::Direction(offset) => {
-                                let target = current_pos as i32 + offset;
-                                target.clamp(0, self.effects.len() as i32) as usize
-                            }
-                            EffectMovement::Start => 0,
-                            EffectMovement::End => self.effects.len(),
-                        };
-                        self.effects.insert(new_pos, effect);
-                    } else {
-                        log::warn!("Effect with id {} not found for move operation", id);
-                    }
-                }
-                MixerMessage::ProcessEffectMessage {
-                    effect_id,
-                    message,
-                    sample_time,
-                } => {
-                    self.insert_event(MixerEvent::ProcessEffectMessage {
-                        effect_id,
-                        message,
-                        sample_time,
-                    });
-                }
-                MixerMessage::ProcessEffectParameterUpdate {
-                    effect_id,
-                    parameter_id,
-                    value,
-                    sample_time,
-                } => {
-                    self.insert_event(MixerEvent::ProcessEffectParameterUpdate {
-                        effect_id,
-                        parameter_id,
-                        value,
-                        sample_time,
-                    });
                 }
                 MixerMessage::SetSourceSpeed {
                     playback_id,
@@ -416,6 +354,71 @@ impl MixedSource {
                 }
                 MixerMessage::RemoveAllSources => {
                     self.remove_all_playing_sources();
+                }
+                // Mixers
+                MixerMessage::AddMixer { mixer_id, mixer } => {
+                    self.mixers.push((mixer_id, SubMixerProcessor::new(mixer)));
+                }
+                MixerMessage::RemoveMixer { mixer_id } => {
+                    self.mixers.retain(|(id, _)| *id != mixer_id);
+                }
+                // Effects
+                MixerMessage::AddEffect { effect_id, effect } => {
+                    self.effects.push((effect_id, EffectProcessor::new(effect)));
+                    self.effects_bypassed = false;
+                }
+                MixerMessage::RemoveEffect { effect_id } => {
+                    if let Some(pos) = self.effects.iter().position(|(id, _)| *id == effect_id) {
+                        self.effects.remove(pos);
+                        if self.effects.is_empty() {
+                            self.effects_bypassed = true;
+                        }
+                    }
+                }
+                MixerMessage::MoveEffect {
+                    effect_id,
+                    movement,
+                } => {
+                    if let Some(current_pos) =
+                        self.effects.iter().position(|(id, _)| *id == effect_id)
+                    {
+                        let effect = self.effects.remove(current_pos);
+                        let new_pos = match movement {
+                            EffectMovement::Direction(offset) => {
+                                let target = current_pos as i32 + offset;
+                                target.clamp(0, self.effects.len() as i32) as usize
+                            }
+                            EffectMovement::Start => 0,
+                            EffectMovement::End => self.effects.len(),
+                        };
+                        self.effects.insert(new_pos, effect);
+                    } else {
+                        log::warn!("Effect with id {effect_id} not found for move operation");
+                    }
+                }
+                MixerMessage::ProcessEffectMessage {
+                    effect_id,
+                    message,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::ProcessEffectMessage {
+                        effect_id,
+                        message,
+                        sample_time,
+                    });
+                }
+                MixerMessage::ProcessEffectParameterUpdate {
+                    effect_id,
+                    parameter_id,
+                    value,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::ProcessEffectParameterUpdate {
+                        effect_id,
+                        parameter_id,
+                        value,
+                        sample_time,
+                    });
                 }
             }
         }
