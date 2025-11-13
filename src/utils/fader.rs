@@ -90,6 +90,14 @@ impl VolumeFader {
         }
     }
 
+    /// Reset the fader to its initial state.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.state = FaderState::Stopped;
+        self.current_volume = 1.0;
+        self.target_volume = 1.0;
+    }
+
     // Process fader on the given interleaved output buffer.
     pub fn process(&mut self, output: &mut [f32]) {
         if self.state != FaderState::IsRunning {

@@ -58,5 +58,6 @@ pub trait AudioResampler: Send + Sync {
     fn update(&mut self, input_rate: u32, output_rate: u32) -> Result<(), Error>;
 
     /// Reset internal resampler state. Make an existing resampler ready for a new source.
+    /// This is real-time safe and can be called from the audio thread.
     fn reset(&mut self);
 }

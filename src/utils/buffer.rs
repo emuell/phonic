@@ -455,6 +455,12 @@ impl TempBuffer {
     pub fn reset_range(&mut self) {
         self.set_range(0, self.capacity());
     }
+    /// Set range to cover an empty buffer.
+    #[inline]
+    pub fn clear_range(&mut self) {
+        self.start = 0;
+        self.end = 0;
+    }
 
     /// Copy up to self.len().min(other.len()) to other. returns the sample len that got copied.
     pub fn copy_to(&self, other: &mut [f32]) -> usize {

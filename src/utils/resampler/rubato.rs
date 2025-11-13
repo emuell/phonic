@@ -140,7 +140,8 @@ impl AudioResampler for RubatoResampler {
     }
 
     fn reset(&mut self) {
-        // there's no reset functionality in rubato
+        // Rubato doesn't provide a public reset method, so we just clear the pending buffer
+        self.pending.clear_range();
     }
 }
 
