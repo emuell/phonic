@@ -59,20 +59,21 @@ impl ResampledSource {
             (output_sample_rate as f64 / speed) as u32,
             source.channel_count(),
         );
-        let resampler: Option<Box<dyn AudioResampler>> = if speed == 1.0 {
-            None
-        } else {
-            match quality {
-                ResamplingQuality::HighQuality => Some(Box::new(
-                    RubatoResampler::new(resampler_specs)
-                        .expect("Failed to create new rubato resampler instance"),
-                )),
-                ResamplingQuality::Default => Some(Box::new(
-                    CubicResampler::new(resampler_specs)
-                        .expect("Failed to create new cubic resampler instance"),
-                )),
-            }
-        };
+        let resampler: Option<Box<dyn AudioResampler>> =
+            if resampler_specs.input_rate == resampler_specs.output_rate {
+                None
+            } else {
+                match quality {
+                    ResamplingQuality::HighQuality => Some(Box::new(
+                        RubatoResampler::new(resampler_specs)
+                            .expect("Failed to create new rubato resampler instance"),
+                    )),
+                    ResamplingQuality::Default => Some(Box::new(
+                        CubicResampler::new(resampler_specs)
+                            .expect("Failed to create new cubic resampler instance"),
+                    )),
+                }
+            };
         const DEFAULT_CHUNK_SIZE: usize = 512;
         let input_buffer_len = if let Some(resampler) = &resampler {
             resampler
