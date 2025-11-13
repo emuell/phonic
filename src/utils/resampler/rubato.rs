@@ -20,6 +20,10 @@ pub struct RubatoResampler {
 
 impl RubatoResampler {
     pub fn new(spec: ResamplingSpecs) -> Result<Self, Error> {
+        assert!(
+            spec.output_ratio() > 0.0 && spec.output_ratio().is_finite(),
+            "Invalid resampling ratio",
+        );
         const CHUNK_SIZE: usize = 256;
         let parameters = SincInterpolationParameters {
             f_cutoff: 0.95,
@@ -133,6 +137,10 @@ impl AudioResampler for RubatoResampler {
         self.spec.input_rate = input_rate;
         self.spec.output_rate = output_rate;
         let new_ratio = self.spec.output_ratio();
+        assert!(
+            new_ratio > 0.0 && new_ratio.is_finite(),
+            "Invalid resampling ratio",
+        );
         let ramp = false;
         self.resampler
             .set_resample_ratio(new_ratio, ramp)

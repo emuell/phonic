@@ -154,6 +154,10 @@ pub struct CubicResampler {
 
 impl CubicResampler {
     pub fn new(spec: ResamplingSpecs) -> Result<Self, Error> {
+        assert!(
+            spec.output_ratio() > 0.0 && spec.output_ratio().is_finite(),
+            "Invalid resampling ratio",
+        );
         Ok(Self {
             spec,
             interpolators: vec![
@@ -185,6 +189,10 @@ impl AudioResampler for CubicResampler {
         self.spec.input_rate = input_rate;
         self.spec.output_rate = output_rate;
         let new_ratio = self.spec.input_ratio() as f32;
+        assert!(
+            new_ratio > 0.0 && new_ratio.is_finite(),
+            "Invalid resampling ratio",
+        );
         for interpolator in self.interpolators.iter_mut() {
             interpolator.ratio = new_ratio;
         }
