@@ -259,7 +259,7 @@ fn main() -> Result<(), Error> {
         // Pad (on the pad mixer)
         let pad_note = PAD_LINE[bar];
         let pad_start_time = output_start_time + (bar * BASS_LINE.len()) as u64 * samples_per_beat;
-        let pad_id = player.play_file_source(
+        let pad_playback_handle = player.play_file_source(
             pad.clone(
                 FilePlaybackOptions::default()
                     .speed(speed_from_note(pad_note))
@@ -271,7 +271,7 @@ fn main() -> Result<(), Error> {
             Some(pad_start_time),
         )?;
         let pad_stop_time = pad_start_time + 16 * samples_per_beat;
-        player.stop_source(pad_id, pad_stop_time)?;
+        pad_playback_handle.stop(pad_stop_time)?;
 
         // Bass line (on the bass line mixer)
         for (beat, note) in BASS_LINE.iter().enumerate().filter(|(_, n)| *n != &0) {

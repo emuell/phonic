@@ -3,9 +3,13 @@ use std::{path::Path, sync::mpsc::SyncSender, sync::Arc, time::Duration};
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    player::{FilePlaybackHandle, MixerId, PlaybackId},
+    source::{
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
+        Source,
+    },
     utils::db_to_linear,
-    Error, Player, ResamplingQuality, Source,
+    Error, Player, ResamplingQuality,
 };
 
 use self::{preloaded::PreloadedFileSource, streamed::StreamedFileSource};
@@ -20,7 +24,7 @@ pub(crate) mod decoder;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a [`FileSource`].
+/// Options to control playback properties of a [`FileSource`].
 #[derive(Clone, Copy)]
 pub struct FilePlaybackOptions {
     /// By default false: when true, the file will be decoded and streamed on the fly.
@@ -233,7 +237,7 @@ impl Player {
         &mut self,
         path: P,
         options: FilePlaybackOptions,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<FilePlaybackHandle, Error> {
         self.play_file_with_context(path, options, None)
     }
 
@@ -244,7 +248,7 @@ impl Player {
         path: P,
         options: FilePlaybackOptions,
         context: Option<PlaybackStatusContext>,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<FilePlaybackHandle, Error> {
         // create a streamed or preloaded source, depending on the options and play it
         if options.stream {
             let streamed_source = StreamedFileSource::from_file(
@@ -273,7 +277,7 @@ impl Player {
         file_buffer: Vec<u8>,
         file_path: &str,
         options: FilePlaybackOptions,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<FilePlaybackHandle, Error> {
         self.play_file_buffer_with_context(file_buffer, file_path, options, None)
     }
 
@@ -286,7 +290,7 @@ impl Player {
         file_path: &str,
         options: FilePlaybackOptions,
         context: Option<PlaybackStatusContext>,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<FilePlaybackHandle, Error> {
         debug_assert!(!options.stream, "Streaming file buffers is not supported.");
         let preloaded_source = PreloadedFileSource::from_file_buffer(
             file_buffer,

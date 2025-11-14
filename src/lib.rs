@@ -27,6 +27,8 @@
 //! Here's a basic example of how to play audio files with DSP effects.
 //!
 //! ```rust,no_run
+//! use std::time::Duration;
+//!
 //! use phonic::{
 //!     DefaultOutputDevice, Player, FilePlaybackOptions, Error,
 //!     effects::{ChorusEffect, ReverbEffect, CompressorEffect},
@@ -48,23 +50,24 @@
 //!     // will be routed through this effect now.
 //!     player.add_effect(CompressorEffect::new_limiter(), None)?;
 //!
-//!     // Play a file with default options on the sub mixer. It will start playing immediately
-//!     // and will be routed through a chorus and reverb effect and the main mixer's limiter.
-//!     player.play_file("path/to/your/file.wav",
+//!     // Play a file and get a handle to control it
+//!     let file_handle = player.play_file("path/to/your/file.wav",
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
 //!     )?;
 //!
-//!     // Play a file with default options on the main mixer and schedule it two seconds ahead
-//!     // of the current output time. It will be routed through the limiter effect only.
-//!     let sample_rate = player.output_sample_rate() as u64;
+//!     // Schedule a stop 2 seconds from now (sample-accurate)
+//!     let now = player.output_sample_frame_position();
+//!     let samples_per_sec = player.output_sample_rate() as u64;
+//!     file_handle.stop(now + 2 * samples_per_sec)?;
+//!
+//!     // Play another file on the main mixer with scheduled start time
 //!     player.play_file("path/to/your/some_other_file.wav",
-//!       FilePlaybackOptions::default().start_at_time(
-//!         player.output_sample_frame_position() + 2 * sample_rate)
+//!       FilePlaybackOptions::default().start_at_time(now + 2 * samples_per_sec)
 //!     )?;
 //!
 //!     // The player's audio output stream runs on a separate thread, so we need to keep
 //!     // the main thread alive to hear the audio.
-//!     std::thread::sleep(std::time::Duration::from_secs(5));
+//!     std::thread::sleep(Duration::from_secs(5));
 //!
 //!     Ok(())
 //! }
@@ -102,8 +105,8 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectId, EffectMovement, MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
-    Player,
+    EffectId, EffectMovement, FilePlaybackHandle, MixerId, PlaybackHandle, PlaybackId, Player,
+    SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
@@ -112,8 +115,9 @@ pub use parameter::{
 };
 
 pub use source::{
-    file::{FilePlaybackMessage, FilePlaybackOptions, FileSource},
+    file::{FilePlaybackOptions, FileSource},
     resampled::ResamplingQuality,
+    status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
 };
@@ -144,10 +148,14 @@ pub mod sources {
         common::FileSourceImpl,
         preloaded::{PreloadedFileBuffer, PreloadedFileSource},
         streamed::StreamedFileSource,
+        FilePlaybackMessage,
     };
-    pub use super::source::synth::common::{SynthSourceGenerator, SynthSourceImpl};
     #[cfg(feature = "dasp")]
     pub use super::source::synth::dasp::DaspSynthSource;
+    pub use super::source::synth::{
+        common::{SynthSourceGenerator, SynthSourceImpl},
+        SynthPlaybackMessage,
+    };
 }
 
 pub mod parameters {

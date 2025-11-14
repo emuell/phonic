@@ -22,8 +22,11 @@ use super::{
 
 use crate::{
     error::Error,
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{Source, SourceTime},
+    player::PlaybackId,
+    source::{
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
+        Source, SourceTime,
+    },
     utils::{buffer::clear_buffer, fader::FaderState},
 };
 

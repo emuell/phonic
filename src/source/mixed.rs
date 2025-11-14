@@ -7,10 +7,10 @@ use four_cc::FourCC;
 use crate::{
     effect::{Effect, EffectMessage},
     parameter::ParameterValueUpdate,
-    player::{EffectId, EffectMovement, PlaybackMessageQueue},
+    player::{EffectId, EffectMovement},
     source::{
         amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
-        Source, SourceTime,
+        playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
         buffer::{add_buffers, clear_buffer},
@@ -34,8 +34,6 @@ pub(crate) struct PlayingSource {
     is_active: bool,
     playback_id: PlaybackId,
     playback_message_queue: PlaybackMessageQueue,
-    volume_message_queue: Arc<ArrayQueue<AmplifiedSourceMessage>>,
-    panning_message_queue: Arc<ArrayQueue<PannedSourceMessage>>,
     source: Owned<Box<dyn Source>>,
     start_time: u64,
     stop_time: Option<u64>,
@@ -100,8 +98,6 @@ pub(crate) enum MixerMessage {
     AddSource {
         playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageQueue,
-        volume_message_queue: Arc<ArrayQueue<AmplifiedSourceMessage>>,
-        panning_message_queue: Arc<ArrayQueue<PannedSourceMessage>>,
         source: Owned<Box<dyn Source>>,
         sample_time: u64,
     },
@@ -255,8 +251,6 @@ impl MixedSource {
                 MixerMessage::AddSource {
                     playback_id,
                     playback_message_queue,
-                    volume_message_queue,
-                    panning_message_queue,
                     source,
                     sample_time,
                 } => {
@@ -281,8 +275,6 @@ impl MixedSource {
                             is_active: true,
                             playback_id,
                             playback_message_queue,
-                            volume_message_queue,
-                            panning_message_queue,
                             source,
                             start_time: sample_time,
                             stop_time: None,
@@ -640,10 +632,12 @@ impl EventProcessor for MixedSource {
                     .iter_mut()
                     .find(|s| s.playback_id == playback_id)
                 {
-                    if let PlaybackMessageQueue::File(queue) = &source.playback_message_queue {
-                        if let Err(msg) = queue.push(FilePlaybackMessage::Seek(position)) {
+                    if let PlaybackMessageQueue::File { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(FilePlaybackMessage::Seek(position)) {
                             log::warn!("Failed to send seek command to file. Force pushing it...");
-                            let _ = queue.force_push(msg);
+                            let _ = playback.force_push(msg);
                         }
                     } else {
                         log::warn!("Trying to seek a synth source, which is not supported");
@@ -661,10 +655,13 @@ impl EventProcessor for MixedSource {
                     .iter()
                     .find(|s| s.playback_id == playback_id)
                 {
-                    if let PlaybackMessageQueue::File(queue) = &source.playback_message_queue {
-                        if let Err(msg) = queue.push(FilePlaybackMessage::SetSpeed(speed, glide)) {
+                    if let PlaybackMessageQueue::File { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(FilePlaybackMessage::SetSpeed(speed, glide))
+                        {
                             log::warn!("Failed to send set speed event. Force pushing it...");
-                            let _ = queue.force_push(msg);
+                            let _ = playback.force_push(msg);
                         }
                     }
                 }
@@ -680,11 +677,12 @@ impl EventProcessor for MixedSource {
                     .find(|s| s.playback_id == playback_id)
                 {
                     if let Err(msg) = source
-                        .volume_message_queue
+                        .playback_message_queue
+                        .volume()
                         .push(AmplifiedSourceMessage::SetVolume(volume))
                     {
                         log::warn!("Failed to send set volume event. Force pushing it...");
-                        let _ = source.volume_message_queue.force_push(msg);
+                        let _ = source.playback_message_queue.volume().force_push(msg);
                     }
                 }
             }
@@ -699,11 +697,12 @@ impl EventProcessor for MixedSource {
                     .find(|s| s.playback_id == playback_id)
                 {
                     if let Err(msg) = source
-                        .panning_message_queue
+                        .playback_message_queue
+                        .panning()
                         .push(PannedSourceMessage::SetPanning(panning))
                     {
                         log::warn!("Failed to send set panning event. Force pushing it...");
-                        let _ = source.panning_message_queue.force_push(msg);
+                        let _ = source.playback_message_queue.panning().force_push(msg);
                     }
                 }
             }

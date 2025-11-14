@@ -6,10 +6,12 @@ use std::{
 use crossbeam_queue::ArrayQueue;
 
 use crate::{
-    player::{MixerId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::Source,
+    source::{
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
+        Source,
+    },
     utils::db_to_linear,
-    Error,
+    Error, MixerId, PlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -21,7 +23,7 @@ pub mod dasp;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Options to control playback of a [`SynthSource`].
+/// Options to control playback properties of a [`SynthSource`].
 #[derive(Clone, Copy)]
 pub struct SynthPlaybackOptions {
     /// By default 1.0f32. Customize to lower or raise the volume of the synth tone.
@@ -124,7 +126,7 @@ impl SynthPlaybackOptions {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Events to control playback of a synth source
+/// Events to control playback of a [`SynthSource`]
 pub enum SynthPlaybackMessage {
     /// Stop the synth source
     Stop,

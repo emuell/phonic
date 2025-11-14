@@ -17,7 +17,7 @@ use phonic::{
     effects::{self, FilterEffectType},
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
-    Error, FilePlaybackOptions, MixerId, PlaybackId, Player, ResamplingQuality,
+    Error, FilePlaybackOptions, MixerId, PlaybackHandle, Player, ResamplingQuality,
     SynthPlaybackOptions,
 };
 
@@ -90,7 +90,7 @@ fn main() -> Result<(), Error> {
     player.add_effect(effects::DcFilterEffect::default(), None)?;
 
     // start playing the background loop
-    let loop_playback_id = player.play_file(
+    let loop_file = player.play_file(
         "assets/YuaiLoop.wav",
         FilePlaybackOptions::default()
             .streamed()
@@ -108,7 +108,7 @@ fn main() -> Result<(), Error> {
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
 
     // create global playback state
-    let playing_synth_ids = Arc::new(Mutex::new(HashMap::<Keycode, usize>::new()));
+    let playing_notes = Arc::new(Mutex::new(HashMap::<Keycode, PlaybackHandle>::new()));
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
@@ -142,7 +142,7 @@ fn main() -> Result<(), Error> {
     let _key_down_guard = event_handler.on_key_down({
         let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
         let player = Arc::clone(&player);
-        let playing_synth_ids = Arc::clone(&playing_synth_ids);
+        let playing_notes = Arc::clone(&playing_notes);
 
         let current_playmode = Arc::clone(&current_playmode);
         let current_octave = Arc::clone(&current_octave);
@@ -236,15 +236,13 @@ fn main() -> Result<(), Error> {
                 Keycode::Left => {
                     let mut current = current_loop_seek_start.lock().unwrap();
                     *current = Duration::from_secs_f32(0_f32.max(current.as_secs_f32() - 0.5));
-                    let mut player = player.lock().unwrap();
-                    let _ = player.seek_source(loop_playback_id, *current, None);
+                    let _ = loop_file.seek(*current, None);
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32());
                 }
                 Keycode::Right => {
                     let mut current = current_loop_seek_start.lock().unwrap();
                     *current = Duration::from_secs_f32(4_f32.min(current.as_secs_f32() + 0.5));
-                    let mut player = player.lock().unwrap();
-                    let _ = player.seek_source(loop_playback_id, *current, None);
+                    let _ = loop_file.seek(*current, None);
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
                 }
                 _ => {
@@ -254,11 +252,11 @@ fn main() -> Result<(), Error> {
                         let final_note = (relative_note + 12 * octave) as u8;
 
                         let mut player = player.lock().unwrap();
-                        let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
+                        let mut playing_notes = playing_notes.lock().unwrap();
 
-                        let playback_id =
+                        let note_handle =
                             handle_note_on(&mut player, final_note, playmode, tone_mixer_id);
-                        playing_synth_ids.insert(*key, playback_id);
+                        playing_notes.insert(*key, note_handle);
                     }
                 }
             }
@@ -267,9 +265,7 @@ fn main() -> Result<(), Error> {
 
     // key up handler
     let _key_up_guard = event_handler.on_key_up({
-        let player = Arc::clone(&player);
-        let playing_synth_ids = Arc::clone(&playing_synth_ids);
-
+        let playing_notes = Arc::clone(&playing_notes);
         let alt_key_pressed = Arc::clone(&alt_key_pressed);
 
         move |key: &Keycode| match key {
@@ -278,11 +274,9 @@ fn main() -> Result<(), Error> {
             }
             _ => {
                 if key_to_note(key).is_some() {
-                    let mut player = player.lock().unwrap();
-                    let mut playing_synth_ids = playing_synth_ids.lock().unwrap();
-                    if let Some(playback_id) = playing_synth_ids.get(key) {
-                        handle_note_off(&mut player, *playback_id);
-                        playing_synth_ids.remove(key);
+                    let mut playing_notes = playing_notes.lock().unwrap();
+                    if let Some(handle) = playing_notes.remove(key) {
+                        handle_note_off(handle);
                     }
                 }
             }
@@ -332,44 +326,48 @@ fn handle_note_on(
     note: u8,
     playmode: PlayMode,
     mixer_id: MixerId,
-) -> PlaybackId {
-    // create, then play a synth or sample source and return the playback_id
+) -> PlaybackHandle {
+    // create, then play a synth or sample source and return the handle
     if playmode == PlayMode::Synth {
-        player
-            .play_synth_source(
-                create_synth_source(
-                    note,
-                    SynthPlaybackOptions::default()
-                        .volume_db(-12.0)
-                        .fade_out(Duration::from_secs(1))
-                        .target_mixer(mixer_id),
-                    player.output_sample_rate(),
+        PlaybackHandle::Synth(
+            player
+                .play_synth_source(
+                    create_synth_source(
+                        note,
+                        SynthPlaybackOptions::default()
+                            .volume_db(-12.0)
+                            .fade_out(Duration::from_secs(1))
+                            .target_mixer(mixer_id),
+                        player.output_sample_rate(),
+                    )
+                    .expect("failed to create a new synth source"),
+                    None,
                 )
-                .expect("failed to create a new synth source"),
-                None,
-            )
-            .expect("failed to play synth")
+                .expect("failed to play synth"),
+        )
     } else {
-        player
-            .play_file_source(
-                create_sample_source(
-                    FilePlaybackOptions::default()
-                        .volume_db(-6.0)
-                        .speed(speed_from_note(note))
-                        .fade_out(Duration::from_secs(3))
-                        .target_mixer(mixer_id),
-                    player.output_sample_rate(),
+        PlaybackHandle::File(
+            player
+                .play_file_source(
+                    create_sample_source(
+                        FilePlaybackOptions::default()
+                            .volume_db(-6.0)
+                            .speed(speed_from_note(note))
+                            .fade_out(Duration::from_secs(3))
+                            .target_mixer(mixer_id),
+                        player.output_sample_rate(),
+                    )
+                    .expect("failed to create a new sample file"),
+                    None,
                 )
-                .expect("failed to create a new sample file"),
-                None,
-            )
-            .expect("failed to play sample")
+                .expect("failed to play sample"),
+        )
     }
 }
 
-fn handle_note_off(player: &mut Player, playback_id: PlaybackId) {
-    // stop playing source with the given playback_id
-    player.stop_source(playback_id, None).unwrap_or_default();
+fn handle_note_off(handle: PlaybackHandle) {
+    // ignore result, source maybe no longer plays
+    let _ = handle.stop(None);
 }
 
 // -------------------------------------------------------------------------------------------------

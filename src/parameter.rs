@@ -43,7 +43,7 @@ pub trait Parameter: Debug {
     fn string_to_value(&self, string: String) -> Option<f32>;
 }
 
-/// Allows creating `dyn Parameter` clones.
+/// Allows creating `dyn `[`Parameter`] clones.
 pub trait ClonableParameter: Parameter {
     /// Create a dyn Parameter clone, wrapped into a box.  
     fn dyn_clone(&self) -> Box<dyn Parameter>;

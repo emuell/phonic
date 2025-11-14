@@ -7,10 +7,11 @@ use crossbeam_queue::ArrayQueue;
 
 use crate::{
     error::Error,
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+    player::PlaybackId,
     source::{
         file::{FilePlaybackMessage, FilePlaybackOptions},
         resampled::ResamplingQuality,
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
         unique_source_id,
     },
     utils::{
