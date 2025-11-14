@@ -15,12 +15,11 @@
 //!   back audio files, [`SynthSource`] for generating synthesized tones or can create your own
 //!   source implementation. File sources can be preloaded into memory or streamed on-the-fly.
 //!
-//! - **[`Effect`]** applies DSP effects to audio signals signals. By default, only one
+//! - **[`Effect`]** applies DSP effects to audio signals. By default, only one
 //!   mixer is present in the player and will route all sources through it. To create more complex
 //!   routings you can create sub-mixers via [`Player::add_mixer`] and route sources to them.
 //!   Each mixer instance has its own chain of DSP effects, which can be set up via
-//!   [`Player::add_effect`]. You can use the built in effects impls in [`effects`] or create
-//!   your own ones.
+//!   [`Player::add_effect`]. You can use the built-in effects in [`effects`] or create your own.
 //!
 //! ### Getting Started
 //!
@@ -38,36 +37,45 @@
 //!     // Create a player with the default audio output device.
 //!     let mut player = Player::new(DefaultOutputDevice::open()?, None);
 //!
+//!     // Memorize some consts for event scheduling.
+//!     let now = player.output_sample_frame_position();
+//!     let samples_per_sec = player.output_sample_rate() as u64;
+//!
 //!     // Add a new sub-mixer with a chorus and reverb effect to the main mixer.
 //!     let sub_mixer_id = {
-//!         let mixer_id = player.add_mixer(None)?;
-//!         player.add_effect(ChorusEffect::default(), mixer_id)?;
-//!         player.add_effect(ReverbEffect::default(), mixer_id)?;
-//!         mixer_id
+//!         let new_mixer_id = player.add_mixer(None)?;
+//!         player.add_effect(ChorusEffect::default(), new_mixer_id)?;
+//!         player.add_effect(ReverbEffect::default(), new_mixer_id)?;
+//!         new_mixer_id
 //!     };
 //!
-//!     // Add a limiter to the main mixer. All sounds, including the sub mixer's output
+//!     // Add a limiter to the main mixer. All sounds, including the sub mixer's output,
 //!     // will be routed through this effect now.
-//!     player.add_effect(CompressorEffect::new_limiter(), None)?;
+//!     let limiter = player.add_effect(CompressorEffect::new_limiter(), None)?;
 //!
-//!     // Play a file and get a handle to control it
-//!     let file_handle = player.play_file("path/to/your/file.wav",
+//!     // Change effect parameters via the returned handles.
+//!     // Schedule a parameter change 3 seconds from now (sample-accurate)
+//!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN_ID, 3.0, now + 3 * samples_per_sec);
+//!  
+//!     // Play a file and get a handle to control it.
+//!     let file = player.play_file("path/to/your/file.wav",
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
 //!     )?;
 //!
+//!     // Change sources via the returned handles.
 //!     // Schedule a stop 2 seconds from now (sample-accurate)
-//!     let now = player.output_sample_frame_position();
-//!     let samples_per_sec = player.output_sample_rate() as u64;
-//!     file_handle.stop(now + 2 * samples_per_sec)?;
+//!     file.stop(now + 2 * samples_per_sec)?;
 //!
 //!     // Play another file on the main mixer with scheduled start time
-//!     player.play_file("path/to/your/some_other_file.wav",
+//!     let some_other_file = player.play_file("path/to/your/some_other_file.wav",
 //!       FilePlaybackOptions::default().start_at_time(now + 2 * samples_per_sec)
 //!     )?;
 //!
-//!     // The player's audio output stream runs on a separate thread, so we need to keep
-//!     // the main thread alive to hear the audio.
-//!     std::thread::sleep(Duration::from_secs(5));
+//!     // The player's audio output stream runs on a separate thread, so we keep
+//!     // the main thread running here, until all files finished playing.
+//!     while file.is_playing() || some_other_file.is_playing() {
+//!         std::thread::sleep(Duration::from_millis(100));
+//!     }
 //!
 //!     Ok(())
 //! }
@@ -105,8 +113,8 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectId, EffectMovement, FilePlaybackHandle, MixerId, PlaybackHandle, PlaybackId, Player,
-    SynthPlaybackHandle,
+    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, MixerId, PlaybackId, Player,
+    SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};

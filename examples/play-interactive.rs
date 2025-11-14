@@ -17,7 +17,7 @@ use phonic::{
     effects::{self, FilterEffectType},
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
-    Error, FilePlaybackOptions, MixerId, PlaybackHandle, Player, ResamplingQuality,
+    Error, FilePlaybackOptions, MixerId, Player, ResamplingQuality, SourcePlaybackHandle,
     SynthPlaybackOptions,
 };
 
@@ -50,7 +50,7 @@ fn main() -> Result<(), Error> {
     let mut player = arguments::new_player(&args, None)?;
 
     let loop_mixer_id;
-    let loop_filter_effect_id;
+    let loop_filter_effect;
     {
         // create a new mixer
         loop_mixer_id = player.add_mixer(None)?;
@@ -60,7 +60,7 @@ fn main() -> Result<(), Error> {
         const DEFAULT_FILTER_CUTOFF: f32 = 20000.0;
         const DEFAULT_FILTER_Q: f32 = 0.707;
 
-        loop_filter_effect_id = player.add_effect(
+        loop_filter_effect = player.add_effect(
             effects::FilterEffect::with_parameters(
                 DEFAULT_FILTER_TYPE,
                 DEFAULT_FILTER_CUTOFF,
@@ -108,7 +108,7 @@ fn main() -> Result<(), Error> {
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
 
     // create global playback state
-    let playing_notes = Arc::new(Mutex::new(HashMap::<Keycode, PlaybackHandle>::new()));
+    let playing_notes = Arc::new(Mutex::new(HashMap::<Keycode, SourcePlaybackHandle>::new()));
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
@@ -169,14 +169,8 @@ fn main() -> Result<(), Error> {
                         _ => unreachable!(),
                     };
                     println!("Filter type: {filter_type}");
-                    let mut player = player.lock().unwrap();
-                    player
-                        .set_effect_parameter(
-                            loop_filter_effect_id,
-                            effects::FilterEffect::TYPE_ID,
-                            filter_type,
-                            None,
-                        )
+                    loop_filter_effect
+                        .set_parameter(effects::FilterEffect::TYPE_ID, filter_type, None)
                         .unwrap_or_default();
                 }
                 Keycode::Key1 => {
@@ -204,33 +198,19 @@ fn main() -> Result<(), Error> {
                     }
                 }
                 Keycode::Right if alt_key => {
-                    let mut player = player.lock().unwrap();
                     let mut cutoff = current_filter_cutoff.lock().unwrap();
-                    *cutoff = (*cutoff * 1.1_f32)
-                        .min(20000.0)
-                        .min(player.output_sample_rate() as f32 / 2.0);
+                    *cutoff = (*cutoff * 1.1_f32).min(20000.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
-                    player
-                        .set_effect_parameter(
-                            loop_filter_effect_id,
-                            effects::FilterEffect::CUTOFF_ID,
-                            *cutoff,
-                            None,
-                        )
+                    loop_filter_effect
+                        .set_parameter(effects::FilterEffect::CUTOFF_ID, *cutoff, None)
                         .unwrap_or_default();
                 }
                 Keycode::Left if alt_key => {
                     let mut cutoff = current_filter_cutoff.lock().unwrap();
                     *cutoff = (*cutoff / 1.1_f32).max(20.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
-                    let mut player = player.lock().unwrap();
-                    player
-                        .set_effect_parameter(
-                            loop_filter_effect_id,
-                            effects::FilterEffect::CUTOFF_ID,
-                            *cutoff,
-                            None,
-                        )
+                    loop_filter_effect
+                        .set_parameter(effects::FilterEffect::CUTOFF_ID, *cutoff, None)
                         .unwrap_or_default();
                 }
                 Keycode::Left => {
@@ -326,10 +306,10 @@ fn handle_note_on(
     note: u8,
     playmode: PlayMode,
     mixer_id: MixerId,
-) -> PlaybackHandle {
+) -> SourcePlaybackHandle {
     // create, then play a synth or sample source and return the handle
     if playmode == PlayMode::Synth {
-        PlaybackHandle::Synth(
+        SourcePlaybackHandle::Synth(
             player
                 .play_synth_source(
                     create_synth_source(
@@ -346,7 +326,7 @@ fn handle_note_on(
                 .expect("failed to play synth"),
         )
     } else {
-        PlaybackHandle::File(
+        SourcePlaybackHandle::File(
             player
                 .play_file_source(
                     create_sample_source(
@@ -365,7 +345,7 @@ fn handle_note_on(
     }
 }
 
-fn handle_note_off(handle: PlaybackHandle) {
+fn handle_note_off(handle: SourcePlaybackHandle) {
     // ignore result, source maybe no longer plays
     let _ = handle.stop(None);
 }
