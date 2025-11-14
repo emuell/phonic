@@ -11,8 +11,8 @@ use phonic::{
     effects,
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{db_to_linear, pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Effect, EffectId, Error, FilePlaybackOptions, MixerId, Parameter,
-    ParameterType, Player, SynthPlaybackHandle, SynthPlaybackOptions,
+    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions, MixerId,
+    Parameter, ParameterType, Player, SynthPlaybackHandle, SynthPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ struct App {
     playing_synth_notes: HashMap<u8, SynthPlaybackHandle>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
-    active_effects: HashMap<EffectId, Vec<Box<dyn Parameter>>>,
+    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
 }
 
 impl App {
@@ -264,18 +264,23 @@ impl App {
             .collect::<Vec<_>>();
         let info_json = serde_json::to_string(&EffectInfo::from(&effect as &dyn Effect))
             .unwrap_or_else(|_| "{}".to_string());
-        let effect_id = self.player.add_effect(effect, self.synth_mixer_id)?;
+        let effect_handle = self.player.add_effect(effect, self.synth_mixer_id)?;
+        let effect_id = effect_handle.id();
 
-        self.active_effects.insert(effect_id, parameters);
+        self.active_effects
+            .insert(effect_id, (effect_handle, parameters));
 
         Ok((effect_id, info_json))
     }
 
     // Remove an effect
     fn remove_effect(&mut self, effect_id: EffectId) -> Result<(), Error> {
-        self.player.remove_effect(effect_id)?;
-        self.active_effects.remove(&effect_id);
-        Ok(())
+        if let Some((_, _)) = self.active_effects.remove(&effect_id) {
+            self.player.remove_effect(effect_id)?;
+            Ok(())
+        } else {
+            Err(Error::EffectNotFoundError(effect_id))
+        }
     }
 
     // Set an effect parameter value and update our tracking
@@ -285,13 +290,12 @@ impl App {
         param_id: FourCC,
         normalized_value: f32,
     ) -> Result<(), Error> {
-        // Send to player
-        self.player.set_effect_parameter_normalized(
-            effect_id,
-            param_id,
-            normalized_value.clamp(0.0, 1.0),
-            None,
-        )
+        let (effect_handle, _) = self
+            .active_effects
+            .get(&effect_id)
+            .ok_or(Error::EffectNotFoundError(effect_id))?;
+
+        effect_handle.set_parameter_normalized(param_id, normalized_value.clamp(0.0, 1.0), None)
     }
 
     // Get an effect parameter's value as a string
@@ -301,7 +305,7 @@ impl App {
         param_id: FourCC,
         normalized_value: f32,
     ) -> Result<String, Error> {
-        let parameters = self
+        let (_, parameters) = self
             .active_effects
             .get(&effect_id)
             .ok_or(Error::EffectNotFoundError(effect_id))?;

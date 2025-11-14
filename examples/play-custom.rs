@@ -201,8 +201,7 @@ fn main() -> Result<(), Error> {
 
     // Create a sub-mixer for the synth, child of the main mixer.
     let bass_mixer_id = player.add_mixer(None)?;
-    let tanh_distortion_id =
-        player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer_id)?;
+    let tanh_distortion = player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer_id)?;
 
     // Create a sub-mixer for the pad, with a high-pass filter.
     let pad_mixer_id = player.add_mixer(None)?;
@@ -290,9 +289,8 @@ fn main() -> Result<(), Error> {
             )?;
             player.play_synth_source(bass, sample_time)?;
 
-            // Randomize the Tanh dist gain with every note
-            player.set_effect_parameter(
-                tanh_distortion_id,
+            // Set a new random Tanh dist gain with every note
+            tanh_distortion.set_parameter(
                 TanhDistortion::GAIN_ID,
                 rand::random_range(0.8..1.0),
                 sample_time,

@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     sync::{
         atomic::{self, AtomicBool, AtomicUsize, Ordering},
         mpsc::{sync_channel, SyncSender},
@@ -12,13 +11,11 @@ use std::{
 use basedrop::{Collector, Handle, Owned};
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
-use four_cc::FourCC;
 
 use crate::{
-    effect::{Effect, EffectMessage, EffectMessagePayload},
+    effect::Effect,
     error::Error,
     output::OutputDevice,
-    parameter::ParameterValueUpdate,
     source::{
         amplified::AmplifiedSource,
         converted::ConvertedSource,
@@ -49,7 +46,7 @@ pub type MixerId = usize;
 pub type EffectId = usize;
 
 // Playback handles for sources.
-pub use handles::{FilePlaybackHandle, PlaybackHandle, SynthPlaybackHandle};
+pub use handles::{EffectHandle, FilePlaybackHandle, SourcePlaybackHandle, SynthPlaybackHandle};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -510,7 +507,7 @@ impl Player {
         &mut self,
         effect: E,
         mixer_id: M,
-    ) -> Result<EffectId, Error> {
+    ) -> Result<EffectHandle, Error> {
         let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
 
@@ -531,7 +528,15 @@ impl Player {
         } else {
             self.mixer_effects
                 .insert(effect_id, (mixer_id, Some(effect_name)));
-            Ok(effect_id)
+
+            // Create and return handle
+            Ok(EffectHandle::new(
+                effect_id,
+                mixer_id,
+                effect_name,
+                Arc::clone(&self.mixer_event_queues),
+                self.collector_handle.clone(),
+            ))
         }
     }
 
@@ -618,116 +623,6 @@ impl Player {
         }
 
         Ok(())
-    }
-
-    /// Set a raw parameter value on an effect at a specific sample time or immediately.
-    ///
-    /// The `value` must be of the correct type for the parameter (`f32`, `i32`, `bool`, or the
-    /// specific enum type).
-    pub fn set_effect_parameter<V: Any + Send + Sync, T: Into<Option<u64>>>(
-        &mut self,
-        effect_id: EffectId,
-        parameter_id: FourCC,
-        value: V,
-        sample_time: T,
-    ) -> Result<(), Error> {
-        let sample_time = sample_time.into().unwrap_or(0);
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Raw(Box::new(value)),
-        );
-
-        if self
-            .effect_mixer_event_queue(effect_id)?
-            .push(MixerMessage::ProcessEffectParameterUpdate {
-                effect_id,
-                parameter_id,
-                value,
-                sample_time,
-            })
-            .is_err()
-        {
-            Err(Self::mixer_event_queue_error("set_effect_parameter"))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Set a normalized parameter value on an effect at a specific sample time or immediately.
-    ///
-    /// The `value` must be in the range `0.0..=1.0`.
-    pub fn set_effect_parameter_normalized<T: Into<Option<u64>>>(
-        &mut self,
-        effect_id: EffectId,
-        parameter_id: FourCC,
-        value: f32,
-        sample_time: T,
-    ) -> Result<(), Error> {
-        let sample_time = sample_time.into().unwrap_or(0);
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Normalized(value),
-        );
-
-        if self
-            .effect_mixer_event_queue(effect_id)?
-            .push(MixerMessage::ProcessEffectParameterUpdate {
-                effect_id,
-                parameter_id,
-                value,
-                sample_time,
-            })
-            .is_err()
-        {
-            Err(Self::mixer_event_queue_error("set_effect_parameter"))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Send a message to an effect at a specific sample time or immediately.
-    pub fn send_effect_message<M: EffectMessage + 'static, T: Into<Option<u64>>>(
-        &mut self,
-        effect_id: EffectId,
-        message: M,
-        sample_time: T,
-    ) -> Result<(), Error> {
-        let message = Owned::new(
-            &self.collector_handle,
-            Box::new(message) as Box<EffectMessagePayload>,
-        );
-        let sample_time = sample_time.into().unwrap_or(0);
-
-        // check if effect name matches
-        let (_, effect_name) = *self
-            .mixer_effects
-            .get(&effect_id)
-            .ok_or(Error::EffectNotFoundError(effect_id))?
-            .value();
-        if let Some(effect_name) = effect_name {
-            if effect_name != message.effect_name() {
-                return Err(Error::ParameterError(format!(
-                    "Invalid message: Trying to send a `{}` message to effect '{}' (id: {})",
-                    message.effect_name(),
-                    effect_name,
-                    effect_id
-                )));
-            }
-        }
-
-        if self
-            .effect_mixer_event_queue(effect_id)?
-            .push(MixerMessage::ProcessEffectMessage {
-                effect_id,
-                message,
-                sample_time,
-            })
-            .is_err()
-        {
-            Err(Self::mixer_event_queue_error("send_effect_message"))
-        } else {
-            Ok(())
-        }
     }
 
     /// Immediately stop all playing and possibly scheduled sources.

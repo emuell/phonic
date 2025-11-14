@@ -58,10 +58,8 @@ pub type EffectTime = SourceTime;
 /// Buffers are processed in-place in the audio real-time thread.
 ///
 /// After an effect got added to a mixer, effect parameters can only be changed by sending parameter
-/// value changes or custom messages via the player's
-/// [`set_effect_parameter`](crate::Player::set_effect_parameter),
-/// [`set_effect_parameter_normalized`](crate::Player::set_effect_parameter_normalized) or
-/// [`send_effect_message`](crate::Player::send_effect_message) functions. This ensures that the
+/// value changes or custom messages via the [`EffectHandle`](crate::EffectHandle) that got returned
+/// from the player's [`add_effect`](crate::Player::add_effect) function. This ensures that the
 /// actual effect processing state can not be mutated outside of the audio thread.
 ///
 /// Non real-time thread clients, such as UIs, can query info about an effect's parameter set via

@@ -23,7 +23,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 - **Advanced Playback Control**:
   - **Sample-precise scheduling** for accurate sequencing.
   - Real-time monitoring of playback position and status for GUI integration.
-  - Dynamic control over volume, panning, and playback speed.
+  - Dynamic control over volume, panning, and playback speed via playback handles.
 
 - **Custom Synthesis and DSPs**:
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
@@ -63,8 +63,8 @@ fn main() -> Result<(), Error> {
     // default playback options. Preloaded means it's entirely decoded first, then played back
     // from a decoded buffer. All files played through the player are automatically resampled 
     // and channel-mapped to match the audio output's signal specs.
-    // Preloaded files can also be cheaply cloned, so they can be allocated ones and played back
-    // many times. The returned handle allows to change playback properties of the playing files.
+    // Preloaded files can also be cheaply cloned, so they can be allocated once and played back
+    // many times too. The returned handle allows changing playback properties of the files.
     let small_file = player.play_file(
         "PATH_TO/some_small_file.wav",
         FilePlaybackOptions::default())?;
@@ -104,7 +104,6 @@ fn main() -> Result<(), Error> {
     });
 
     // The returned handles allow controlling playback properties of playing files.
-    // Handles can be cloned are are `Sync` and `Send`.
     // The second args is an optional sample time, where `None` means immediately.
     long_file.seek(Duration::from_secs(5), None)?;
 
@@ -121,7 +120,7 @@ fn main() -> Result<(), Error> {
     // If you only want one file to play at the same time, stop all playing sounds.
     player.stop_all_sources()?;
     // And then schedule a new source for playback.
-    player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
+    let _boom = player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 
     Ok(())
 }
@@ -129,7 +128,7 @@ fn main() -> Result<(), Error> {
 
 #### File playback with DSP Effects in a Mixer Graph
 
-Create complex audio processing chains by routing sources through different mixers and effects.
+Create DSP graphs by routing sources through different mixers and effects.
 
 ```rust no_run
 use phonic::{
@@ -143,22 +142,27 @@ fn main() -> Result<(), Error> {
 
     // Add a reverb effect to the main mixer. All sounds played without a
     // specific target mixer will now be routed through this effect.
-    player.add_effect(ReverbEffect::with_parameters(0.6, 0.8), None)?;
+    let reverb = player.add_effect(ReverbEffect::with_parameters(0.6, 0.8), None)?;
 
     // Create a new sub-mixer that is a child of the main mixer.
     let chorus_mixer_id = player.add_mixer(None)?;
     // Add a chorus effect to this new mixer. Sources routed to this mixer will
-    // now apply the chorus effect and reverb (the main mixer effects) 
-    player.add_effect(ChorusEffect::default(), chorus_mixer_id)?;
+    // now apply the chorus effect and reverb (the main mixer effects).
+    let chorus = player.add_effect(ChorusEffect::default(), chorus_mixer_id)?;
+
+    // Effect parameters can be automated via the returned handles.
+    // The `None` arguments are optional sample times to schedule events. 
+    reverb.set_parameter(ReverbEffect::ROOM_SIZE_ID, 0.9f32, None)?;
+    chorus.set_parameter_normalized(ChorusEffect::RATE_ID, 0.5, None)?;
 
     // Play a file through the main mixer (which has reverb only).
-    player.play_file(
+    let _some_file = player.play_file(
         "PATH_TO/some_file.wav",
         FilePlaybackOptions::default(),
     )?;
 
     // Play another file through the chorus mixer (and main mixer with the reverb FX).
-    player.play_file(
+    let _another_file = player.play_file(
         "PATH_TO/another_file.wav",
         FilePlaybackOptions::default().target_mixer(chorus_mixer_id),
     )?;
