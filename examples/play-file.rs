@@ -1,14 +1,7 @@
 //! An example showcasing how to play audio files, both preloaded and streamed
 //! and how to monitor file playback status.
 
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::sync_channel,
-        Arc,
-    },
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc::sync_channel, time::Duration};
 
 use phonic::{utils::speed_from_note, Error, FilePlaybackOptions, PlaybackStatusEvent};
 
@@ -30,17 +23,15 @@ fn main() -> Result<(), Error> {
     // Parse optional arguments
     let args = arguments::parse();
 
-    // Create a channel for playback status events.
-    let (status_sender, status_receiver) = sync_channel(32);
+    // Create a player with the default output device and a channel to receive playback events.
+    let (playback_status_sender, playback_status_receiver) = sync_channel(32);
+    let mut player = arguments::new_player(&args, playback_status_sender)?;
 
-    // Create a player instance with the output device as configured via program arguments
-    let mut player = arguments::new_player(&args, status_sender)?;
-
-    // Pause playback until we've added all sources
+    // Pause playback until we've added all sources.
     player.stop();
 
-    // Create sound sources and memorize file ids for the playback status
-    let mut playing_file_ids = vec![
+    // Create sound sources and memorize handles for control
+    let playing_files = [
         player
             // files are by default not streamed but are preloaded and played buffered.
             .play_file(
@@ -62,67 +53,52 @@ fn main() -> Result<(), Error> {
             )?,
     ];
 
-    let mut loop_playback_id = Some(playing_file_ids[1]);
-    let is_running = Arc::new(AtomicBool::new(true));
+    // Stop (fade-out) the loop after 3 secs.
+    let samples_per_second = player.output_sample_rate() as u64;
+    let now = player.output_sample_frame_position();
 
-    // Handle events from the file sources
-    let event_thread = std::thread::spawn({
-        let is_running = is_running.clone();
-        move || {
-            while let Ok(event) = status_receiver.recv() {
-                match event {
-                    PlaybackStatusEvent::Position {
+    let loop_playback_handle = &playing_files[1];
+    loop_playback_handle.stop(now + 3 * samples_per_second)?;
+
+    // Handle events from the file sources.
+    std::thread::spawn(move || {
+        while let Ok(event) = playback_status_receiver.recv() {
+            match event {
+                PlaybackStatusEvent::Position {
+                    id,
+                    path,
+                    context: _,
+                    position,
+                } => {
+                    println!(
+                        "Playback pos of file #{} '{}': {}",
                         id,
                         path,
-                        context: _,
-                        position,
-                    } => {
-                        println!(
-                            "Playback pos of file #{} '{}': {}",
-                            id,
-                            path,
-                            position.as_secs_f32()
-                        );
-                    }
-                    PlaybackStatusEvent::Stopped {
-                        id,
-                        path,
-                        context: _,
-                        exhausted,
-                    } => {
-                        if exhausted {
-                            println!("Playback of #{id} '{path}' finished playback");
-                        } else {
-                            println!("Playback of #{id} '{path}' was stopped");
-                        }
-                        playing_file_ids.retain(|v| *v != id);
-                        if playing_file_ids.is_empty() {
-                            // stop thread when all files finished
-                            is_running.store(false, Ordering::Relaxed);
-                            break;
-                        }
+                        position.as_secs_f32()
+                    );
+                }
+                PlaybackStatusEvent::Stopped {
+                    id,
+                    path,
+                    context: _,
+                    exhausted,
+                } => {
+                    if exhausted {
+                        println!("Playback of #{id} '{path}' finished playback");
+                    } else {
+                        println!("Playback of #{id} '{path}' was stopped");
                     }
                 }
             }
         }
     });
 
-    // Start playing
+    // Start playing.
     player.start();
 
-    // Stop (fade-out) the loop after 3 secs
-    let play_time = Instant::now();
-    while is_running.load(Ordering::Relaxed) {
-        if loop_playback_id.is_some() && play_time.elapsed() > Duration::from_secs(3) {
-            player.stop_source(loop_playback_id.unwrap(), None)?;
-            loop_playback_id = None;
-        }
-        std::thread::sleep(Duration::from_secs(1));
-    }
-
-    // Wait until playback finished
-    if let Err(err) = event_thread.join() {
-        std::panic::resume_unwind(err);
+    // Wait until all files sources finished playing...
+    while playing_files.iter().any(|file| file.is_playing()) {
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     Ok(())

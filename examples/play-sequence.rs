@@ -61,11 +61,12 @@ fn main() -> Result<(), Error> {
         } else {
             60
         });
-        let playback_id = player.play_file_source(
-            cowbell.clone(FilePlaybackOptions::default().speed(speed), samples_per_sec)?,
-            sample_time,
-        )?;
-        player.stop_source(playback_id, sample_time + samples_per_beat)?;
+        player
+            .play_file_source(
+                cowbell.clone(FilePlaybackOptions::default().speed(speed), samples_per_sec)?,
+                sample_time,
+            )?
+            .stop(sample_time + samples_per_beat)?;
     }
 
     // Schedule bass line with glides (midi_note, duration_in_beats, glide, volume, pan)
@@ -79,7 +80,7 @@ fn main() -> Result<(), Error> {
 
     // Play first note
     let (first_note, first_duration_beats, _glide, volume, panning) = bass_line[0];
-    let bass_playback_id = player.play_file_source(
+    let bass_playback_handle = player.play_file_source(
         bass.clone(
             FilePlaybackOptions::default()
                 .speed(speed_from_note(first_note))
@@ -96,17 +97,12 @@ fn main() -> Result<(), Error> {
     current_time += first_duration_samples;
 
     for (note, duration_beats, glide, volume, panning) in &bass_line[1..] {
-        player.set_source_speed(
-            bass_playback_id,
-            speed_from_note(*note),
-            *glide,
-            current_time,
-        )?;
+        bass_playback_handle.set_speed(speed_from_note(*note), *glide, current_time)?;
         if let Some(volume) = volume {
-            player.set_source_volume(bass_playback_id, *volume, current_time)?;
+            bass_playback_handle.set_volume(*volume, current_time)?;
         }
         if let Some(panning) = panning {
-            player.set_source_panning(bass_playback_id, *panning, current_time)?;
+            bass_playback_handle.set_panning(*panning, current_time)?;
         }
         let duration_samples = (duration_beats * samples_per_beat as f64) as u64;
         current_time += duration_samples;

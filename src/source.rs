@@ -5,6 +5,9 @@ use std::{
 
 // -------------------------------------------------------------------------------------------------
 
+pub(crate) mod playback;
+pub mod status;
+
 pub mod amplified;
 pub mod converted;
 pub mod empty;

@@ -9,8 +9,11 @@ use crossbeam_queue::ArrayQueue;
 use super::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource};
 
 use crate::{
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{unique_source_id, Source, SourceTime},
+    player::PlaybackId,
+    source::{
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
+        unique_source_id, Source, SourceTime,
+    },
     utils::fader::{FaderState, VolumeFader},
     Error,
 };

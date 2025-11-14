@@ -1,17 +1,10 @@
 //! An example showcasing how to play a `dasp` signal as a synth source.
 
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::sync_channel,
-        Arc,
-    },
-    time::Duration,
-};
-
-use phonic::{Error, PlaybackStatusEvent, SynthPlaybackOptions};
+use std::{sync::mpsc::sync_channel, time::Duration};
 
 use dasp::{signal, Frame, Signal};
+
+use phonic::{Error, PlaybackStatusEvent, SynthPlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -31,13 +24,11 @@ fn main() -> Result<(), Error> {
     // Parse optional arguments
     let args = arguments::parse();
 
-    // Create a channel for playback status events.
-    let (status_sender, status_receiver) = sync_channel(32);
+    // Create a player with the default output device and a channel to receive playback events.
+    let (playback_status_sender, playback_status_receiver) = sync_channel(32);
+    let mut player = arguments::new_player(&args, playback_status_sender)?;
 
-    // Create a player instance with the output device as configured via program arguments
-    let mut player = arguments::new_player(&args, status_sender)?;
-
-    // pause playback until we've added all sources
+    // Pause playback until we've added all sources.
     player.stop();
 
     let sample_rate = player.output_sample_rate();
@@ -65,7 +56,7 @@ fn main() -> Result<(), Error> {
         )
     };
 
-    // Combine 3 notes to a chord
+    // Combine 3 notes to a chord.
     let chord_note_amp = 0.5_f64;
     let chord_note_duration = 4 * sample_rate;
     let chord = // chord
@@ -120,8 +111,8 @@ fn main() -> Result<(), Error> {
         )
     };
 
-    // play all synth sources and memorize ids for the playback status
-    let mut playing_synth_ids = vec![
+    // Play all synth sources and memorize ids for the playback status.
+    let playing_synths = [
         player.play_dasp_synth(
             chord,
             "synth_chord",
@@ -150,53 +141,43 @@ fn main() -> Result<(), Error> {
         )?,
     ];
 
-    // handle playback events from the player
-    let is_running = Arc::new(AtomicBool::new(true));
-    let event_thread = std::thread::spawn({
-        let is_running = is_running.clone();
-        move || {
-            while let Ok(event) = status_receiver.recv() {
-                match event {
-                    PlaybackStatusEvent::Position {
-                        id,
-                        path,
-                        context: _,
-                        position,
-                    } => {
-                        println!(
-                            "Playback pos of synth #{id} '{path}': {pos}",
-                            pos = position.as_secs_f32()
-                        );
-                    }
-                    PlaybackStatusEvent::Stopped {
-                        id,
-                        path,
-                        context: _,
-                        exhausted,
-                    } => {
-                        if exhausted {
-                            println!("Playback of synth #{id} '{path}' finished playback");
-                        } else {
-                            println!("Playback of synth #{id} '{path}' stopped");
-                        }
-                        playing_synth_ids.retain(|v| *v != id);
-                        if playing_synth_ids.is_empty() {
-                            // stop this example when all synths finished
-                            is_running.store(false, Ordering::Relaxed);
-                            break;
-                        }
+    // Handle playback events from the player.
+    std::thread::spawn(move || {
+        while let Ok(event) = playback_status_receiver.recv() {
+            match event {
+                PlaybackStatusEvent::Position {
+                    id,
+                    path,
+                    context: _,
+                    position,
+                } => {
+                    println!(
+                        "Playback pos of synth #{id} '{path}': {pos}",
+                        pos = position.as_secs_f32()
+                    );
+                }
+                PlaybackStatusEvent::Stopped {
+                    id,
+                    path,
+                    context: _,
+                    exhausted,
+                } => {
+                    if exhausted {
+                        println!("Playback of synth #{id} '{path}' finished playback");
+                    } else {
+                        println!("Playback of synth #{id} '{path}' stopped");
                     }
                 }
             }
         }
     });
 
-    // start playing
+    // Start playing.
     player.start();
 
-    // Wait until all playback finished
-    if let Err(err) = event_thread.join() {
-        std::panic::resume_unwind(err);
+    // Wait until all synth sources finished playing...
+    while playing_synths.iter().any(|synth| synth.is_playing()) {
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     Ok(())

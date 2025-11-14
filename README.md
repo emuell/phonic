@@ -47,7 +47,7 @@ Play, seek and stop audio files on the default audio output device.
 Monitor playback status of playing files.
 
 ```rust no_run
-use std::sync::mpsc::sync_channel;
+use std::{time::Duration, sync::mpsc::sync_channel};
 
 use phonic::{
     DefaultOutputDevice, Player, PlaybackStatusEvent, Error, 
@@ -61,16 +61,18 @@ fn main() -> Result<(), Error> {
 
     // Start playing a file: The file below is going to be "preloaded" because it uses the 
     // default playback options. Preloaded means it's entirely decoded first, then played back
-    // from a decoded buffer. All files played through the player are automatically resampled
+    // from a decoded buffer. All files played through the player are automatically resampled 
     // and channel-mapped to match the audio output's signal specs.
-    let small_file_id = player.play_file(
+    // Preloaded files can also be cheaply cloned, so they can be allocated ones and played back
+    // many times. The returned handle allows to change playback properties of the playing files.
+    let small_file = player.play_file(
         "PATH_TO/some_small_file.wav",
         FilePlaybackOptions::default())?;
+    
     // The next file is going to be decoded and streamed on the fly, which is especially handy
     // for long files, as it can start playing right away and won't need to allocate memory 
-    // for the entire file. We also repeat the file playback 2 times, lowering the volume and
-    // are pitching it down a bit.
-    let long_file_id = player.play_file(
+    // for the entire file.
+    let long_file = player.play_file(
         "PATH_TO/some_long_file.mp3",
         FilePlaybackOptions::default()
             .streamed()
@@ -84,8 +86,8 @@ fn main() -> Result<(), Error> {
         while let Ok(event) = playback_status_receiver.recv() {
             match event {
                 PlaybackStatusEvent::Position { id, path, context: _, position } => {
-                    // context is an optional, user defined payload,
-                    // passed along with `player.play_file_with_context` 
+                    // `context` is an optional, user defined payload, which can be passed
+                    // along to the status with `player.play_file_with_context` 
                     println!("Playback pos of source #{id} '{path}': {pos}",
                         pos = position.as_secs_f32()
                     );
@@ -101,13 +103,24 @@ fn main() -> Result<(), Error> {
         }
     });
 
-    // Playing files can be manipulated in various ways. Here we seek and stop a file.
-    player.seek_source(long_file_id, std::time::Duration::from_secs(5), None)?;
-    player.stop_source(small_file_id, None)?;
+    // The returned handles allow controlling playback properties of playing files.
+    // Handles can be cloned are are `Sync` and `Send`.
+    // The second args is an optional sample time, where `None` means immediately.
+    long_file.seek(Duration::from_secs(5), None)?;
 
-    // If you only want one file to play at the same time, simply stop all playing
-    // sounds before starting a new one.
+    // Using Some sample time args, we can schedule changes (sample-accurate).
+    let now = player.output_sample_frame_position();
+    let samples_per_second = player.output_sample_rate() as u64;
+
+    // Use the handle's `is_playing` functions to check if a file is still playing.
+    if long_file.is_playing() {
+        long_file.set_volume(0.3, now + samples_per_second)?; // Fade down after 1 second
+        long_file.stop(now + 2 * samples_per_second)?;  // Stop after 2 seconds
+    }
+
+    // If you only want one file to play at the same time, stop all playing sounds.
     player.stop_all_sources()?;
+    // And then schedule a new source for playback.
     player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 
     Ok(())

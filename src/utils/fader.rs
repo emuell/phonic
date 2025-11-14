@@ -1,4 +1,5 @@
 //! Volume fading, de-clicking tools.
+#![allow(unused)]
 
 use std::time::Duration;
 

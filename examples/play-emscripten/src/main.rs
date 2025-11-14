@@ -12,7 +12,7 @@ use phonic::{
     sources::{DaspSynthSource, PreloadedFileSource},
     utils::{db_to_linear, pitch_from_note, speed_from_note},
     DefaultOutputDevice, Effect, EffectId, Error, FilePlaybackOptions, MixerId, Parameter,
-    ParameterType, PlaybackId, Player, SynthPlaybackOptions,
+    ParameterType, Player, SynthPlaybackHandle, SynthPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -83,7 +83,7 @@ struct App {
     player: Player,
     playback_beat_counter: u32,
     playback_start_time: u64,
-    playing_synth_notes: HashMap<u8, PlaybackId>,
+    playing_synth_notes: HashMap<u8, SynthPlaybackHandle>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
     active_effects: HashMap<EffectId, Vec<Box<dyn Parameter>>>,
@@ -200,21 +200,22 @@ impl App {
 
     // Schedule synth note on for playback
     fn synth_note_on(&mut self, note: u8) {
-        if let Some(playback_id) = self.playing_synth_notes.get(&note) {
-            let _ = self.player.stop_source(*playback_id, None);
+        if let Some(playing_note) = self.playing_synth_notes.get(&note) {
+            let _ = playing_note.stop(None);
             self.playing_synth_notes.remove(&note);
         }
-        let playback_id = self
+        if let Ok(playing_note) = self
             .player
             .play_synth_source(self.create_synth_source(note).unwrap(), None)
-            .unwrap();
-        self.playing_synth_notes.insert(note, playback_id);
+        {
+            self.playing_synth_notes.insert(note, playing_note);
+        }
     }
 
     // Stop a scheduled synth note on
     fn synth_note_off(&mut self, note: u8) {
-        if let Some(playback_id) = self.playing_synth_notes.get(&note) {
-            let _ = self.player.stop_source(*playback_id, None);
+        if let Some(handle) = self.playing_synth_notes.get(&note) {
+            let _ = handle.stop(None);
             self.playing_synth_notes.remove(&note);
         }
     }
@@ -363,17 +364,13 @@ impl App {
                 .unwrap();
 
             // play it at the new beat's time
-            let playback_id = self
+            if let Ok(playback_handle) = self
                 .player
                 .play_file_source(sample, Some(next_beats_sample_time))
-                .unwrap();
-            // and stop it again (fade out) before the next beat starts
-            self.player
-                .stop_source(
-                    playback_id,
-                    next_beats_sample_time + samples_per_beat as u64,
-                )
-                .unwrap();
+            {
+                // and stop it again (fade out) before the next beat starts
+                let _ = playback_handle.stop(next_beats_sample_time + samples_per_beat as u64);
+            }
 
             // advance beat counter
             self.playback_beat_counter += 1;

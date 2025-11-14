@@ -4,8 +4,12 @@ use crossbeam_queue::ArrayQueue;
 use dasp::{signal::UntilExhausted, Signal};
 
 use crate::{
-    player::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
-    source::{synth::SynthPlaybackOptions, Source, SourceTime},
+    player::{PlaybackId, SynthPlaybackHandle},
+    source::{
+        status::{PlaybackStatusContext, PlaybackStatusEvent},
+        synth::SynthPlaybackOptions,
+        Source, SourceTime,
+    },
     Error, Player,
 };
 
@@ -163,7 +167,7 @@ impl Player {
         signal: SignalType,
         signal_name: &str,
         options: SynthPlaybackOptions,
-    ) -> Result<PlaybackId, Error>
+    ) -> Result<SynthPlaybackHandle, Error>
     where
         SignalType: Signal<Frame = f64> + Send + Sync + 'static,
     {
@@ -178,7 +182,7 @@ impl Player {
         signal_name: &str,
         options: SynthPlaybackOptions,
         context: Option<PlaybackStatusContext>,
-    ) -> Result<PlaybackId, Error>
+    ) -> Result<SynthPlaybackHandle, Error>
     where
         SignalType: Signal<Frame = f64> + Send + Sync + 'static,
     {

@@ -6,6 +6,7 @@ use std::{error, fmt, io};
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
+    SourceNotPlaying,
     MediaFileNotFound,
     MediaFileProbeError,
     MediaFileSeekError,
@@ -24,6 +25,7 @@ impl error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SourceNotPlaying => write!(f, "Source is no longer playing"),
             Self::MediaFileNotFound => write!(f, "Audio file not found"),
             Self::MediaFileProbeError => write!(f, "Audio file failed to probe"),
             Self::MediaFileSeekError => write!(f, "Audio file failed to seek"),
