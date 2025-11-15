@@ -26,8 +26,9 @@ use crate::{
         resampled::ResamplingQuality,
         status::{PlaybackStatusContext, PlaybackStatusEvent},
         synth::SynthSource,
+        unique_source_id,
     },
-    Source,
+    Generator, Source,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -36,7 +37,7 @@ mod handles;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Unique ID for played back file or synth sources.
+/// Unique ID for played back file, synth or generator sources.
 pub type PlaybackId = usize;
 
 /// Unique ID for newly added mixers.
@@ -46,7 +47,10 @@ pub type MixerId = usize;
 pub type EffectId = usize;
 
 // Playback handles for sources.
-pub use handles::{EffectHandle, FilePlaybackHandle, SourcePlaybackHandle, SynthPlaybackHandle};
+pub use handles::{
+    EffectHandle, FilePlaybackHandle, GeneratorPlaybackHandle, SourcePlaybackHandle,
+    SynthPlaybackHandle,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -380,6 +384,95 @@ impl Player {
             // Create and return handle
             let mixer_event_queues = Arc::clone(&self.mixer_event_queues);
             Ok(SynthPlaybackHandle::new(
+                is_playing,
+                playback_id,
+                mixer_id,
+                playback_message_queue,
+                mixer_event_queues,
+            ))
+        }
+    }
+
+    /// Play a generator source.
+    ///
+    /// The generator must be configured (including sequencer attachment) before played.
+    /// Returns a handle that can be used to control the generator.
+    ///
+    /// Use `mixer_id` to specify which mixer to add the generator to. If None, adds to the main mixer.
+    pub fn play_generator_source<
+        G: Generator + 'static,
+        M: Into<Option<MixerId>>,
+        T: Into<Option<u64>>,
+    >(
+        &mut self,
+        generator: G,
+        mixer_id: M,
+        start_time: T,
+    ) -> Result<GeneratorPlaybackHandle, Error> {
+        let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
+        let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
+
+        // Generate a unique playback ID for this generator
+        let playback_id = unique_source_id();
+
+        // Get the generator's playback message queue
+        let playback_message_queue = generator.playback_message_queue();
+        // Convert generator to mixer's rate and channel layout
+        let converted_source = ConvertedSource::new(
+            generator,
+            self.output_device.channel_count(),
+            self.output_device.sample_rate(),
+            ResamplingQuality::Default,
+        );
+
+        // Apply volume
+        let initial_volume = 1.0;
+        let amplified_source = AmplifiedSource::new(converted_source, initial_volume);
+        let volume_message_queue = amplified_source.message_queue();
+
+        // Apply panning
+        let panning = 0.0;
+        let panned_source = PannedSource::new(amplified_source, panning);
+        let panning_message_queue = panned_source.message_queue();
+
+        // add to playing sources
+        let is_playing = Arc::new(AtomicBool::new(true));
+        let playback_message_queue = PlaybackMessageQueue::Generator {
+            playback: playback_message_queue,
+            volume: volume_message_queue,
+            panning: panning_message_queue,
+        };
+        // Store in playing sources for tracking
+        self.playing_sources.insert(
+            playback_id,
+            PlayingSource {
+                playback_message_queue: playback_message_queue.clone(),
+                is_playing: Arc::clone(&is_playing),
+            },
+        );
+
+        // Wrap the panned source as a boxed Source
+        let source = Owned::new(
+            &self.collector_handle,
+            Box::new(panned_source) as Box<dyn Source>,
+        );
+
+        let sample_time = start_time.into().unwrap_or(0);
+        if mixer_event_queue
+            .push(MixerMessage::AddSource {
+                playback_id,
+                playback_message_queue: playback_message_queue.clone(),
+                source,
+                sample_time,
+            })
+            .is_err()
+        {
+            self.playing_sources.remove(&playback_id);
+            Err(Self::mixer_event_queue_error("play_generator"))
+        } else {
+            // Create and return handle
+            let mixer_event_queues = Arc::clone(&self.mixer_event_queues);
+            Ok(GeneratorPlaybackHandle::new(
                 is_playing,
                 playback_id,
                 mixer_id,

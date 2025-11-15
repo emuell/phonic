@@ -104,6 +104,7 @@ pub struct PreloadedFileSource {
     file_buffer: Arc<PreloadedFileBuffer>,
     file_source: FileSourceImpl,
     playback_repeat: usize,
+    playback_repeat_count: usize,
     playback_pos: usize,
     playback_pos_eof: bool,
 }
@@ -230,20 +231,22 @@ impl PreloadedFileSource {
             playback_status_send,
         )?;
 
-        let playback_repeat = options
+        let playback_repeat_count = options
             .repeat
             .unwrap_or(if file_buffer.loop_range.is_some() {
                 usize::MAX
             } else {
                 0
             });
+        let playback_repeat = playback_repeat_count;
         let playback_pos = 0;
         let playback_pos_eof = false;
 
         Ok(Self {
             file_buffer,
             file_source,
-            playback_repeat,
+            playback_repeat_count: playback_repeat,
+            playback_repeat: playback_repeat_count,
             playback_pos,
             playback_pos_eof,
         })
@@ -269,6 +272,33 @@ impl PreloadedFileSource {
     /// Access to the shared file buffer.
     pub fn file_buffer(&self) -> Arc<PreloadedFileBuffer> {
         Arc::clone(&self.file_buffer)
+    }
+
+    /// Reset the file to start playback from the beginning.
+    /// This is real-time safe and can be called in the audio thread.
+    pub fn reset(&mut self) {
+        self.playback_pos = 0;
+        self.playback_repeat_count = self.playback_repeat;
+        self.playback_pos_eof = false;
+        self.file_source.playback_finished = false;
+
+        // Reset resampler state
+        self.file_source.resampler.reset();
+        self.file_source.resampler_input_buffer.clear_range();
+
+        // Reset volume fader
+        self.file_source.volume_fader.reset();
+    }
+
+    /// Set the playback speed (pitch) for this source.
+    pub fn set_speed(&mut self, speed: f64, glide: Option<f32>) {
+        self.file_source.samples_to_next_speed_update = 0;
+        self.file_source.target_speed = speed;
+        self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
+        if self.file_source.speed_glide_rate == 0.0 {
+            self.file_source.current_speed = speed;
+            self.file_source.update_speed(self.file_buffer.sample_rate);
+        }
     }
 
     fn process_messages(&mut self) {
@@ -302,6 +332,9 @@ impl PreloadedFileSource {
                         self.file_source.playback_finished = true;
                     }
                 }
+                FilePlaybackMessage::Reset => {
+                    self.reset();
+                }
             }
         }
     }
@@ -322,7 +355,7 @@ impl PreloadedFileSource {
 
         while written < output.len() {
             // write from resampled buffer into output and apply volume
-            let remaining_input_len = if self.playback_repeat > 0 {
+            let remaining_input_len = if self.playback_repeat_count > 0 {
                 loop_range.end.saturating_sub(self.playback_pos)
             } else {
                 self.file_buffer
@@ -357,9 +390,9 @@ impl PreloadedFileSource {
 
             // loop or stop when reaching end of file or end of loop
             if self.playback_pos >= loop_range.end {
-                if self.playback_repeat > 0 {
-                    if self.playback_repeat != usize::MAX {
-                        self.playback_repeat -= 1;
+                if self.playback_repeat_count > 0 {
+                    if self.playback_repeat_count != usize::MAX {
+                        self.playback_repeat_count -= 1;
                     }
                     self.playback_pos = loop_range.start;
                 } else {

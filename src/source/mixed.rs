@@ -9,7 +9,8 @@ use crate::{
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage,
+        generator::GeneratorPlaybackMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
@@ -43,6 +44,7 @@ pub(crate) struct PlayingSource {
 
 /// Mixer internal struct to apply sample time tagged playback events.
 pub(crate) enum MixerEvent {
+    // Sources
     SeekSource {
         playback_id: PlaybackId,
         position: Duration,
@@ -64,6 +66,7 @@ pub(crate) enum MixerEvent {
         panning: f32,
         sample_time: u64,
     },
+    // Effects
     ProcessEffectMessage {
         effect_id: EffectId,
         message: Owned<Box<dyn EffectMessage>>,
@@ -73,6 +76,43 @@ pub(crate) enum MixerEvent {
         effect_id: EffectId,
         parameter_id: FourCC,
         value: Owned<ParameterValueUpdate>,
+        sample_time: u64,
+    },
+    // Generators
+    TriggerGeneratorNoteOn {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        note: u8,
+        volume: Option<f32>,
+        panning: Option<f32>,
+        sample_time: u64,
+    },
+    TriggerGeneratorNoteOff {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        sample_time: u64,
+    },
+    SetGeneratorNoteSpeed {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        speed: f64,
+        glide: Option<f32>,
+        sample_time: u64,
+    },
+    SetGeneratorNoteVolume {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        volume: f32,
+        sample_time: u64,
+    },
+    SetGeneratorNotePanning {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        panning: f32,
+        sample_time: u64,
+    },
+    TriggerGeneratorAllNotesOff {
+        playback_id: PlaybackId,
         sample_time: u64,
     },
 }
@@ -86,6 +126,12 @@ impl Event for MixerEvent {
             Self::SetSourcePanning { sample_time, .. } => *sample_time,
             Self::ProcessEffectMessage { sample_time, .. } => *sample_time,
             Self::ProcessEffectParameterUpdate { sample_time, .. } => *sample_time,
+            Self::TriggerGeneratorNoteOn { sample_time, .. } => *sample_time,
+            Self::TriggerGeneratorNoteOff { sample_time, .. } => *sample_time,
+            Self::SetGeneratorNoteSpeed { sample_time, .. } => *sample_time,
+            Self::SetGeneratorNoteVolume { sample_time, .. } => *sample_time,
+            Self::SetGeneratorNotePanning { sample_time, .. } => *sample_time,
+            Self::TriggerGeneratorAllNotesOff { sample_time, .. } => *sample_time,
         }
     }
 }
@@ -160,6 +206,43 @@ pub(crate) enum MixerMessage {
         value: Owned<ParameterValueUpdate>,
         sample_time: u64,
     },
+    // Generators
+    TriggerGeneratorNoteOn {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        note: u8,
+        volume: Option<f32>,
+        panning: Option<f32>,
+        sample_time: u64,
+    },
+    TriggerGeneratorNoteOff {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        sample_time: u64,
+    },
+    SetGeneratorNoteSpeed {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        speed: f64,
+        glide: Option<f32>,
+        sample_time: u64,
+    },
+    SetGeneratorNoteVolume {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        volume: f32,
+        sample_time: u64,
+    },
+    SetGeneratorNotePanning {
+        playback_id: PlaybackId,
+        note_playback_id: PlaybackId,
+        panning: f32,
+        sample_time: u64,
+    },
+    TriggerGeneratorAllNotesOff {
+        playback_id: PlaybackId,
+        sample_time: u64,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -167,7 +250,7 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
-    mixers: Vec<(EffectId, SubMixerProcessor)>,
+    mixers: Vec<(MixerId, SubMixerProcessor)>,
     effects: Vec<(EffectId, EffectProcessor)>,
     effects_bypassed: bool,
     message_queue: Arc<ArrayQueue<MixerMessage>>,
@@ -409,6 +492,85 @@ impl MixedSource {
                         effect_id,
                         parameter_id,
                         value,
+                        sample_time,
+                    });
+                }
+                // Generators
+                MixerMessage::TriggerGeneratorNoteOn {
+                    playback_id,
+                    note_playback_id,
+                    note,
+                    volume,
+                    panning,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::TriggerGeneratorNoteOn {
+                        playback_id,
+                        note_playback_id,
+                        note,
+                        volume,
+                        panning,
+                        sample_time,
+                    });
+                }
+                MixerMessage::TriggerGeneratorNoteOff {
+                    playback_id,
+                    note_playback_id,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::TriggerGeneratorNoteOff {
+                        playback_id,
+                        note_playback_id,
+                        sample_time,
+                    });
+                }
+                MixerMessage::SetGeneratorNoteSpeed {
+                    playback_id,
+                    note_playback_id,
+                    speed,
+                    glide,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::SetGeneratorNoteSpeed {
+                        playback_id,
+                        note_playback_id,
+                        speed,
+                        glide,
+                        sample_time,
+                    });
+                }
+                MixerMessage::SetGeneratorNoteVolume {
+                    playback_id,
+                    note_playback_id,
+                    volume,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::SetGeneratorNoteVolume {
+                        playback_id,
+                        note_playback_id,
+                        volume,
+                        sample_time,
+                    });
+                }
+                MixerMessage::SetGeneratorNotePanning {
+                    playback_id,
+                    note_playback_id,
+                    panning,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::SetGeneratorNotePanning {
+                        playback_id,
+                        note_playback_id,
+                        panning,
+                        sample_time,
+                    });
+                }
+                MixerMessage::TriggerGeneratorAllNotesOff {
+                    playback_id,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::TriggerGeneratorAllNotesOff {
+                        playback_id,
                         sample_time,
                     });
                 }
@@ -742,6 +904,149 @@ impl EventProcessor for MixedSource {
                     log::warn!(
                         "Effect with id {effect_id} not found for scheduled parameter update"
                     );
+                }
+            }
+            MixerEvent::TriggerGeneratorNoteOn {
+                playback_id,
+                note_playback_id,
+                note,
+                volume,
+                panning,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::NoteOn {
+                            note_playback_id,
+                            note,
+                            volume,
+                            panning,
+                        }) {
+                            log::warn!("Failed to send note on event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::TriggerGeneratorNoteOff {
+                playback_id,
+                note_playback_id,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) =
+                            playback.push(GeneratorPlaybackMessage::NoteOff { note_playback_id })
+                        {
+                            log::warn!("Failed to send note off event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::SetGeneratorNoteSpeed {
+                playback_id,
+                note_playback_id,
+                speed,
+                glide,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::SetSpeed {
+                            note_playback_id,
+                            speed,
+                            glide,
+                        }) {
+                            log::warn!("Failed to send set speed event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::SetGeneratorNoteVolume {
+                playback_id,
+                note_playback_id,
+                volume,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::SetVolume {
+                            note_playback_id,
+                            volume,
+                        }) {
+                            log::warn!("Failed to send set volume event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::SetGeneratorNotePanning {
+                playback_id,
+                note_playback_id,
+                panning,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::SetPanning {
+                            note_playback_id,
+                            panning,
+                        }) {
+                            log::warn!("Failed to send set panning event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
+                }
+            }
+            MixerEvent::TriggerGeneratorAllNotesOff {
+                playback_id,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::AllNotesOff) {
+                            log::warn!("Failed to send all notes off event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
                 }
             }
         }

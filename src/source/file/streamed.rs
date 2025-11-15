@@ -182,6 +182,28 @@ impl StreamedFileSource {
                         log::warn!("Failed to send playback stop event: {err}")
                     }
                 }
+                FilePlaybackMessage::Reset => {
+                    // Reset by seeking to the beginning
+                    if let Err(err) = self
+                        .stream_thread
+                        .sender
+                        .try_send(StreamedFileSourceMessage::Seek(Duration::ZERO))
+                    {
+                        log::warn!("Failed to send playback reset event: {err}")
+                    }
+                    // Reset local state
+                    self.file_source.playback_finished = false;
+                    self.file_source.resampler.reset();
+                    self.file_source.resampler_input_buffer.clear_range();
+                    self.file_source.volume_fader.reset();
+                    self.worker_state
+                        .end_of_file
+                        .store(false, Ordering::Relaxed);
+                    self.worker_state.is_playing.store(true, Ordering::Relaxed);
+                    self.worker_state
+                        .is_fading_out
+                        .store(false, Ordering::Relaxed);
+                }
             }
         }
     }
