@@ -24,28 +24,24 @@ pub enum ResamplingQuality {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which resamples the input source to adjust the source's sample rate.
-pub struct ResampledSource {
-    source: Box<dyn Source>,
+pub struct ResampledSource<InputSource: Source + 'static> {
+    source: InputSource,
     output_sample_rate: u32,
     resampler: Option<Box<dyn AudioResampler>>,
     input_buffer: TempBuffer,
     output_buffer: TempBuffer,
 }
 
-impl ResampledSource {
+impl<InputSource: Source + 'static> ResampledSource<InputSource> {
     /// Create a new resampled sources with the given sample rate adjustment.
-    pub fn new<InputSource>(
-        source: InputSource,
-        output_sample_rate: u32,
-        quality: ResamplingQuality,
-    ) -> Self
+    pub fn new(source: InputSource, output_sample_rate: u32, quality: ResamplingQuality) -> Self
     where
         InputSource: Source,
     {
         Self::new_with_speed(source, output_sample_rate, 1.0, quality)
     }
     /// Create a new resampled sources with the given sample rate and playback speed adjustment.
-    pub fn new_with_speed<InputSource>(
+    pub fn new_with_speed(
         source: InputSource,
         output_sample_rate: u32,
         speed: f64,
@@ -82,22 +78,26 @@ impl ResampledSource {
         } else {
             0
         };
+        let input_buffer = TempBuffer::new(input_buffer_len);
+
         let output_buffer_len = if resampler.is_some() {
             DEFAULT_CHUNK_SIZE * source.channel_count()
         } else {
             0
         };
+        let output_buffer = TempBuffer::new(output_buffer_len);
+
         Self {
-            source: Box::new(source),
+            source,
             resampler,
             output_sample_rate,
-            input_buffer: TempBuffer::new(input_buffer_len),
-            output_buffer: TempBuffer::new(output_buffer_len),
+            input_buffer,
+            output_buffer,
         }
     }
 }
 
-impl Source for ResampledSource {
+impl<InputSource: Source + 'static> Source for ResampledSource<InputSource> {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         if let Some(resampler) = self.resampler.as_deref_mut() {
             let mut total_written = 0;

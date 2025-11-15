@@ -16,27 +16,28 @@ pub enum PannedSourceMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// A source which applies a pan factor to some other source's output
-pub struct PannedSource {
-    source: Box<dyn Source>,
+pub struct PannedSource<InputSource: Source + 'static> {
+    source: InputSource,
     panning: ExponentialSmoothedValue,
     message_queue: Arc<ArrayQueue<PannedSourceMessage>>,
 }
 
-impl PannedSource {
-    pub fn new<InputSource>(source: InputSource, panning: f32) -> Self
+impl<InputSource: Source + 'static> PannedSource<InputSource> {
+    pub fn new(source: InputSource, panning: f32) -> Self
     where
         InputSource: Source,
     {
         debug_assert!((-1.0..=1.0).contains(&panning), "Invalid panning factor");
-        let smoothed_panning = ExponentialSmoothedValue::new(panning, source.sample_rate());
+        let panning = ExponentialSmoothedValue::new(panning, source.sample_rate());
 
         // we're expecting a single message only, as events are already scheduled by the mixer
         const MESSAGE_QUEUE_SIZE: usize = 1;
+        let message_queue = Arc::new(ArrayQueue::new(MESSAGE_QUEUE_SIZE));
 
         Self {
-            source: Box::new(source),
-            panning: smoothed_panning,
-            message_queue: Arc::new(ArrayQueue::new(MESSAGE_QUEUE_SIZE)),
+            source,
+            panning,
+            message_queue,
         }
     }
 
@@ -57,7 +58,7 @@ impl PannedSource {
     }
 }
 
-impl Source for PannedSource {
+impl<InputSource: Source + 'static> Source for PannedSource<InputSource> {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // process pending messages
         self.process_messages();

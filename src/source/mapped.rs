@@ -3,22 +3,22 @@ use super::{Source, SourceTime};
 // -------------------------------------------------------------------------------------------------
 
 /// A source which changes the channel layout of some other source.
-pub struct ChannelMappedSource {
-    source: Box<dyn Source>,
+pub struct ChannelMappedSource<InputSource: Source + 'static> {
+    source: InputSource,
     input_channels: usize,
     output_channels: usize,
     input_buffer: Vec<f32>,
 }
 
-impl ChannelMappedSource {
-    pub fn new<InputSource>(source: InputSource, output_channels: usize) -> Self
+impl<InputSource: Source + 'static> ChannelMappedSource<InputSource> {
+    pub fn new(source: InputSource, output_channels: usize) -> Self
     where
         InputSource: Source,
     {
         const BUFFER_SIZE: usize = 256;
         let input_channels = source.channel_count();
         Self {
-            source: Box::new(source),
+            source,
             input_channels,
             output_channels,
             input_buffer: vec![0.0; BUFFER_SIZE * input_channels],
@@ -26,7 +26,7 @@ impl ChannelMappedSource {
     }
 }
 
-impl Source for ChannelMappedSource {
+impl<InputSource: Source + 'static> Source for ChannelMappedSource<InputSource> {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         let mut total_written = 0;
         while total_written < output.len() {
