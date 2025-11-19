@@ -1,4 +1,4 @@
-use super::{FilePlaybackHandle, SynthPlaybackHandle};
+use super::{FilePlaybackHandle, GeneratorPlaybackHandle, SynthPlaybackHandle};
 use crate::Error;
 
 // -------------------------------------------------------------------------------------------------
@@ -8,6 +8,7 @@ use crate::Error;
 pub enum SourcePlaybackHandle {
     File(FilePlaybackHandle),
     Synth(SynthPlaybackHandle),
+    Generator(GeneratorPlaybackHandle),
 }
 
 impl SourcePlaybackHandle {
@@ -16,6 +17,7 @@ impl SourcePlaybackHandle {
         match self {
             SourcePlaybackHandle::File(handle) => handle.is_playing(),
             SourcePlaybackHandle::Synth(handle) => handle.is_playing(),
+            SourcePlaybackHandle::Generator(handle) => handle.is_playing(),
         }
     }
 
@@ -23,6 +25,7 @@ impl SourcePlaybackHandle {
         match self {
             SourcePlaybackHandle::File(handle) => handle.stop(stop_time),
             SourcePlaybackHandle::Synth(handle) => handle.stop(stop_time),
+            SourcePlaybackHandle::Generator(handle) => handle.stop(stop_time),
         }
     }
 }
