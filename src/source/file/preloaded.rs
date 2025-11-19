@@ -1,4 +1,9 @@
-use std::{ops::Range, path::Path, sync::mpsc::SyncSender, sync::Arc};
+use std::{
+    ops::Range,
+    path::Path,
+    sync::{mpsc::SyncSender, Arc},
+    time::{Duration, Instant},
+};
 
 use crossbeam_queue::ArrayQueue;
 use symphonia::core::audio::SampleBuffer;
@@ -104,6 +109,7 @@ pub struct PreloadedFileSource {
     file_buffer: Arc<PreloadedFileBuffer>,
     file_source: FileSourceImpl,
     playback_repeat: usize,
+    playback_repeat_count: usize,
     playback_pos: usize,
     playback_pos_eof: bool,
 }
@@ -237,12 +243,14 @@ impl PreloadedFileSource {
             } else {
                 0
             });
+        let playback_repeat_count = playback_repeat;
         let playback_pos = 0;
         let playback_pos_eof = false;
 
         Ok(Self {
             file_buffer,
             file_source,
+            playback_repeat_count,
             playback_repeat,
             playback_pos,
             playback_pos_eof,
@@ -271,36 +279,90 @@ impl PreloadedFileSource {
         Arc::clone(&self.file_buffer)
     }
 
+    /// Set a new playback position for this source.
+    pub fn seek(&mut self, position: Duration) {
+        if !self.is_exhausted() {
+            let buffer_pos = position.as_secs_f64()
+                * self.file_buffer.sample_rate as f64
+                * self.file_buffer.channel_count as f64;
+            self.playback_pos = (buffer_pos as usize).clamp(0, self.file_buffer.buffer.len());
+            self.file_source.resampler.reset();
+        }
+    }
+
+    /// Set the playback speed (pitch) for this source.
+    pub fn set_speed(&mut self, speed: f64, glide: Option<f32>) {
+        if !self.is_exhausted() {
+            self.file_source.samples_to_next_speed_update = 0;
+            self.file_source.target_speed = speed;
+            self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
+            if self.file_source.speed_glide_rate == 0.0 {
+                self.file_source.current_speed = speed;
+                self.file_source.update_speed(self.file_buffer.sample_rate);
+            }
+        }
+    }
+
+    /// Stop the file source, starting to fade-out, when a fadeout is set, stop immediately.
+    pub fn stop(&mut self) {
+        if !self.is_exhausted() {
+            match self.file_source.fade_out_duration {
+                Some(duration) if !duration.is_zero() => {
+                    self.file_source.volume_fader.start_fade_out(duration);
+                }
+                _ => {
+                    self.file_source
+                        .send_playback_stopped_status(self.playback_pos_eof);
+                    self.file_source.playback_finished = true;
+                }
+            }
+        }
+    }
+
+    /// Reset the file to start playback from the beginning.
+    pub fn reset(&mut self) {
+        // Send stopped status
+        if !self.is_exhausted() {
+            self.kill();
+        }
+        // Reset positions and playback status
+        self.playback_pos = 0;
+        self.playback_repeat_count = self.playback_repeat;
+        self.playback_pos_eof = false;
+        self.file_source.playback_pos_report_instant = Instant::now();
+        self.file_source.playback_finished = false;
+
+        // Reset resampler state
+        self.file_source.resampler.reset();
+        self.file_source.resampler_input_buffer.clear_range();
+
+        // Reset volume fader
+        self.file_source.volume_fader.reset();
+    }
+
+    /// Abruptly stop the source without applying fade-outs
+    pub fn kill(&mut self) {
+        if !self.is_exhausted() {
+            self.file_source
+                .send_playback_stopped_status(self.playback_pos_eof);
+            self.file_source.playback_finished = true;
+        }
+    }
+
     fn process_messages(&mut self) {
         while let Some(msg) = self.file_source.playback_message_queue.pop() {
             match msg {
                 FilePlaybackMessage::Seek(position) => {
-                    let buffer_pos = position.as_secs_f64()
-                        * self.file_buffer.sample_rate as f64
-                        * self.file_buffer.channel_count as f64;
-                    self.playback_pos =
-                        (buffer_pos as usize).clamp(0, self.file_buffer.buffer.len());
-                    self.file_source.resampler.reset();
+                    self.seek(position);
                 }
                 FilePlaybackMessage::SetSpeed(speed, glide) => {
-                    self.file_source.samples_to_next_speed_update = 0;
-                    self.file_source.target_speed = speed;
-                    self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
-                    if self.file_source.speed_glide_rate == 0.0 {
-                        self.file_source.current_speed = speed;
-                        self.file_source.update_speed(self.file_buffer.sample_rate);
-                    }
+                    self.set_speed(speed, glide);
                 }
                 FilePlaybackMessage::Stop => {
-                    if let Some(duration) = self.file_source.fade_out_duration {
-                        if !duration.is_zero() {
-                            self.file_source.volume_fader.start_fade_out(duration);
-                        } else {
-                            self.file_source.playback_finished = true;
-                        }
-                    } else {
-                        self.file_source.playback_finished = true;
-                    }
+                    self.stop();
+                }
+                FilePlaybackMessage::Kill => {
+                    self.kill();
                 }
             }
         }
@@ -322,7 +384,7 @@ impl PreloadedFileSource {
 
         while written < output.len() {
             // write from resampled buffer into output and apply volume
-            let remaining_input_len = if self.playback_repeat > 0 {
+            let remaining_input_len = if self.playback_repeat_count > 0 {
                 loop_range.end.saturating_sub(self.playback_pos)
             } else {
                 self.file_buffer
@@ -357,9 +419,9 @@ impl PreloadedFileSource {
 
             // loop or stop when reaching end of file or end of loop
             if self.playback_pos >= loop_range.end {
-                if self.playback_repeat > 0 {
-                    if self.playback_repeat != usize::MAX {
-                        self.playback_repeat -= 1;
+                if self.playback_repeat_count > 0 {
+                    if self.playback_repeat_count != usize::MAX {
+                        self.playback_repeat_count -= 1;
                     }
                     self.playback_pos = loop_range.start;
                 } else {
@@ -471,9 +533,9 @@ impl Source for PreloadedFileSource {
         let fade_out_completed = self.file_source.volume_fader.state() == FaderState::Finished
             && self.file_source.volume_fader.target_volume() == 0.0;
         if self.playback_pos_eof || fade_out_completed {
-            self.file_source
-                .send_playback_stopped_status(self.playback_pos >= self.file_buffer.buffer.len());
             // mark playback as finished
+            self.file_source
+                .send_playback_stopped_status(self.playback_pos_eof);
             self.file_source.playback_finished = true;
         }
 

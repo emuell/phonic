@@ -189,13 +189,14 @@ impl FilePlaybackOptions {
 
 /// Events to control playback of a [`FileSource`]
 pub enum FilePlaybackMessage {
-    /// Seek the file source to a new position
+    /// Seek the file source to a new position.
     Seek(Duration),
-    /// Update the source's playback speed with the given
-    /// optional glide rate in semitones per second.
+    /// Update the source's playback speed with the given optional glide rate in semitones per second.
     SetSpeed(f64, Option<f32>),
-    /// Stop the source
+    /// Stop the source gracefully, applying off actions, fade-outs and stuff.
     Stop,
+    /// Stop the source by force, immediately.
+    Kill,
 }
 
 // -------------------------------------------------------------------------------------------------
