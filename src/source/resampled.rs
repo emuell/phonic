@@ -100,47 +100,53 @@ impl<InputSource: Source + 'static> ResampledSource<InputSource> {
 impl<InputSource: Source + 'static> Source for ResampledSource<InputSource> {
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         if let Some(resampler) = self.resampler.as_deref_mut() {
-            let mut total_written = 0;
-            while total_written < output.len() {
-                if self.output_buffer.is_empty() {
-                    self.output_buffer.reset_range();
-                    // fetch new input from our source
-                    if self.input_buffer.is_empty() {
-                        let source_time = time.with_added_frames(
-                            (total_written / self.source.channel_count()) as u64,
-                        );
-                        self.input_buffer.reset_range();
-                        let input_read =
-                            self.source.write(self.input_buffer.get_mut(), &source_time);
-                        // pad, fill up up missing inputs with zeros if the resampler has an input buffer constrain
-                        // this should only happen for exhausted sources...
-                        if input_read < self.input_buffer.len() {
-                            let required_input_len =
-                                resampler.required_input_buffer_size().unwrap_or(0);
-                            if self.input_buffer.len() < required_input_len {
-                                self.input_buffer.set_range(0, required_input_len);
-                                clear_buffer(&mut self.input_buffer.get_mut()[input_read..]);
+            if !output.is_empty() {
+                let mut total_written = 0;
+                while total_written < output.len() {
+                    if self.output_buffer.is_empty() {
+                        self.output_buffer.reset_range();
+                        // fetch new input from our source
+                        if self.input_buffer.is_empty() {
+                            let source_time = time.with_added_frames(
+                                (total_written / self.source.channel_count()) as u64,
+                            );
+                            self.input_buffer.reset_range();
+                            let input_read =
+                                self.source.write(self.input_buffer.get_mut(), &source_time);
+                            // pad, fill up up missing inputs with zeros if the resampler has an input buffer constrain
+                            // this should only happen for exhausted sources...
+                            if input_read < self.input_buffer.len() {
+                                let required_input_len =
+                                    resampler.required_input_buffer_size().unwrap_or(0);
+                                if self.input_buffer.len() < required_input_len {
+                                    self.input_buffer.set_range(0, required_input_len);
+                                    clear_buffer(&mut self.input_buffer.get_mut()[input_read..]);
+                                }
                             }
                         }
+                        // run resampler to generate some output
+                        let (input_consumed, output_written) = resampler
+                            .process(self.input_buffer.get(), self.output_buffer.get_mut())
+                            .expect("Resampling failed");
+                        self.input_buffer.consume(input_consumed);
+                        self.output_buffer.set_range(0, output_written);
+                        if self.source.is_exhausted() && output_written == 0 {
+                            // source and resampler produced no more output: we're done
+                            break;
+                        }
                     }
-                    // run resampler to generate some output
-                    let (input_consumed, output_written) = resampler
-                        .process(self.input_buffer.get(), self.output_buffer.get_mut())
-                        .expect("Resampling failed");
-                    self.input_buffer.consume(input_consumed);
-                    self.output_buffer.set_range(0, output_written);
-                    if self.source.is_exhausted() && output_written == 0 {
-                        // source and resampler produced no more output: we're done
-                        break;
-                    }
+                    let target = &mut output[total_written..];
+                    let written = self.output_buffer.copy_to(target);
+                    self.output_buffer.consume(written);
+                    total_written += written;
                 }
-                let target = &mut output[total_written..];
-                let written = self.output_buffer.copy_to(target);
-                self.output_buffer.consume(written);
-                total_written += written;
+                total_written
+            } else {
+                // pass empty buffers as they are, to process messages only
+                self.source.write(output, time)
             }
-            total_written
         } else {
+            // no resampling needed, just process the source as it is
             self.source.write(output, time)
         }
     }

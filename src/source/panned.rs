@@ -46,6 +46,21 @@ impl<InputSource: Source + 'static> PannedSource<InputSource> {
         self.message_queue.clone()
     }
 
+    /// Access to the wrapped source.
+    #[allow(unused)]
+    pub fn input_source(&self) -> &InputSource {
+        &self.source
+    }
+    /// Mut access to the wrapped source.
+    pub fn input_source_mut(&mut self) -> &mut InputSource {
+        &mut self.source
+    }
+
+    /// Set a new target panning level.
+    pub fn set_panning(&mut self, panning: f32) {
+        self.panning.set_target(panning);
+    }
+
     /// Internal event handling
     fn process_messages(&mut self) {
         while let Some(msg) = self.message_queue.pop() {
