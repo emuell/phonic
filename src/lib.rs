@@ -113,8 +113,8 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, MixerId, PlaybackId, Player,
-    SourcePlaybackHandle, SynthPlaybackHandle,
+    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle, MixerId,
+    PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
@@ -124,6 +124,7 @@ pub use parameter::{
 
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
+    generator::{Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     resampled::ResamplingQuality,
     status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},

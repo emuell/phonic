@@ -9,14 +9,15 @@ use crate::{
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage,
+        generator::GeneratorPlaybackMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
         buffer::{add_buffers, clear_buffer},
         event::{Event, EventProcessor},
     },
-    MixerId, PlaybackId,
+    GeneratorPlaybackEvent, MixerId, PlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -65,6 +66,13 @@ pub(crate) enum MixerEvent {
         panning: f32,
         sample_time: u64,
     },
+    // Generator Sources
+    TriggerGeneratorEvent {
+        playback_id: PlaybackId,
+        event: GeneratorPlaybackEvent,
+        sample_time: u64,
+    },
+    // Effects
     ProcessEffectMessage {
         effect_id: EffectId,
         message: Owned<Box<dyn EffectMessage>>,
@@ -85,6 +93,7 @@ impl Event for MixerEvent {
             Self::SetSourceSpeed { sample_time, .. } => *sample_time,
             Self::SetSourceVolume { sample_time, .. } => *sample_time,
             Self::SetSourcePanning { sample_time, .. } => *sample_time,
+            Self::TriggerGeneratorEvent { sample_time, .. } => *sample_time,
             Self::ProcessEffectMessage { sample_time, .. } => *sample_time,
             Self::ProcessEffectParameterUpdate { sample_time, .. } => *sample_time,
         }
@@ -130,6 +139,12 @@ pub(crate) enum MixerMessage {
     #[allow(dead_code)]
     RemoveAllSources,
     RemoveAllPendingSources,
+    // Generator Sources
+    TriggerGeneratorEvent {
+        playback_id: PlaybackId,
+        event: GeneratorPlaybackEvent,
+        sample_time: u64,
+    },
     // Mixers
     AddMixer {
         mixer_id: EffectId,
@@ -410,6 +425,18 @@ impl MixedSource {
                         effect_id,
                         parameter_id,
                         value,
+                        sample_time,
+                    });
+                }
+                // Generators
+                MixerMessage::TriggerGeneratorEvent {
+                    playback_id,
+                    event,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::TriggerGeneratorEvent {
+                        playback_id,
+                        event,
                         sample_time,
                     });
                 }
@@ -743,6 +770,27 @@ impl EventProcessor for MixedSource {
                     log::warn!(
                         "Effect with id {effect_id} not found for scheduled parameter update"
                     );
+                }
+            }
+            MixerEvent::TriggerGeneratorEvent {
+                playback_id,
+                event,
+                sample_time: _,
+            } => {
+                if let Some(source) = self
+                    .playing_sources
+                    .iter()
+                    .find(|s| s.playback_id == playback_id)
+                {
+                    if let PlaybackMessageQueue::Generator { playback, .. } =
+                        &source.playback_message_queue
+                    {
+                        if let Err(msg) = playback.push(GeneratorPlaybackMessage::Trigger { event })
+                        {
+                            log::warn!("Failed to send note on event. Force pushing it...");
+                            let _ = playback.force_push(msg);
+                        }
+                    }
                 }
             }
         }
