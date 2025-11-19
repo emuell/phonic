@@ -39,8 +39,10 @@ pub enum StreamedFileSourceMessage {
     Seek(Duration),
     /// Start reading streamed source
     Read,
-    /// Stop the decoder
+    /// Stop the decoder gracefully.
     Stop,
+    /// Stop the decoder by force, immediately.
+    Kill,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -178,6 +180,15 @@ impl StreamedFileSource {
                         .stream_thread
                         .sender
                         .try_send(StreamedFileSourceMessage::Stop)
+                    {
+                        log::warn!("Failed to send playback stop event: {err}")
+                    }
+                }
+                FilePlaybackMessage::Kill => {
+                    if let Err(err) = self
+                        .stream_thread
+                        .sender
+                        .try_send(StreamedFileSourceMessage::Kill)
                     {
                         log::warn!("Failed to send playback stop event: {err}")
                     }
@@ -373,7 +384,7 @@ impl Drop for StreamedFileSource {
         let _ = self
             .stream_thread
             .sender
-            .try_send(StreamedFileSourceMessage::Stop);
+            .try_send(StreamedFileSourceMessage::Kill);
     }
 }
 
@@ -565,6 +576,7 @@ impl StreamThread {
                 StreamedFileSourceMessage::Seek(time) => self.on_seek(time),
                 StreamedFileSourceMessage::Read => self.on_read(),
                 StreamedFileSourceMessage::Stop => self.on_stop(),
+                StreamedFileSourceMessage::Kill => self.on_stop_forced(),
             };
             action = match result {
                 Ok(action) => action,
@@ -593,6 +605,13 @@ impl StreamThread {
             self.shared_state.is_playing.store(false, Ordering::Relaxed);
             Ok(StreamThreadAction::Shutdown)
         }
+    }
+
+    fn on_stop_forced(&mut self) -> Result<StreamThreadAction, Error> {
+        // immediately stop reading
+        self.is_reading = false;
+        self.shared_state.is_playing.store(false, Ordering::Relaxed);
+        Ok(StreamThreadAction::Shutdown)
     }
 
     fn on_seek(&mut self, time: Duration) -> Result<StreamThreadAction, Error> {
