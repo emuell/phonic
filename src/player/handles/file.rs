@@ -206,10 +206,10 @@ impl FilePlaybackHandle {
             if self
                 .playback_message_queue
                 .volume()
-                .push(AmplifiedSourceMessage::SetVolume(volume))
-                .is_err()
+                .force_push(AmplifiedSourceMessage::SetVolume(volume))
+                .is_some()
             {
-                return Err(Self::file_playback_queue_error("set_volume"));
+                // expected: simply overwrite previous values, if any
             }
         }
 
@@ -245,10 +245,10 @@ impl FilePlaybackHandle {
             if self
                 .playback_message_queue
                 .panning()
-                .push(PannedSourceMessage::SetPanning(panning))
-                .is_err()
+                .force_push(PannedSourceMessage::SetPanning(panning))
+                .is_some()
             {
-                return Err(Self::file_playback_queue_error("set_panning"));
+                // expected: simply overwrite previous values, if any
             }
         }
 

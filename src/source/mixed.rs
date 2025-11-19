@@ -43,6 +43,7 @@ pub(crate) struct PlayingSource {
 
 /// Mixer internal struct to apply sample time tagged playback events.
 pub(crate) enum MixerEvent {
+    // Sources
     SeekSource {
         playback_id: PlaybackId,
         position: Duration,
@@ -167,7 +168,7 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
-    mixers: Vec<(EffectId, SubMixerProcessor)>,
+    mixers: Vec<(MixerId, SubMixerProcessor)>,
     effects: Vec<(EffectId, EffectProcessor)>,
     effects_bypassed: bool,
     message_queue: Arc<ArrayQueue<MixerMessage>>,
@@ -635,9 +636,8 @@ impl EventProcessor for MixedSource {
                     if let PlaybackMessageQueue::File { playback, .. } =
                         &source.playback_message_queue
                     {
-                        if let Err(msg) = playback.push(FilePlaybackMessage::Seek(position)) {
-                            log::warn!("Failed to send seek command to file. Force pushing it...");
-                            let _ = playback.force_push(msg);
+                        if playback.push(FilePlaybackMessage::Seek(position)).is_err() {
+                            log::warn!("Failed to send seek command to file.");
                         }
                     } else {
                         log::warn!("Trying to seek a synth source, which is not supported");
@@ -658,10 +658,11 @@ impl EventProcessor for MixedSource {
                     if let PlaybackMessageQueue::File { playback, .. } =
                         &source.playback_message_queue
                     {
-                        if let Err(msg) = playback.push(FilePlaybackMessage::SetSpeed(speed, glide))
+                        if playback
+                            .push(FilePlaybackMessage::SetSpeed(speed, glide))
+                            .is_err()
                         {
-                            log::warn!("Failed to send set speed event. Force pushing it...");
-                            let _ = playback.force_push(msg);
+                            log::warn!("Failed to send set speed event.");
                         }
                     }
                 }
@@ -676,13 +677,13 @@ impl EventProcessor for MixedSource {
                     .iter()
                     .find(|s| s.playback_id == playback_id)
                 {
-                    if let Err(msg) = source
+                    if source
                         .playback_message_queue
                         .volume()
-                        .push(AmplifiedSourceMessage::SetVolume(volume))
+                        .force_push(AmplifiedSourceMessage::SetVolume(volume))
+                        .is_some()
                     {
-                        log::warn!("Failed to send set volume event. Force pushing it...");
-                        let _ = source.playback_message_queue.volume().force_push(msg);
+                        // force-pushed: overwrite previous values, if any
                     }
                 }
             }
@@ -696,13 +697,13 @@ impl EventProcessor for MixedSource {
                     .iter()
                     .find(|s| s.playback_id == playback_id)
                 {
-                    if let Err(msg) = source
+                    if source
                         .playback_message_queue
                         .panning()
-                        .push(PannedSourceMessage::SetPanning(panning))
+                        .force_push(PannedSourceMessage::SetPanning(panning))
+                        .is_some()
                     {
-                        log::warn!("Failed to send set panning event. Force pushing it...");
-                        let _ = source.playback_message_queue.panning().force_push(msg);
+                        // force-pushed: overwrite previous values, if any
                     }
                 }
             }
