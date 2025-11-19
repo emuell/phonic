@@ -46,6 +46,21 @@ impl<InputSource: Source + 'static> AmplifiedSource<InputSource> {
         self.message_queue.clone()
     }
 
+    /// Access to the wrapped source.
+    #[allow(unused)]
+    pub fn input_source(&self) -> &InputSource {
+        &self.source
+    }
+    /// Mut access to the wrapped source.
+    pub fn input_source_mut(&mut self) -> &mut InputSource {
+        &mut self.source
+    }
+
+    /// Set a new target volume level.
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume.set_target(volume);
+    }
+
     /// Internal message handling
     fn process_messages(&mut self) {
         while let Some(msg) = self.message_queue.pop() {
