@@ -15,6 +15,11 @@
 //!   back audio files, [`SynthSource`] for generating synthesized tones or can create your own
 //!   source implementation. File sources can be preloaded into memory or streamed on-the-fly.
 //!
+//! - **[`Generator`]** is a source that is driven by note events. It does not play anything by default,
+//!   until it gets triggered via note events.
+//!   Use e.g. a [`Sampler`](crate::sources::generators::Sampler) to play back or sequence a single
+//!   sample file repeatedly with optional AHDSR envelopes, or create your own generator.
+//!
 //! - **[`Effect`]** applies DSP effects to audio signals. By default, only one
 //!   mixer is present in the player and will route all sources through it. To create more complex
 //!   routings you can create sub-mixers via [`Player::add_mixer`] and route sources to them.
@@ -56,7 +61,7 @@
 //!     // Change effect parameters via the returned handles.
 //!     // Schedule a parameter change 3 seconds from now (sample-accurate)
 //!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN_ID, 3.0, now + 3 * samples_per_sec);
-//!  
+//!
 //!     // Play a file and get a handle to control it.
 //!     let file = player.play_file("path/to/your/file.wav",
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
@@ -113,8 +118,8 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, MixerId, PlaybackId, Player,
-    SourcePlaybackHandle, SynthPlaybackHandle,
+    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle, MixerId,
+    PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
@@ -124,6 +129,7 @@ pub use parameter::{
 
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
+    generator::{Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     resampled::ResamplingQuality,
     status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
@@ -150,7 +156,8 @@ pub mod outputs {
 }
 
 pub mod sources {
-    //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
+    //! Set of basic, common File & Synth tone [`Source`](super::Source) and
+    //! [`Generator`](super::Generator) implementations.
 
     pub use super::source::file::{
         common::FileSourceImpl,

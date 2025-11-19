@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crossbeam_queue::ArrayQueue;
 
 use super::{
-    amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
-    synth::SynthPlaybackMessage,
+    amplified::AmplifiedSourceMessage, file::FilePlaybackMessage,
+    generator::GeneratorPlaybackMessage, panned::PannedSourceMessage, synth::SynthPlaybackMessage,
 };
 use crate::Error;
 
@@ -25,6 +25,11 @@ pub(crate) enum PlaybackMessageQueue {
         volume: Arc<ArrayQueue<AmplifiedSourceMessage>>,
         panning: Arc<ArrayQueue<PannedSourceMessage>>,
     },
+    Generator {
+        playback: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
+        volume: Arc<ArrayQueue<AmplifiedSourceMessage>>,
+        panning: Arc<ArrayQueue<PannedSourceMessage>>,
+    },
 }
 
 impl PlaybackMessageQueue {
@@ -36,6 +41,9 @@ impl PlaybackMessageQueue {
             PlaybackMessageQueue::Synth { playback, .. } => playback
                 .push(SynthPlaybackMessage::Stop)
                 .map_err(|_msg| Error::SendError("Synth playback queue is full".to_string())),
+            PlaybackMessageQueue::Generator { playback, .. } => playback
+                .push(GeneratorPlaybackMessage::Stop)
+                .map_err(|_msg| Error::SendError("Generator playback queue is full".to_string())),
         }
     }
 
@@ -43,6 +51,7 @@ impl PlaybackMessageQueue {
         match self {
             PlaybackMessageQueue::File { volume, .. } => volume,
             PlaybackMessageQueue::Synth { volume, .. } => volume,
+            PlaybackMessageQueue::Generator { volume, .. } => volume,
         }
     }
 
@@ -50,6 +59,7 @@ impl PlaybackMessageQueue {
         match self {
             PlaybackMessageQueue::File { panning, .. } => panning,
             PlaybackMessageQueue::Synth { panning, .. } => panning,
+            PlaybackMessageQueue::Generator { panning, .. } => panning,
         }
     }
 }
