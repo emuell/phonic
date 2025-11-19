@@ -14,6 +14,10 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+pub mod sampler;
+
+// -------------------------------------------------------------------------------------------------
+
 /// Events to start/stop, change playback properties or parameters **within** a [`Generator`].
 pub enum GeneratorPlaybackEvent {
     /// Trigger a note on event.

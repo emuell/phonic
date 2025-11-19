@@ -171,6 +171,14 @@ pub mod sources {
         common::{SynthSourceGenerator, SynthSourceImpl},
         SynthPlaybackMessage,
     };
+
+    pub mod generators {
+        //! Set of basic, common [`Generator`](crate::Generator) source implementations.
+
+        pub use super::super::source::generator::{
+            sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        };
+    }
 }
 
 pub mod parameters {
