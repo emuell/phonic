@@ -7,6 +7,7 @@ pub(crate) mod event;
 pub(crate) mod fader;
 pub(crate) mod resampler;
 
+pub mod ahdsr;
 pub mod buffer;
 pub mod smoothing;
 pub mod waveform;

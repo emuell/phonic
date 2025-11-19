@@ -15,6 +15,11 @@
 //!   back audio files, [`SynthSource`] for generating synthesized tones or can create your own
 //!   source implementation. File sources can be preloaded into memory or streamed on-the-fly.
 //!
+//! - **[`Generator`]** is a source that is driven by note events. It does not play anything by default,
+//!   until it gets triggered via note events.
+//!   Use e.g. a [`Sampler`](crate::sources::generators::Sampler) to play back or sequence a single
+//!   sample file repeatedly with optional AHDSR envelopes, or create your own generator.
+//!
 //! - **[`Effect`]** applies DSP effects to audio signals. By default, only one
 //!   mixer is present in the player and will route all sources through it. To create more complex
 //!   routings you can create sub-mixers via [`Player::add_mixer`] and route sources to them.
@@ -151,7 +156,8 @@ pub mod outputs {
 }
 
 pub mod sources {
-    //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
+    //! Set of basic, common File & Synth tone [`Source`](super::Source) and
+    //! [`Generator`](super::Generator) implementations.
 
     pub use super::source::file::{
         common::FileSourceImpl,
@@ -165,6 +171,14 @@ pub mod sources {
         common::{SynthSourceGenerator, SynthSourceImpl},
         SynthPlaybackMessage,
     };
+
+    pub mod generators {
+        //! Set of basic, common [`Generator`](crate::Generator) source implementations.
+
+        pub use super::super::source::generator::{
+            sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        };
+    }
 }
 
 pub mod parameters {
