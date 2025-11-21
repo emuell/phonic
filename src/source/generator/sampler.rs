@@ -5,8 +5,10 @@ use std::{
 };
 
 use crossbeam_queue::ArrayQueue;
+use four_cc::FourCC;
 
 use crate::{
+    parameter::{ClonableParameter, FloatParameter, Parameter, ParameterValueUpdate},
     source::{
         amplified::AmplifiedSource,
         file::preloaded::PreloadedFileSource,
@@ -35,9 +37,9 @@ type SamplerVoiceSource = SamplerVoicePannedSource;
 
 pub(crate) struct SamplerVoice {
     playback_id: Option<PlaybackId>,
-    playback_duration: u64,
     source: SamplerVoiceSource,
     envelope: AhdsrEnvelope,
+    release_start_frame: Option<u64>,
 }
 
 impl SamplerVoice {
@@ -69,8 +71,9 @@ impl SamplerVoice {
     }
 
     /// Stop the voice and start fadeouts .
-    pub fn stop(&mut self, envelope_params: &Option<AhdsrParameters>) {
+    pub fn stop(&mut self, envelope_params: &Option<AhdsrParameters>, current_sample_frame: u64) {
         if self.is_active() {
+            self.release_start_frame = Some(current_sample_frame);
             if let Some(envelope_params) = envelope_params {
                 self.envelope.note_off(envelope_params);
             } else {
@@ -86,8 +89,8 @@ impl SamplerVoice {
             self.file_source_mut().reset();
             self.playback_id = None;
         }
-        // reset playback count for exhausted voices
-        self.playback_duration = 0;
+        // reset release start time
+        self.release_start_frame = None;
     }
 
     /// Write source and apply envelope, if set.
@@ -102,7 +105,6 @@ impl SamplerVoice {
 
         // Write source
         let written = self.source.write(output, time);
-        self.playback_duration += written as u64;
 
         // Apply envelope to the voice output
         if let Some(envelope_params) = envelope_params {
@@ -137,17 +139,32 @@ pub struct Sampler {
     file_path: Arc<String>,
     voices: Vec<SamplerVoice>,
     envelope_params: Option<AhdsrParameters>,
+    attack_param: FloatParameter,
+    hold_param: FloatParameter,
+    decay_param: FloatParameter,
+    sustain_param: FloatParameter,
+    release_param: FloatParameter,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+    stopping: bool, // True if stop has been called and we are waiting for voices to decay
+    stopped: bool,  // True if all voices have decayed after a stop call
     sample_rate: u32,
     channel_count: usize,
     temp_buffer: Vec<f32>,
-    stopping: bool,
-    stopped: bool,
 }
 
 // -------------------------------------------------------------------------------------------------
 
 impl Sampler {
+    // Parameter IDs
+    pub const ATTACK_PARAM_ID: FourCC = FourCC(*b"SATK");
+    pub const HOLD_PARAM_ID: FourCC = FourCC(*b"SHLD");
+    pub const DECAY_PARAM_ID: FourCC = FourCC(*b"SDCY");
+    pub const SUSTAIN_PARAM_ID: FourCC = FourCC(*b"SSTN");
+    pub const RELEASE_PARAM_ID: FourCC = FourCC(*b"SREL");
+
+    const MIN_TIME_SEC: f32 = 0.0;
+    const MAX_TIME_SEC: f32 = 10.0;
+
     /// Create a new sampler with the given sample file, optional AHDSR envelope
     /// and the given fixed voice count.
     pub fn from_file<P: AsRef<Path>>(
@@ -187,7 +204,6 @@ impl Sampler {
         let mut voices = Vec::with_capacity(voice_count);
         for _ in 0..voice_count {
             let playback_id = None;
-            let playback_duration = 0;
 
             // Clone sample file source
             let file_source = sample
@@ -208,20 +224,15 @@ impl Sampler {
 
             // Create envelope state for this voice
             let envelope = AhdsrEnvelope::new();
+            let release_start_frame = None;
 
             voices.push(SamplerVoice {
                 playback_id,
-                playback_duration,
                 source,
                 envelope,
+                release_start_frame,
             });
         }
-
-        let stopping = false;
-        let stopped = false;
-
-        // Pre-allocate temp buffer for mixing, using mixer's max sample buffer size
-        let temp_buffer = vec![0.0; MixedSource::MAX_MIX_BUFFER_SAMPLES];
 
         // Initialize envelope parameters, if any
         let mut envelope_params = envelope_params;
@@ -235,6 +246,64 @@ impl Sampler {
                 })?;
         }
 
+        // Create AHDSR parameter descriptions
+        let attack_param = FloatParameter::new(
+            Self::ATTACK_PARAM_ID,
+            "Attack",
+            Self::MIN_TIME_SEC..=Self::MAX_TIME_SEC,
+            envelope_params
+                .as_ref()
+                .map(|e| e.attack_time().as_secs_f32().max(Self::MAX_TIME_SEC))
+                .unwrap_or(0.01),
+        )
+        .with_unit("s");
+        let hold_param = FloatParameter::new(
+            Self::HOLD_PARAM_ID,
+            "Hold",
+            Self::MIN_TIME_SEC..=Self::MAX_TIME_SEC,
+            envelope_params
+                .as_ref()
+                .map(|e| e.hold_time().as_secs_f32().max(Self::MAX_TIME_SEC))
+                .unwrap_or(1.0),
+        )
+        .with_unit("s");
+        let decay_param = FloatParameter::new(
+            Self::DECAY_PARAM_ID,
+            "Decay",
+            Self::MIN_TIME_SEC..=Self::MAX_TIME_SEC,
+            envelope_params
+                .as_ref()
+                .map(|e| e.decay_time().as_secs_f32().max(Self::MAX_TIME_SEC))
+                .unwrap_or(1.0),
+        )
+        .with_unit("s");
+        let sustain_param = FloatParameter::new(
+            Self::SUSTAIN_PARAM_ID, //
+            "Sustain",
+            0.0..=1.0,
+            envelope_params
+                .as_ref()
+                .map(|e| e.sustain_level() as f32)
+                .unwrap_or(1.0),
+        );
+        let release_param = FloatParameter::new(
+            Self::RELEASE_PARAM_ID,
+            "Release",
+            Self::MIN_TIME_SEC..=Self::MAX_TIME_SEC,
+            envelope_params
+                .as_ref()
+                .map(|e| e.release_time().as_secs_f32().max(Self::MAX_TIME_SEC))
+                .unwrap_or(1.0),
+        )
+        .with_unit("s");
+
+        // Initial playback state
+        let stopping = false;
+        let stopped = false;
+
+        // Pre-allocate temp buffer for mixing, using mixer's max sample buffer size
+        let temp_buffer = vec![0.0; MixedSource::MAX_MIX_BUFFER_SAMPLES];
+
         Ok(Self {
             playback_id,
             playback_message_queue,
@@ -242,11 +311,16 @@ impl Sampler {
             file_path,
             voices,
             envelope_params,
+            attack_param,
+            hold_param,
+            decay_param,
+            sustain_param,
+            release_param,
+            stopping,
+            stopped,
             sample_rate,
             channel_count,
             temp_buffer,
-            stopping,
-            stopped,
         })
     }
 
@@ -260,15 +334,15 @@ impl Sampler {
     }
 
     /// Process pending playback messages from the queue.
-    fn process_playback_messages(&mut self) {
+    fn process_playback_messages(&mut self, current_sample_frame: u64) {
         while let Some(message) = self.playback_message_queue.pop() {
             match message {
                 GeneratorPlaybackMessage::Stop => {
-                    self.stop();
+                    self.stop(current_sample_frame);
                 }
                 GeneratorPlaybackMessage::Trigger { event } => match event {
                     GeneratorPlaybackEvent::AllNotesOff => {
-                        self.trigger_all_notes_off();
+                        self.trigger_all_notes_off(current_sample_frame);
                     }
                     GeneratorPlaybackEvent::NoteOn {
                         note_playback_id,
@@ -279,7 +353,7 @@ impl Sampler {
                         self.trigger_note_on(note_playback_id, note, volume, panning);
                     }
                     GeneratorPlaybackEvent::NoteOff { note_playback_id } => {
-                        self.trigger_note_off(note_playback_id);
+                        self.trigger_note_off(note_playback_id, current_sample_frame);
                     }
                     GeneratorPlaybackEvent::SetSpeed {
                         note_playback_id,
@@ -300,20 +374,22 @@ impl Sampler {
                     } => {
                         self.trigger_set_panning(note_playback_id, panning);
                     }
-                    GeneratorPlaybackEvent::SetParameter { id: _, value: _ } => {
-                        unimplemented!()
+                    GeneratorPlaybackEvent::SetParameter { id, value } => {
+                        if let Err(err) = self.apply_parameter_update(id, &value) {
+                            log::warn!("Failed to update sampler parameter {id:?}: {err}");
+                        }
                     }
                 },
             }
         }
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, current_sample_frame: u64) {
         // Mark source as about to stop
         self.stopping = true;
         // Stop all active voices
         for voice in &mut self.voices {
-            voice.stop(&self.envelope_params);
+            voice.stop(&self.envelope_params, current_sample_frame);
         }
     }
 
@@ -348,7 +424,7 @@ impl Sampler {
         voice.playback_id = Some(note_playback_id);
     }
 
-    fn trigger_note_off(&mut self, playback_id: PlaybackId) {
+    fn trigger_note_off(&mut self, playback_id: PlaybackId, current_sample_frame: u64) {
         if self.stopping {
             // Ignore new events when we're about to stop
             return;
@@ -358,17 +434,17 @@ impl Sampler {
             .iter_mut()
             .find(|v| v.playback_id == Some(playback_id))
         {
-            voice.stop(&self.envelope_params);
+            voice.stop(&self.envelope_params, current_sample_frame);
         }
     }
 
-    fn trigger_all_notes_off(&mut self) {
+    fn trigger_all_notes_off(&mut self, current_sample_frame: u64) {
         if self.stopping {
             // Ignore new events when we're about to stop
             return;
         }
         for voice in &mut self.voices {
-            voice.stop(&self.envelope_params);
+            voice.stop(&self.envelope_params, current_sample_frame);
         }
     }
 
@@ -417,36 +493,116 @@ impl Sampler {
     /// Find a free voice or steal the oldest one.
     /// Returns the index of the new voice, which is always valid.
     fn next_free_voice_index(&self) -> usize {
-        // Try to find a free voice first
+        // Try to find a completely free voice first
         if let Some(index) = self.voices.iter().position(|v| !v.is_active()) {
-            index
-        } else {
-            if self.envelope_params.is_some() {
-                // Pick oldest one among all released voices
-                let oldest_released_voice = self
-                    .voices
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, v1)| v1.envelope.stage() == AhdsrStage::Release)
-                    .max_by(|(_, v1), (_, v2)| v1.playback_duration.cmp(&v2.playback_duration));
-                if let Some((index, _)) = oldest_released_voice {
-                    return index;
+            return index;
+        }
+        // If all voices are active, find the best candidate to steal
+        // Prioritize:
+        //   a) Longest releasing voice (earliest release_start_sample_frame)
+        //   b) Oldest active voice (by playback_id)
+        let mut candidate_index = 0;
+        let mut earliest_release_time: Option<u64> = None;
+        let mut oldest_active_playback_id: Option<PlaybackId> = None;
+        for (index, voice) in self.voices.iter().enumerate() {
+            if self.envelope_params.is_some() && voice.envelope.stage() == AhdsrStage::Release {
+                // This voice is in Release stage
+                if let Some(release_time) = voice.release_start_frame {
+                    if earliest_release_time.is_none_or(|earliest| release_time < earliest) {
+                        earliest_release_time = Some(release_time);
+                        oldest_active_playback_id = None; // Reset active voices once we found a releasing voice
+                        candidate_index = index;
+                    }
+                }
+            } else if earliest_release_time.is_none() {
+                // This voice is active (not in Release stage)
+                // Only consider if we haven't found a releasing voice yet
+                if let Some(playback_id) = voice.playback_id {
+                    if oldest_active_playback_id.is_none_or(|oldest| playback_id < oldest) {
+                        oldest_active_playback_id = Some(playback_id);
+                        candidate_index = index;
+                    }
                 }
             }
-            // Pick oldest one among all voices
-            let oldest_voice = self
-                .voices
-                .iter()
-                .enumerate()
-                .max_by(|(_, v1), (_, v2)| v1.playback_duration.cmp(&v2.playback_duration));
-            if let Some((index, _)) = oldest_voice {
-                index
-            } else {
-                0
+        }
+        candidate_index
+    }
+
+    fn parameter_descriptors(&self) -> [&dyn ClonableParameter; 5] {
+        [
+            &self.attack_param,
+            &self.hold_param,
+            &self.decay_param,
+            &self.sustain_param,
+            &self.release_param,
+        ]
+    }
+
+    fn apply_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        let params = self.envelope_params.as_mut().ok_or_else(|| {
+            Error::ParameterError("Sampler has no AHDSR envelope configured".to_string())
+        })?;
+
+        match id {
+            Self::ATTACK_PARAM_ID => {
+                let seconds = Self::parameter_update_value(value, &self.attack_param)?;
+                params.set_attack_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            Self::HOLD_PARAM_ID => {
+                let seconds = Self::parameter_update_value(value, &self.hold_param)?;
+                params.set_hold_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            Self::DECAY_PARAM_ID => {
+                let seconds = Self::parameter_update_value(value, &self.decay_param)?;
+                params.set_decay_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            Self::SUSTAIN_PARAM_ID => {
+                let sustain = Self::parameter_update_value(value, &self.sustain_param)? as f64;
+                params.set_sustain_level(sustain)?;
+            }
+            Self::RELEASE_PARAM_ID => {
+                let seconds = Self::parameter_update_value(value, &self.release_param)?;
+                params.set_release_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown sampler parameter: {id:?}"
+                )))
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parameter_update_value(
+        value: &ParameterValueUpdate,
+        descriptor: &FloatParameter,
+    ) -> Result<f32, Error> {
+        match value {
+            ParameterValueUpdate::Normalized(norm) => {
+                Ok(descriptor.denormalize_value(norm.clamp(0.0, 1.0)))
+            }
+            ParameterValueUpdate::Raw(raw) => {
+                if let Some(v) = raw.downcast_ref::<f32>() {
+                    Ok(descriptor.clamp_value(*v))
+                } else if let Some(v) = raw.downcast_ref::<f64>() {
+                    Ok(descriptor.clamp_value(*v as f32))
+                } else {
+                    Err(Error::ParameterError(format!(
+                        "Unsupported payload type for sampler parameter '{}'",
+                        descriptor.name()
+                    )))
+                }
             }
         }
     }
 }
+
+// -------------------------------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------------------------------
 
@@ -465,7 +621,7 @@ impl Source for Sampler {
 
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // Process playback messages
-        self.process_playback_messages();
+        self.process_playback_messages(time.pos_in_frames);
 
         // Return empty handed when exhausted
         if self.stopped {
@@ -525,12 +681,19 @@ impl Generator for Sampler {
         self.playback_status_send = sender;
     }
 
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        if self.envelope_params.is_none() {
+            return Vec::new();
+        }
+        self.parameter_descriptors().into_iter().collect()
+    }
+
     fn process_parameter_update(
         &mut self,
-        _id: four_cc::FourCC,
-        _value: crate::ParameterValueUpdate,
+        id: FourCC,
+        value: ParameterValueUpdate,
         _time: &SourceTime,
     ) -> Result<(), Error> {
-        unimplemented!()
+        self.apply_parameter_update(id, &value)
     }
 }

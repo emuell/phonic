@@ -133,6 +133,10 @@ impl AhdsrParameters {
         }
     }
 
+    /// Get the sustain level.
+    pub fn sustain_level(&self) -> f64 {
+        self.sustain_level
+    }
     /// Set the sustain level.
     pub fn set_sustain_level(&mut self, level: f64) -> Result<(), Error> {
         if !(0.0..=1.0).contains(&level) {
@@ -145,6 +149,10 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get attack time duration.
+    pub fn attack_time(&self) -> Duration {
+        self.attack_time
+    }
     /// Set the attack rate based on a time duration. Attack can be zero
     /// to completely skip the attack phase.
     pub fn set_attack_time(&mut self, time: Duration) -> Result<(), Error> {
@@ -158,6 +166,10 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get attack scaling.
+    pub fn attack_scaling(&self) -> f64 {
+        self.attack_scaling
+    }
     /// Set the attack scaling factor.
     ///
     /// Scaling should be in range [-1.0, 1.0].
@@ -173,12 +185,20 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get hold time duration.
+    pub fn hold_time(&self) -> Duration {
+        self.hold_time
+    }
     /// Set the hold time duration.
     pub fn set_hold_time(&mut self, time: Duration) -> Result<(), Error> {
         self.hold_time = time;
         Ok(())
     }
 
+    /// Get decay time duration.
+    pub fn decay_time(&self) -> Duration {
+        self.decay_time
+    }
     /// Set the decay rate based on a time duration.
     /// Duration must be strictly greater than zero.
     pub fn set_decay_time(&mut self, time: Duration) -> Result<(), Error> {
@@ -194,6 +214,10 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get decay scaling.
+    pub fn decay_scaling(&self) -> f64 {
+        self.decay_scaling
+    }
     /// Set the decay scaling factor.
     ///
     /// Scaling should be in range [-1.0, 1.0].
@@ -209,6 +233,10 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get release time duration.
+    pub fn release_time(&self) -> Duration {
+        self.release_time
+    }
     /// Set the release rate based on a time duration.
     pub fn set_release_time(&mut self, time: Duration) -> Result<(), Error> {
         self.release_time = time;
@@ -221,6 +249,10 @@ impl AhdsrParameters {
         Ok(())
     }
 
+    /// Get release scaling.
+    pub fn release_scaling(&self) -> f64 {
+        self.release_scaling
+    }
     /// Set the release scaling factor.
     ///
     /// Scaling should be in range [-1.0, 1.0].
