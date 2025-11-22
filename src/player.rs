@@ -473,6 +473,7 @@ impl Player {
                 mixer_id,
                 playback_message_queue,
                 mixer_event_queues,
+                self.collector_handle.clone(),
             ))
         }
     }

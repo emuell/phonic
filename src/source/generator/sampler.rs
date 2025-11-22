@@ -300,6 +300,9 @@ impl Sampler {
                     } => {
                         self.trigger_set_panning(note_playback_id, panning);
                     }
+                    GeneratorPlaybackEvent::SetParameter { id: _, value: _ } => {
+                        unimplemented!()
+                    }
                 },
             }
         }
@@ -520,5 +523,14 @@ impl Generator for Sampler {
     }
     fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
         self.playback_status_send = sender;
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        _id: four_cc::FourCC,
+        _value: crate::ParameterValueUpdate,
+        _time: &SourceTime,
+    ) -> Result<(), Error> {
+        unimplemented!()
     }
 }

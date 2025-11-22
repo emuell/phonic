@@ -3,18 +3,23 @@ use std::sync::{
     Arc,
 };
 
+use basedrop::{Handle, Owned};
 use crossbeam_queue::ArrayQueue;
 use dashmap::DashMap;
+use four_cc::FourCC;
 
 use crate::{
     error::Error,
+    parameter::ParameterValueUpdate,
     player::{MixerId, PlaybackId},
     source::{
-        amplified::AmplifiedSourceMessage, generator::GeneratorPlaybackMessage,
-        mixed::MixerMessage, panned::PannedSourceMessage, playback::PlaybackMessageQueue,
+        amplified::AmplifiedSourceMessage,
+        generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
+        mixed::MixerMessage,
+        panned::PannedSourceMessage,
+        playback::PlaybackMessageQueue,
         unique_source_id,
     },
-    GeneratorPlaybackEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -27,6 +32,7 @@ pub struct GeneratorPlaybackHandle {
     mixer_id: MixerId,
     playback_message_queue: PlaybackMessageQueue,
     mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+    collector_handle: Handle,
 }
 
 impl GeneratorPlaybackHandle {
@@ -36,6 +42,7 @@ impl GeneratorPlaybackHandle {
         mixer_id: MixerId,
         playback_message_queue: PlaybackMessageQueue,
         mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+        collector_handle: Handle,
     ) -> Self {
         Self {
             is_playing,
@@ -43,6 +50,7 @@ impl GeneratorPlaybackHandle {
             playback_message_queue,
             mixer_id,
             mixer_event_queues,
+            collector_handle,
         }
     }
 
@@ -213,7 +221,7 @@ impl GeneratorPlaybackHandle {
         self.send_generator_event(
             sample_time,
             GeneratorPlaybackEvent::NoteOff { note_playback_id },
-            "note_ff",
+            "note_off",
         )
     }
 
@@ -293,6 +301,63 @@ impl GeneratorPlaybackHandle {
                 panning,
             },
             "set_note_panning",
+        )
+    }
+
+    /// Set a generator parameter value at a specific sample time or immediately.
+    ///
+    /// The `value` must be of the correct type for the parameter: `f32`, `i32`, `bool`,
+    /// or the specific enum type used by the parameter.
+    pub fn set_parameter<V, T>(
+        &self,
+        parameter_id: FourCC,
+        value: V,
+        sample_time: T,
+    ) -> Result<(), Error>
+    where
+        V: std::any::Any + Send + Sync + 'static,
+        T: Into<Option<u64>>,
+    {
+        let sample_time = sample_time.into();
+        if !self.is_playing() {
+            return Err(Error::SourceNotPlaying);
+        }
+        let value = Owned::new(
+            &self.collector_handle,
+            ParameterValueUpdate::Raw(Box::new(value)),
+        );
+        self.send_generator_event(
+            sample_time,
+            GeneratorPlaybackEvent::SetParameter {
+                id: parameter_id,
+                value,
+            },
+            "set_parameter",
+        )
+    }
+
+    /// Set a normalized (0.0..=1.0) parameter value either immediately or at a future sample time.
+    pub fn set_parameter_normalized<T: Into<Option<u64>>>(
+        &self,
+        parameter_id: FourCC,
+        value: f32,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into();
+        if !self.is_playing() {
+            return Err(Error::SourceNotPlaying);
+        }
+        let value = Owned::new(
+            &self.collector_handle,
+            ParameterValueUpdate::Normalized(value),
+        );
+        self.send_generator_event(
+            sample_time,
+            GeneratorPlaybackEvent::SetParameter {
+                id: parameter_id,
+                value,
+            },
+            "set_parameter_normalized",
         )
     }
 

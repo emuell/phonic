@@ -2,9 +2,15 @@
 
 use std::sync::{mpsc::SyncSender, Arc};
 
+use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
+use four_cc::FourCC;
 
-use crate::{source::Source, PlaybackId, PlaybackStatusEvent};
+use crate::{
+    parameter::{ClonableParameter, ParameterValueUpdate},
+    source::{Source, SourceTime},
+    Error, PlaybackId, PlaybackStatusEvent,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -12,8 +18,7 @@ pub mod sampler;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Events to start/stop or change playback **within** a [`Generator`].
-#[derive(Debug, Clone, Copy)]
+/// Events to start/stop, change playback properties or parameters **within** a [`Generator`].
 pub enum GeneratorPlaybackEvent {
     /// Trigger a note on event.
     NoteOn {
@@ -22,34 +27,41 @@ pub enum GeneratorPlaybackEvent {
         volume: Option<f32>,
         panning: Option<f32>,
     },
-    /// Trigger a note off event for a specific note instance.
+    /// Trigger a note off event for a specific note playback.
     NoteOff { note_playback_id: PlaybackId },
-    /// Trigger note off for all currently playing notes and keep the generator running.
+    /// Stop all currently playing notes.
     AllNotesOff,
-    /// Set playback speed (pitch) for a specific note instance.
+
+    /// Set the speed/pitch of a specific note playback.
     SetSpeed {
         note_playback_id: PlaybackId,
         speed: f64,
         glide: Option<f32>,
     },
-    /// Set volume for a specific note instance.
+    /// Set the volume of a specific note playback.
     SetVolume {
         note_playback_id: PlaybackId,
         volume: f32,
     },
-    /// Set panning for a specific note instance.
+    /// Set the panning of a specific note playback.
     SetPanning {
         note_playback_id: PlaybackId,
         panning: f32,
+    },
+
+    /// Update a generator automation parameter.
+    SetParameter {
+        id: FourCC,
+        value: Owned<ParameterValueUpdate>,
     },
 }
 
 // -------------------------------------------------------------------------------------------------
 
-/// Events to control playback of a [`Generator`].
-#[derive(Debug, Clone, Copy)]
+/// Messages to control playback of and within a [`Generator`].
 pub enum GeneratorPlaybackMessage {
-    /// Stop the generator and remove it from the mixer. This will abruptly kill all notes.
+    /// Stop the generator and remove it from the mixer. This stops playback, wait until the
+    /// source is exhausted and finally remove the source from the mixer.
     Stop,
     /// Trigger a playback event. All playback events keep the generator running in the mixer.
     Trigger { event: GeneratorPlaybackEvent },
@@ -64,6 +76,9 @@ pub enum GeneratorPlaybackMessage {
 ///
 /// A generator is active as long as it get's actively stopped. Stopping will remove the
 /// generator from it's parent mixer, so to keep it running stop all playing notes only instead.
+///
+/// Generator parameters work similarly to [`Effect`](crate::Effect) parameters: they provide
+/// automation capabilities and can be queried via [`parameters()`](Self::parameters).
 pub trait Generator: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> PlaybackId;
@@ -73,5 +88,27 @@ pub trait Generator: Source {
 
     /// Channel to receive playback status from the generator.
     fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>>;
+    /// Set the playback status sender for this generator.
     fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>);
+
+    /// Optional parameter descriptors for the generator.
+    ///
+    /// When returning parameters here, implement `process_parameter_update` too.
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        vec![]
+    }
+
+    /// Process a parameter update for this generator in the audio thread.
+    fn process_parameter_update(
+        &mut self,
+        _id: FourCC,
+        _value: ParameterValueUpdate,
+        _time: &SourceTime,
+    ) -> Result<(), Error> {
+        debug_assert!(
+            self.parameters().is_empty(),
+            "When providing parameters, implement 'process_parameter_update' too!"
+        );
+        Ok(())
+    }
 }

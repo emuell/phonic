@@ -61,7 +61,7 @@
 //!     // Change effect parameters via the returned handles.
 //!     // Schedule a parameter change 3 seconds from now (sample-accurate)
 //!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN_ID, 3.0, now + 3 * samples_per_sec);
-//!  
+//!
 //!     // Play a file and get a handle to control it.
 //!     let file = player.play_file("path/to/your/file.wav",
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
@@ -175,6 +175,8 @@ pub mod sources {
     pub mod generators {
         //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
+        #[cfg(feature = "fundsp-synth")]
+        pub use super::super::source::generator::fundsp::{FunDspGenerator, FunDspParameters};
         pub use super::super::source::generator::{
             sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
         };
