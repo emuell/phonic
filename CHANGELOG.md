@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.13.0 - 2025/11/26
+
+- [breaking] `play_file/synth` and `add_effect` functions now return playback handles:
+  - handles of file and synth sources allow checking if the source is still playing, and allow changing playback properties of the playing source.
+  - handles of added effects allow scheduling/changing effect parameters.
+  - Related functions in the player interface got removed from the player and can only be used with the handles.
+  - all handles are `Send` + `Sync`, so they can be moved and used from other threads.  
+- fix memory (de)alloc in the audio-thread when removing effects:
+- fix bogus test if resampling is needed in ResampledSource. 
+- fix missing check for already scheduled stop playing commands
+
 ## v0.12.0 - 2025/11/10
 
 - auto-bypass DSP effects that receive no input signals to save CPU cycles
