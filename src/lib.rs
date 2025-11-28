@@ -179,6 +179,11 @@ pub mod sources {
         pub use super::super::source::generator::{
             sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
         };
+
+        #[cfg(feature = "fundsp")]
+        pub use super::super::source::generator::fundsp::{
+            shared_ahdsr, FunDspGenerator, SharedAhdsrNode,
+        };
     }
 }
 

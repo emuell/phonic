@@ -16,6 +16,9 @@ use crate::{
 
 pub mod sampler;
 
+#[cfg(feature = "fundsp")]
+pub mod fundsp;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Events to start/stop, change playback properties or parameters **within** a [`Generator`].

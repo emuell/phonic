@@ -1,0 +1,540 @@
+//! FunDSP-based polyphonic generator.
+
+use std::{
+    collections::HashMap,
+    sync::{mpsc::SyncSender, Arc},
+};
+
+use crossbeam_queue::ArrayQueue;
+use four_cc::FourCC;
+use fundsp::hacker32::*;
+
+use crate::{
+    parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
+    source::{
+        generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
+        unique_source_id, Source, SourceTime,
+    },
+    utils::buffer::clear_buffer,
+    Error, Generator, Parameter, PlaybackId, PlaybackStatusEvent,
+};
+
+// -------------------------------------------------------------------------------------------------
+
+mod ahdsr;
+mod parameters;
+mod voice;
+
+pub use ahdsr::{shared_ahdsr, SharedAhdsrNode};
+
+use parameters::FunDspFloatParameterValue;
+use voice::FunDspVoice;
+
+// -------------------------------------------------------------------------------------------------
+
+/// A polyphonic generator using FunDSP audio units created from a factory function.
+///
+/// The factory function receives shared variables for `gate`, `frequency`, `volume`, `panning`
+/// and optional user defined shared parameters to control playback, and returns a FunDSP audio
+/// unit that can use these variables.
+///
+/// # Example
+/// ```rust
+/// use fundsp::hacker32::*;
+/// use phonic::sources::generators::FunDspGenerator;
+///
+/// // Simple fundsp generator without extra parameters
+/// let generator = FunDspGenerator::new(
+///     "example_synth",
+///     |gate: Shared, freq: Shared, vol: Shared, pan: Shared| {
+///         // Simple saw wave with envelope and panning
+///         let envelope = var(&gate) >> follow(0.01);
+///         let sound = var(&freq) >> saw();
+///         Box::new((envelope * sound * var(&vol) | var(&pan)) >> panner())
+///     },
+///     8,      // 8 voices
+///     None,   // no playback status sender
+///     44100,  // voice and source's sample rate
+/// );
+/// ```
+pub struct FunDspGenerator {
+    synth_name: Arc<String>,
+    playback_id: PlaybackId,
+    playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
+    playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+    voices: Vec<FunDspVoice>,
+    shared_parameters: HashMap<FourCC, FunDspFloatParameterValue>,
+    stopping: bool, // True if stop has been called and we are waiting for voices to decay
+    stopped: bool,  // True if all voices have decayed after a stop call
+    output_sample_rate: u32,
+    output_channel_count: usize,
+}
+
+impl FunDspGenerator {
+    /// Create a new FunDSP-based generator with the given voice count.
+    ///
+    /// # Arguments
+    /// * `synth_name` - A name for the synth (for logging/debugging).
+    /// * `voice_factory` - Function that creates a voice unit with given.
+    ///   (frequency, volume, gate, panning) shared variables
+    /// * `voice_count` - Maximum number of simultaneous voices.
+    /// * `playback_status_send` - Sender for playback status events.
+    /// * `sample_rate` - Output sample rate.
+    pub fn new<S: AsRef<str>, F>(
+        synth_name: S,
+        voice_factory: F,
+        voice_count: usize,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error>
+    where
+        F: Fn(Shared, Shared, Shared, Shared) -> Box<dyn AudioUnit>,
+    {
+        let synth_name = Arc::new(synth_name.as_ref().to_owned());
+        let playback_id = unique_source_id();
+
+        // Create playback message queue with space for trigger events only
+        let playback_message_queue_size: usize = 16;
+        let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
+
+        // Pre-allocate all voices
+        let mut voices = Vec::with_capacity(voice_count);
+        let mut output_channel_count = 0;
+        for _ in 0..voice_count {
+            // Create common shared variables for this voice
+            let gate = shared(0.0);
+            let frequency = shared(440.0);
+            let volume = shared(1.0);
+            let panning = shared(0.0); // Default to center
+
+            // Create the voice node using the factory
+            let mut audio_unit = voice_factory(
+                gate.clone(),
+                frequency.clone(),
+                volume.clone(),
+                panning.clone(),
+            );
+            audio_unit.set_sample_rate(output_sample_rate as f64);
+            audio_unit.allocate();
+
+            // Memorize voice channel count
+            assert!(
+                output_channel_count == 0 || output_channel_count == audio_unit.outputs(),
+                "Channel layout should be the same for every created voice"
+            );
+            output_channel_count = audio_unit.outputs();
+
+            // Create voice
+            voices.push(FunDspVoice::new(
+                audio_unit,
+                frequency,
+                volume,
+                panning,
+                gate,
+                output_sample_rate,
+            ));
+        }
+
+        let shared_parameters = HashMap::new();
+
+        let stopping = false;
+        let stopped = false;
+
+        Ok(Self {
+            synth_name,
+            playback_id,
+            playback_message_queue,
+            playback_status_send,
+            voices,
+            shared_parameters,
+            stopping,
+            stopped,
+            output_sample_rate,
+            output_channel_count,
+        })
+    }
+
+    /// Create a new FunDSP-based generator with the given voice count and shared parameters.
+    ///
+    /// # Arguments
+    /// * `synth_name` - A name for the synth (for logging/debugging).
+    /// * `parameters` - A slice of parameters which will be passed to the factory
+    ///   in order automate variables.
+    /// * `voice_factory` - Function that creates a voice unit with given
+    ///   (frequency, volume, gate, panning) shared variables.
+    /// * `voice_count` - Maximum number of simultaneous voices.
+    /// * `playback_status_send` - Sender for playback status events.
+    /// * `sample_rate` - Output sample rate.
+    pub fn with_parameters<S: AsRef<str>, F>(
+        synth_name: S,
+        parameters: &[FloatParameter],
+        voice_factory: F,
+        voice_count: usize,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error>
+    where
+        F: Fn(
+            Shared,
+            Shared,
+            Shared,
+            Shared,
+            &mut dyn FnMut(FourCC) -> Shared,
+        ) -> Box<dyn AudioUnit>,
+    {
+        let synth_name = Arc::new(synth_name.as_ref().to_owned());
+        let playback_id = unique_source_id();
+
+        // Create playback message queue to hold automation for all params at once + a bit more
+        let playback_message_queue_size: usize = parameters.len() * 2 + 16;
+        let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
+
+        // Create parameter map and ensure that all parameter IDs are unique
+        let mut shared_parameters = HashMap::with_capacity(parameters.len());
+        for p in parameters {
+            if shared_parameters
+                .insert(
+                    p.id(),
+                    FunDspFloatParameterValue::from_description(p.clone()),
+                )
+                .is_some()
+            {
+                return Err(Error::ParameterError(format!(
+                    "Duplicate parameter ID '{}' in parameter set",
+                    p.id()
+                )));
+            }
+        }
+
+        // Allocate all voices
+        let mut voices = Vec::with_capacity(voice_count);
+        let mut output_channel_count = 0;
+        for _ in 0..voice_count {
+            // Create common shared variables for this voice
+            let gate = shared(0.0);
+            let frequency = shared(440.0);
+            let volume = shared(1.0);
+            let panning = shared(0.0); // Default to center
+
+            // Create the voice node using the factory
+            let mut audio_unit = voice_factory(
+                gate.clone(),
+                frequency.clone(),
+                volume.clone(),
+                panning.clone(),
+                &mut |id: FourCC| -> Shared {
+                    shared_parameters
+                        .get(&id)
+                        .unwrap_or_else(|| {
+                            panic!("Parameter '{id}' not found in provided parameter set")
+                        })
+                        .shared()
+                        .clone()
+                },
+            );
+            audio_unit.set_sample_rate(output_sample_rate as f64);
+            audio_unit.allocate();
+
+            // Memorize voice channel count
+            assert!(
+                output_channel_count == 0 || output_channel_count == audio_unit.outputs(),
+                "Channel layout should be the same for every created voice"
+            );
+            output_channel_count = audio_unit.outputs();
+
+            // Create voice
+            voices.push(FunDspVoice::new(
+                audio_unit,
+                frequency,
+                volume,
+                panning,
+                gate,
+                output_sample_rate,
+            ));
+        }
+
+        let stopping = false;
+        let stopped = false;
+
+        Ok(Self {
+            synth_name,
+            playback_id,
+            playback_message_queue,
+            playback_status_send,
+            voices,
+            shared_parameters,
+            stopping,
+            stopped,
+            output_sample_rate,
+            output_channel_count,
+        })
+    }
+
+    fn next_free_voice_index(&mut self, _current_sample_frame: u64) -> usize {
+        // Try to find an inactive voice first
+        if let Some(index) = self.voices.iter().position(|v| !v.is_active()) {
+            return index;
+        }
+        // If all voices are active, find the best candidate to steal.
+        // Prioritize:
+        //   a) Longest releasing voice (earliest release_start_frame)
+        //   b) Oldest active voice (smallest playback_id)
+        let mut candidate_index = 0;
+        let mut earliest_release_time: Option<u64> = None;
+        let mut oldest_playback_id: Option<PlaybackId> = None;
+        for (index, voice) in self.voices.iter().enumerate() {
+            if voice.is_releasing() {
+                // If this voice is releasing, check if it's the longest releasing one
+                if let Some(release_time) = voice.release_start_frame() {
+                    if earliest_release_time.is_none_or(|earliest| release_time < earliest) {
+                        earliest_release_time = Some(release_time);
+                        candidate_index = index;
+                    }
+                }
+            } else if voice.playback_id().is_some() {
+                // If this voice is playing, check if it's the oldest active one
+                // Only consider playing voices if no releasing voice has been found yet
+                // (i.e., earliest_release_time is still None)
+                if earliest_release_time.is_none() {
+                    if let Some(current_playback_id) = voice.playback_id() {
+                        if oldest_playback_id.is_none_or(|oldest| current_playback_id < oldest) {
+                            oldest_playback_id = Some(current_playback_id);
+                            candidate_index = index;
+                        }
+                    }
+                }
+            }
+        }
+        candidate_index
+    }
+
+    fn trigger_note_on(
+        &mut self,
+        note_playback_id: PlaybackId,
+        note: u8,
+        volume: Option<f32>,
+        panning: Option<f32>,
+        current_sample_frame: u64,
+    ) {
+        let voice_index = self.next_free_voice_index(current_sample_frame);
+        let voice = &mut self.voices[voice_index];
+        voice.start(
+            note_playback_id,
+            note,
+            volume.unwrap_or(1.0),
+            panning.unwrap_or(0.0),
+        );
+    }
+
+    fn trigger_note_off(&mut self, playback_id: PlaybackId, current_sample_frame: u64) {
+        if let Some(voice) = self
+            .voices
+            .iter_mut()
+            .find(|v| v.playback_id() == Some(playback_id))
+        {
+            voice.stop(current_sample_frame);
+        }
+    }
+
+    fn trigger_set_speed(&mut self, playback_id: PlaybackId, speed: f64, glide: Option<f32>) {
+        if let Some(voice) = self
+            .voices
+            .iter_mut()
+            .find(|v| v.playback_id() == Some(playback_id))
+        {
+            voice.set_speed(speed, glide, self.output_sample_rate);
+        }
+    }
+
+    fn trigger_set_volume(&mut self, playback_id: PlaybackId, volume: f32) {
+        if let Some(voice) = self
+            .voices
+            .iter_mut()
+            .find(|v| v.playback_id() == Some(playback_id))
+        {
+            voice.set_volume(volume);
+        }
+    }
+
+    fn trigger_set_panning(&mut self, playback_id: PlaybackId, panning: f32) {
+        if let Some(voice) = self
+            .voices
+            .iter_mut()
+            .find(|v| v.playback_id() == Some(playback_id))
+        {
+            voice.set_panning(panning);
+        }
+    }
+
+    fn process_playback_messages(&mut self, current_sample_frame: u64) {
+        while let Some(message) = self.playback_message_queue.pop() {
+            match message {
+                GeneratorPlaybackMessage::Stop => {
+                    self.stopping = true; // Mark generator as stopping
+                    for voice in &mut self.voices {
+                        voice.stop(current_sample_frame); // Trigger release for all voices
+                    }
+                }
+                GeneratorPlaybackMessage::Trigger { event } => {
+                    // Ignore all events while stopping
+                    if !self.stopping {
+                        match event {
+                            GeneratorPlaybackEvent::AllNotesOff => {
+                                for voice in &mut self.voices {
+                                    voice.stop(current_sample_frame);
+                                }
+                            }
+                            GeneratorPlaybackEvent::NoteOn {
+                                note_playback_id,
+                                note,
+                                volume,
+                                panning,
+                            } => {
+                                self.trigger_note_on(
+                                    note_playback_id,
+                                    note,
+                                    volume,
+                                    panning,
+                                    current_sample_frame,
+                                );
+                            }
+                            GeneratorPlaybackEvent::NoteOff { note_playback_id } => {
+                                self.trigger_note_off(note_playback_id, current_sample_frame);
+                            }
+                            GeneratorPlaybackEvent::SetSpeed {
+                                note_playback_id,
+                                speed,
+                                glide,
+                            } => {
+                                self.trigger_set_speed(note_playback_id, speed, glide);
+                            }
+                            GeneratorPlaybackEvent::SetVolume {
+                                note_playback_id,
+                                volume,
+                            } => {
+                                self.trigger_set_volume(note_playback_id, volume);
+                            }
+                            GeneratorPlaybackEvent::SetPanning {
+                                note_playback_id,
+                                panning,
+                            } => {
+                                self.trigger_set_panning(note_playback_id, panning);
+                            }
+                            GeneratorPlaybackEvent::SetParameter { id, value } => {
+                                if let Err(err) = self.process_parameter_update(id, &value) {
+                                    log::warn!("Failed to process parameter update: {err}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        if let Some(parameter) = self.shared_parameters.get_mut(&id) {
+            parameter.apply_update(value);
+            Ok(())
+        } else {
+            Err(Error::ParameterError(format!("Unknown parameter '{id}'")))
+        }
+    }
+}
+
+impl Source for FunDspGenerator {
+    fn sample_rate(&self) -> u32 {
+        self.output_sample_rate
+    }
+
+    fn channel_count(&self) -> usize {
+        self.output_channel_count
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.stopped
+    }
+
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        // Process pending messages, if any
+        self.process_playback_messages(time.pos_in_frames);
+
+        // Return empty handle where we stopped
+        if self.stopped {
+            return 0;
+        }
+
+        // Prepare output for mixing
+        clear_buffer(output);
+
+        // Mix all active voices
+        let mut active_voices_count = 0;
+        for voice in &mut self.voices {
+            if voice.is_active() {
+                // Process the entire voice using block processing
+                voice.process(output);
+                // Check if a releasing voice has become exhausted
+                if voice.is_exhausted() {
+                    voice.kill();
+                } else if voice.is_active() {
+                    // Count voices that are either playing or still decaying
+                    active_voices_count += 1;
+                }
+            }
+        }
+
+        // If the generator was stopping and all voices become inactive report as stopped.
+        if self.stopping && active_voices_count == 0 {
+            self.stopped = true;
+            if let Some(sender) = &self.playback_status_send {
+                if let Err(err) = sender.send(PlaybackStatusEvent::Stopped {
+                    id: self.playback_id,
+                    path: Arc::clone(&self.synth_name),
+                    context: None,
+                    exhausted: true,
+                }) {
+                    log::warn!("Failed to send fundsp generator playback status event: {err}");
+                }
+            }
+        }
+
+        // We've cleared the entire buffer so report the entire buffer's len
+        output.len()
+    }
+}
+
+impl Generator for FunDspGenerator {
+    fn playback_id(&self) -> PlaybackId {
+        self.playback_id
+    }
+
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>> {
+        self.playback_message_queue.clone()
+    }
+
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
+        self.playback_status_send.clone()
+    }
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
+        self.playback_status_send = sender;
+    }
+
+    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+        self.shared_parameters
+            .values()
+            .map(|p| p.description() as &dyn ClonableParameter)
+            .collect()
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        self.process_parameter_update(id, value)
+    }
+}
