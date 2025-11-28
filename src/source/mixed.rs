@@ -6,11 +6,11 @@ use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectMessage},
+    generator::GeneratorPlaybackMessage,
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage,
-        generator::GeneratorPlaybackMessage, panned::PannedSourceMessage,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
@@ -147,7 +147,7 @@ pub(crate) enum MixerMessage {
     },
     // Mixers
     AddMixer {
-        mixer_id: EffectId,
+        mixer_id: MixerId,
         mixer: Box<MixedSource>,
     },
     RemoveMixer {

@@ -11,7 +11,7 @@ use four_cc::FourCC;
 use fundsp::hacker32::*;
 
 use phonic::{
-    parameters::FloatParameter, sources::generators::shared_ahdsr, Error, GeneratorPlaybackHandle,
+    generators::shared_ahdsr, parameters::FloatParameter, Error, GeneratorPlaybackHandle,
     Parameter, ParameterScaling,
 };
 

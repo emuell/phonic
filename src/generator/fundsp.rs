@@ -10,13 +10,11 @@ use four_cc::FourCC;
 use fundsp::hacker32::*;
 
 use crate::{
+    generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
-    source::{
-        generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
-        unique_source_id, Source, SourceTime,
-    },
+    source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
-    Error, Generator, Parameter, PlaybackId, PlaybackStatusEvent,
+    Error, Generator, NotePlaybackId, Parameter, PlaybackId, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -36,12 +34,12 @@ use voice::FunDspVoice;
 ///
 /// The factory function receives shared variables for `gate`, `frequency`, `volume`, `panning`
 /// and optional user defined shared parameters to control playback, and returns a FunDSP audio
-/// unit that can use these variables.
+/// unit that uses these as variables.
 ///
 /// # Example
 /// ```rust
 /// use fundsp::hacker32::*;
-/// use phonic::sources::generators::FunDspGenerator;
+/// use phonic::generators::FunDspGenerator;
 ///
 /// // Simple fundsp generator without extra parameters
 /// let generator = FunDspGenerator::new(
@@ -281,7 +279,7 @@ impl FunDspGenerator {
         //   b) Oldest active voice (smallest playback_id)
         let mut candidate_index = 0;
         let mut earliest_release_time: Option<u64> = None;
-        let mut oldest_playback_id: Option<PlaybackId> = None;
+        let mut oldest_note_id: Option<NotePlaybackId> = None;
         for (index, voice) in self.voices.iter().enumerate() {
             if voice.is_releasing() {
                 // If this voice is releasing, check if it's the longest releasing one
@@ -291,14 +289,14 @@ impl FunDspGenerator {
                         candidate_index = index;
                     }
                 }
-            } else if voice.playback_id().is_some() {
+            } else if voice.note_id().is_some() {
                 // If this voice is playing, check if it's the oldest active one
                 // Only consider playing voices if no releasing voice has been found yet
                 // (i.e., earliest_release_time is still None)
                 if earliest_release_time.is_none() {
-                    if let Some(current_playback_id) = voice.playback_id() {
-                        if oldest_playback_id.is_none_or(|oldest| current_playback_id < oldest) {
-                            oldest_playback_id = Some(current_playback_id);
+                    if let Some(current_playback_id) = voice.note_id() {
+                        if oldest_note_id.is_none_or(|oldest| current_playback_id < oldest) {
+                            oldest_note_id = Some(current_playback_id);
                             candidate_index = index;
                         }
                     }
@@ -310,7 +308,7 @@ impl FunDspGenerator {
 
     fn trigger_note_on(
         &mut self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         note: u8,
         volume: Option<f32>,
         panning: Option<f32>,
@@ -318,49 +316,44 @@ impl FunDspGenerator {
     ) {
         let voice_index = self.next_free_voice_index(current_sample_frame);
         let voice = &mut self.voices[voice_index];
-        voice.start(
-            note_playback_id,
-            note,
-            volume.unwrap_or(1.0),
-            panning.unwrap_or(0.0),
-        );
+        voice.start(note_id, note, volume.unwrap_or(1.0), panning.unwrap_or(0.0));
     }
 
-    fn trigger_note_off(&mut self, playback_id: PlaybackId, current_sample_frame: u64) {
+    fn trigger_note_off(&mut self, note_id: NotePlaybackId, current_sample_frame: u64) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.stop(current_sample_frame);
         }
     }
 
-    fn trigger_set_speed(&mut self, playback_id: PlaybackId, speed: f64, glide: Option<f32>) {
+    fn trigger_set_speed(&mut self, note_id: NotePlaybackId, speed: f64, glide: Option<f32>) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_speed(speed, glide, self.output_sample_rate);
         }
     }
 
-    fn trigger_set_volume(&mut self, playback_id: PlaybackId, volume: f32) {
+    fn trigger_set_volume(&mut self, note_id: NotePlaybackId, volume: f32) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_volume(volume);
         }
     }
 
-    fn trigger_set_panning(&mut self, playback_id: PlaybackId, panning: f32) {
+    fn trigger_set_panning(&mut self, note_id: NotePlaybackId, panning: f32) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_panning(panning);
         }
@@ -385,40 +378,34 @@ impl FunDspGenerator {
                                 }
                             }
                             GeneratorPlaybackEvent::NoteOn {
-                                note_playback_id,
+                                note_id,
                                 note,
                                 volume,
                                 panning,
                             } => {
                                 self.trigger_note_on(
-                                    note_playback_id,
+                                    note_id,
                                     note,
                                     volume,
                                     panning,
                                     current_sample_frame,
                                 );
                             }
-                            GeneratorPlaybackEvent::NoteOff { note_playback_id } => {
-                                self.trigger_note_off(note_playback_id, current_sample_frame);
+                            GeneratorPlaybackEvent::NoteOff { note_id } => {
+                                self.trigger_note_off(note_id, current_sample_frame);
                             }
                             GeneratorPlaybackEvent::SetSpeed {
-                                note_playback_id,
+                                note_id,
                                 speed,
                                 glide,
                             } => {
-                                self.trigger_set_speed(note_playback_id, speed, glide);
+                                self.trigger_set_speed(note_id, speed, glide);
                             }
-                            GeneratorPlaybackEvent::SetVolume {
-                                note_playback_id,
-                                volume,
-                            } => {
-                                self.trigger_set_volume(note_playback_id, volume);
+                            GeneratorPlaybackEvent::SetVolume { note_id, volume } => {
+                                self.trigger_set_volume(note_id, volume);
                             }
-                            GeneratorPlaybackEvent::SetPanning {
-                                note_playback_id,
-                                panning,
-                            } => {
-                                self.trigger_set_panning(note_playback_id, panning);
+                            GeneratorPlaybackEvent::SetPanning { note_id, panning } => {
+                                self.trigger_set_panning(note_id, panning);
                             }
                             GeneratorPlaybackEvent::SetParameter { id, value } => {
                                 if let Err(err) = self.process_parameter_update(id, &value) {

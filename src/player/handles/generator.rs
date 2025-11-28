@@ -10,16 +10,14 @@ use four_cc::FourCC;
 
 use crate::{
     error::Error,
+    generator::{unique_note_id, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     parameter::ParameterValueUpdate,
     player::{MixerId, PlaybackId},
     source::{
-        amplified::AmplifiedSourceMessage,
-        generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
-        mixed::MixerMessage,
-        panned::PannedSourceMessage,
+        amplified::AmplifiedSourceMessage, mixed::MixerMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue,
-        unique_source_id,
     },
+    NotePlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -189,29 +187,29 @@ impl GeneratorPlaybackHandle {
         volume: Option<f32>,
         panning: Option<f32>,
         sample_time: T,
-    ) -> Result<PlaybackId, Error> {
+    ) -> Result<NotePlaybackId, Error> {
         let sample_time = sample_time.into();
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        let note_playback_id = unique_source_id();
+        let note_id = unique_note_id();
         self.send_generator_event(
             sample_time,
             GeneratorPlaybackEvent::NoteOn {
-                note_playback_id,
+                note_id,
                 note,
                 volume,
                 panning,
             },
             "note_on",
         )?;
-        Ok(note_playback_id)
+        Ok(note_id)
     }
 
     /// Trigger a note off event for a specific note instance at the given sample time or immediately.
     pub fn note_off<T: Into<Option<u64>>>(
         &self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         sample_time: T,
     ) -> Result<(), Error> {
         let sample_time = sample_time.into();
@@ -220,7 +218,7 @@ impl GeneratorPlaybackHandle {
         }
         self.send_generator_event(
             sample_time,
-            GeneratorPlaybackEvent::NoteOff { note_playback_id },
+            GeneratorPlaybackEvent::NoteOff { note_id },
             "note_off",
         )
     }
@@ -228,7 +226,7 @@ impl GeneratorPlaybackHandle {
     /// Set playback speed (pitch) for a specific note instance at the given sample time or immediately.
     pub fn set_note_speed<T: Into<Option<u64>>>(
         &self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         speed: f64,
         glide: Option<f32>,
         sample_time: T,
@@ -240,7 +238,7 @@ impl GeneratorPlaybackHandle {
         self.send_generator_event(
             sample_time,
             GeneratorPlaybackEvent::SetSpeed {
-                note_playback_id,
+                note_id,
                 speed,
                 glide,
             },
@@ -265,7 +263,7 @@ impl GeneratorPlaybackHandle {
     /// Set volume for a specific note instance at the given sample time or immediately.
     pub fn set_note_volume<T: Into<Option<u64>>>(
         &self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         volume: f32,
         sample_time: T,
     ) -> Result<(), Error> {
@@ -275,10 +273,7 @@ impl GeneratorPlaybackHandle {
         }
         self.send_generator_event(
             sample_time,
-            GeneratorPlaybackEvent::SetVolume {
-                note_playback_id,
-                volume,
-            },
+            GeneratorPlaybackEvent::SetVolume { note_id, volume },
             "set_note_volume",
         )
     }
@@ -286,7 +281,7 @@ impl GeneratorPlaybackHandle {
     /// Set panning for a specific note instance at the given sample time or immediately.
     pub fn set_note_panning<T: Into<Option<u64>>>(
         &self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         panning: f32,
         sample_time: T,
     ) -> Result<(), Error> {
@@ -296,10 +291,7 @@ impl GeneratorPlaybackHandle {
         }
         self.send_generator_event(
             sample_time,
-            GeneratorPlaybackEvent::SetPanning {
-                note_playback_id,
-                panning,
-            },
+            GeneratorPlaybackEvent::SetPanning { note_id, panning },
             "set_note_panning",
         )
     }

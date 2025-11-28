@@ -1,5 +1,5 @@
 //! **phonic** is a cross-platform audio playback and DSP library for Rust. It provides a flexible,
-//! low-latency audio engine and related tools for desktop and web-based music applications
+//! low-latency audio engine and DSP tools for desktop and web applications.
 //!
 //! ### Overview
 //!
@@ -7,24 +7,26 @@
 //!   output device instance, plays sounds and manages DSP effects.
 //!
 //! - **[`OutputDevice`]** represents the audio backend stream. phonic provides implementations
-//!   for different platforms, such as `cpal` for native applications and `webauddio` for WebAssembly.
-//!   The [`DefaultOutputDevice`] is an alias for the recommended output device for the current
-//!   build target.
+//!   for different platforms, such as `cpal` for native applications and `web-audio` for WebAssembly.
 //!
 //! - **[`Source`]** produces audio signals. You can use the built-in [`FileSource`] for playing
-//!   back audio files, [`SynthSource`] for generating synthesized tones or can create your own
-//!   source implementation. File sources can be preloaded into memory or streamed on-the-fly.
+//!   back one-shot audio files, [`SynthSource`] for generating synthesized one-shot tones, or create
+//!   your own custom source implementation. Files can be played preloaded from RAM or streamed
+//!   on-the-fly.
 //!
-//! - **[`Generator`]** is a source that is driven by note events. It does not play anything by default,
-//!   until it gets triggered via note events.
-//!   Use e.g. a [`Sampler`](crate::sources::generators::Sampler) to play back or sequence a single
-//!   sample file repeatedly with optional AHDSR envelopes, or create your own generator.
+//! - **[`Generator`]** is a source that plays sounds driven by note and parameter events.
+//!   Use e.g. a [`Sampler`](crate::generators::Sampler) to play back sample files with
+//!   optional AHDSR envelopes, or [`FunDspGenerator`](crate::generators::FunDspGenerator)
+//!   to create a custom synth via [fundsp](https://github.com/SamiPerttu/fundsp), or create your
+//!   own custom generator.
 //!
-//! - **[`Effect`]** applies DSP effects to audio signals. By default, only one
-//!   mixer is present in the player and will route all sources through it. To create more complex
-//!   routings you can create sub-mixers via [`Player::add_mixer`] and route sources to them.
-//!   Each mixer instance has its own chain of DSP effects, which can be set up via
-//!   [`Player::add_effect`]. You can use the built-in effects in [`effects`] or create your own.
+//! - **[`Effect`]** applies DSP effects to audio signals in a mixer and describes its automatable
+//!   properties via [`Parameter`]s. Phonic comes with a basic set of [`effects`], but you can
+//!   create your own custom ones too.
+//!   Effects are applied within mixers. By default, the player includes one main mixer that routes
+//!   all sources through it. For more complex audio routing, create additional mixers using
+//!   [`Player::add_mixer`] and route specific sources to them.
+//!
 //!
 //! ### Getting Started
 //!
@@ -42,7 +44,7 @@
 //!     // Create a player with the default audio output device.
 //!     let mut player = Player::new(DefaultOutputDevice::open()?, None);
 //!
-//!     // Memorize some consts for event scheduling.
+//!     // Store some constants for event scheduling.
 //!     let now = player.output_sample_frame_position();
 //!     let samples_per_sec = player.output_sample_rate() as u64;
 //!
@@ -59,7 +61,7 @@
 //!     let limiter = player.add_effect(CompressorEffect::new_limiter(), None)?;
 //!
 //!     // Change effect parameters via the returned handles.
-//!     // Schedule a parameter change 3 seconds from now (sample-accurate)
+//!     // Schedule a parameter change 3 seconds from now (sample-accurate).
 //!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN_ID, 3.0, now + 3 * samples_per_sec);
 //!
 //!     // Play a file and get a handle to control it.
@@ -67,17 +69,17 @@
 //!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
 //!     )?;
 //!
-//!     // Change sources via the returned handles.
+//!     // Control playback via the returned handles.
 //!     // Schedule a stop 2 seconds from now (sample-accurate)
 //!     file.stop(now + 2 * samples_per_sec)?;
 //!
-//!     // Play another file on the main mixer with scheduled start time
+//!     // Play another file on the main mixer with scheduled start time.
 //!     let some_other_file = player.play_file("path/to/your/some_other_file.wav",
 //!       FilePlaybackOptions::default().start_at_time(now + 2 * samples_per_sec)
 //!     )?;
 //!
-//!     // The player's audio output stream runs on a separate thread, so we keep
-//!     // the main thread running here, until all files finished playing.
+//!     // The player's audio output stream runs on a separate thread. Keep the
+//!     // main thread running here, until all files finished playing.
 //!     while file.is_playing() || some_other_file.is_playing() {
 //!         std::thread::sleep(Duration::from_millis(100));
 //!     }
@@ -86,9 +88,9 @@
 //! }
 //! ```
 //!
-//! For more advanced usage, such as monitoring playback, sequencing source playback or managing
-//! creating more complex mixer graphs, please see the examples in the `README.md` and the `/examples`
-//! directory of the repository.
+//! For more advanced usage, such as monitoring playback, sequencing playback, using generator
+//! or creating more complex mixer graphs, please see the examples in the `README.md` and the
+//! `/examples` directory of the repository.
 
 // enable feature config when building for docs.rs
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -105,6 +107,7 @@
 
 mod effect;
 mod error;
+mod generator;
 mod output;
 mod parameter;
 mod player;
@@ -119,7 +122,7 @@ pub use output::OutputDevice;
 
 pub use player::{
     EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle, MixerId,
-    PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
+    NotePlaybackId, PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
@@ -129,12 +132,13 @@ pub use parameter::{
 
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
-    generator::{Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     resampled::ResamplingQuality,
     status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
 };
+
+pub use generator::{Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -172,19 +176,17 @@ pub mod sources {
 
     #[cfg(feature = "fundsp")]
     pub use super::source::synth::fundsp::FunDspSynthSource;
+}
 
-    pub mod generators {
-        //! Set of basic, common [`Generator`](crate::Generator) source implementations.
+pub mod generators {
+    //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
-        pub use super::super::source::generator::{
-            sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
-        };
+    pub use super::generator::{
+        sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+    };
 
-        #[cfg(feature = "fundsp")]
-        pub use super::super::source::generator::fundsp::{
-            shared_ahdsr, FunDspGenerator, SharedAhdsrNode,
-        };
-    }
+    #[cfg(feature = "fundsp")]
+    pub use super::generator::fundsp::{shared_ahdsr, FunDspGenerator, SharedAhdsrNode};
 }
 
 pub mod parameters {

@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use phonic::{sources::generators::Sampler, utils::speed_from_note, Error};
+use phonic::{generators::Sampler, utils::speed_from_note, Error};
 
 // Use a fundsp generator, if available, else a sampler
 #[cfg(feature = "fundsp")]
-use phonic::sources::generators::FunDspGenerator;
+use phonic::generators::FunDspGenerator;
 #[cfg(not(feature = "fundsp"))]
 use phonic::utils::ahdsr::AhdsrParameters;
 

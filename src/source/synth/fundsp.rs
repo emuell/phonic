@@ -162,6 +162,7 @@ impl SynthSourceGenerator for FunDspSynthSourceGenerator {
 pub struct FunDspSynthSource(SynthSourceImpl<FunDspSynthSourceGenerator>);
 
 impl FunDspSynthSource {
+    /// Create a new fundsp synth source. Usually created via [`Player::play_fundsp_synth`].
     pub fn new(
         generator_name: &str,
         audio_unit: Box<dyn AudioUnit>,
@@ -234,12 +235,12 @@ impl Source for FunDspSynthSource {
 // -------------------------------------------------------------------------------------------------
 
 impl Player {
-    /// Play a mono [FunDSP](https://github.com/SamiPerttu/fundsp) AudioNode with the given options.
-    /// See [`SynthPlaybackOptions`] for more info about available options.
+    /// Play a mono or stereo [FunDSP](https://github.com/SamiPerttu/fundsp) AudioNode with the
+    /// given options. See [`SynthPlaybackOptions`] for more info about available options.
     ///
-    /// The node will play until it is exhausted (stops producing audio).
+    /// The node will play until it is exhausted (stops producing audio for more than 2 seconds).
     ///
-    /// Example one-shot node:
+    /// Example one-shot sound:
     /// ```rust, no_run
     /// use fundsp::hacker32::*;
     ///
@@ -259,8 +260,8 @@ impl Player {
         self.play_fundsp_synth_with_context(generator_name, audio_unit, options, None)
     }
 
-    /// Play a mono [FunDSP](https://github.com/SamiPerttu/fundsp) AudioNode with the given options
-    /// and playback status context.
+    /// Play a mono or stereo [FunDSP](https://github.com/SamiPerttu/fundsp) AudioNode with the
+    /// given options and a custom playback status context.
     #[cfg(feature = "fundsp")]
     pub fn play_fundsp_synth_with_context(
         &mut self,

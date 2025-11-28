@@ -8,18 +8,17 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
+    generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     parameter::{ClonableParameter, FloatParameter, Parameter, ParameterValueUpdate},
     source::{
-        file::preloaded::PreloadedFileSource,
-        generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
-        mixed::MixedSource,
-        unique_source_id, Source, SourceTime,
+        file::preloaded::PreloadedFileSource, mixed::MixedSource, unique_source_id, Source,
+        SourceTime,
     },
     utils::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
     },
-    Error, FilePlaybackOptions, Generator, PlaybackId, PlaybackStatusEvent,
+    Error, FilePlaybackOptions, Generator, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -29,11 +28,13 @@ use voice::SamplerVoice;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A simple sampler that plays a single preloaded audio file with an optional AHDSR envelope on
+/// A basic sampler that plays a single audio file from RAM with an optional AHDSR envelope on
 /// a limited set of voices.
+///
+/// All sampler parameters can be automated.
 pub struct Sampler {
-    playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
     playback_id: PlaybackId,
+    playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
     file_path: Arc<String>,
     voices: Vec<SamplerVoice>,
     envelope_parameters: Option<AhdsrParameters>,
@@ -199,34 +200,28 @@ impl Sampler {
                                 self.trigger_all_notes_off(current_sample_frame);
                             }
                             GeneratorPlaybackEvent::NoteOn {
-                                note_playback_id,
+                                note_id,
                                 note,
                                 volume,
                                 panning,
                             } => {
-                                self.trigger_note_on(note_playback_id, note, volume, panning);
+                                self.trigger_note_on(note_id, note, volume, panning);
                             }
-                            GeneratorPlaybackEvent::NoteOff { note_playback_id } => {
-                                self.trigger_note_off(note_playback_id, current_sample_frame);
+                            GeneratorPlaybackEvent::NoteOff { note_id } => {
+                                self.trigger_note_off(note_id, current_sample_frame);
                             }
                             GeneratorPlaybackEvent::SetSpeed {
-                                note_playback_id,
+                                note_id,
                                 speed,
                                 glide,
                             } => {
-                                self.trigger_set_speed(note_playback_id, speed, glide);
+                                self.trigger_set_speed(note_id, speed, glide);
                             }
-                            GeneratorPlaybackEvent::SetVolume {
-                                note_playback_id,
-                                volume,
-                            } => {
-                                self.trigger_set_volume(note_playback_id, volume);
+                            GeneratorPlaybackEvent::SetVolume { note_id, volume } => {
+                                self.trigger_set_volume(note_id, volume);
                             }
-                            GeneratorPlaybackEvent::SetPanning {
-                                note_playback_id,
-                                panning,
-                            } => {
-                                self.trigger_set_panning(note_playback_id, panning);
+                            GeneratorPlaybackEvent::SetPanning { note_id, panning } => {
+                                self.trigger_set_panning(note_id, panning);
                             }
                             GeneratorPlaybackEvent::SetParameter { id, value } => {
                                 if let Err(err) = self.process_parameter_update(id, &value) {
@@ -252,7 +247,7 @@ impl Sampler {
     /// Immediately trigger a note on (used by event processor)
     fn trigger_note_on(
         &mut self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         note: u8,
         volume: Option<f32>,
         panning: Option<f32>,
@@ -261,7 +256,7 @@ impl Sampler {
         let voice_index = self.next_free_voice_index();
         let voice = &mut self.voices[voice_index];
         voice.start(
-            note_playback_id,
+            note_id,
             note,
             volume.unwrap_or(1.0),
             panning.unwrap_or(0.0),
@@ -269,11 +264,11 @@ impl Sampler {
         );
     }
 
-    fn trigger_note_off(&mut self, playback_id: PlaybackId, current_sample_frame: u64) {
+    fn trigger_note_off(&mut self, note_id: NotePlaybackId, current_sample_frame: u64) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.stop(&self.envelope_parameters, current_sample_frame);
         }
@@ -285,31 +280,31 @@ impl Sampler {
         }
     }
 
-    fn trigger_set_speed(&mut self, playback_id: PlaybackId, speed: f64, glide: Option<f32>) {
+    fn trigger_set_speed(&mut self, note_id: NotePlaybackId, speed: f64, glide: Option<f32>) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_speed(speed, glide);
         }
     }
 
-    fn trigger_set_volume(&mut self, playback_id: PlaybackId, volume: f32) {
+    fn trigger_set_volume(&mut self, note_id: NotePlaybackId, volume: f32) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_volume(volume);
         }
     }
 
-    fn trigger_set_panning(&mut self, playback_id: PlaybackId, panning: f32) {
+    fn trigger_set_panning(&mut self, note_id: NotePlaybackId, panning: f32) {
         if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.playback_id() == Some(playback_id))
+            .find(|v| v.note_id() == Some(note_id))
         {
             voice.set_panning(panning);
         }
@@ -328,7 +323,7 @@ impl Sampler {
         //   b) Oldest active voice (by playback_id)
         let mut candidate_index = 0;
         let mut earliest_release_time: Option<u64> = None;
-        let mut oldest_active_playback_id: Option<PlaybackId> = None;
+        let mut oldest_active_playback_id: Option<NotePlaybackId> = None;
         for (index, voice) in self.voices.iter().enumerate() {
             if self.envelope_parameters.is_some() && voice.in_release_stage() {
                 // This voice is in Release stage
@@ -342,7 +337,7 @@ impl Sampler {
             } else if earliest_release_time.is_none() {
                 // This voice is active (not in Release stage)
                 // Only consider if we haven't found a releasing voice yet
-                if let Some(playback_id) = voice.playback_id() {
+                if let Some(playback_id) = voice.note_id() {
                     if oldest_active_playback_id.is_none_or(|oldest| playback_id < oldest) {
                         oldest_active_playback_id = Some(playback_id);
                         candidate_index = index;

@@ -8,10 +8,11 @@ use serde::Serialize;
 
 use phonic::{
     effects,
-    sources::{generators::FunDspGenerator, PreloadedFileSource},
+    generators::FunDspGenerator,
+    sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
     DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
-    GeneratorPlaybackHandle, MixerId, Parameter, ParameterType, PlaybackId, Player,
+    GeneratorPlaybackHandle, MixerId, NotePlaybackId, Parameter, ParameterType, Player,
 };
 
 #[path = "../../common/synths/organ.rs"]
@@ -86,7 +87,7 @@ struct App {
     playback_beat_counter: u32,
     playback_start_time: u64,
     synth_handle: GeneratorPlaybackHandle,
-    playing_synth_notes: HashMap<u8, PlaybackId>,
+    playing_synth_notes: HashMap<u8, NotePlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
     active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,

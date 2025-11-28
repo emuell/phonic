@@ -8,7 +8,7 @@ use crate::{
         buffer::{scale_buffer, InterleavedBufferMut},
         speed_from_note,
     },
-    PlaybackId,
+    NotePlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ type SamplerVoiceSource = SamplerVoicePannedSource;
 // -------------------------------------------------------------------------------------------------
 
 pub struct SamplerVoice {
-    playback_id: Option<PlaybackId>,
+    note_id: Option<NotePlaybackId>,
     source: SamplerVoiceSource,
     envelope: AhdsrEnvelope,
     release_start_frame: Option<u64>,
@@ -29,7 +29,7 @@ pub struct SamplerVoice {
 
 impl SamplerVoice {
     pub fn new(file_source: PreloadedFileSource, channel_count: usize) -> Self {
-        let playback_id = None;
+        let note_id = None;
 
         // Create wrapped voice source
         let source = {
@@ -46,7 +46,7 @@ impl SamplerVoice {
         let release_start_frame = None;
 
         Self {
-            playback_id,
+            note_id,
             source,
             envelope,
             release_start_frame,
@@ -55,14 +55,14 @@ impl SamplerVoice {
 
     #[inline(always)]
     /// This voice's note playback id. None, when stopped.
-    pub fn playback_id(&self) -> Option<usize> {
-        self.playback_id
+    pub fn note_id(&self) -> Option<NotePlaybackId> {
+        self.note_id
     }
 
     #[inline(always)]
     /// Is this voice currently playing something?
     pub fn is_active(&self) -> bool {
-        self.playback_id.is_some()
+        self.note_id.is_some()
     }
 
     #[inline(always)]
@@ -79,7 +79,7 @@ impl SamplerVoice {
 
     pub fn start(
         &mut self,
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         note: u8,
         volume: f32,
         panning: f32,
@@ -95,7 +95,7 @@ impl SamplerVoice {
         if let Some(envelope_parameters) = envelope_parameters {
             self.envelope.note_on(envelope_parameters, 1.0);
         }
-        self.playback_id = Some(note_playback_id)
+        self.note_id = Some(note_id)
     }
     /// Stop the voice and start fadeouts .
     pub fn stop(
@@ -118,7 +118,7 @@ impl SamplerVoice {
         // reset sources
         if self.is_active() {
             self.file_source().reset();
-            self.playback_id = None;
+            self.note_id = None;
         }
         // reset release start time
         self.release_start_frame = None;

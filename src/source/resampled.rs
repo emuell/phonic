@@ -10,7 +10,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// The resampler quality an audio source should be resampled with.
+/// The resampler quality an audio source can be resampled with.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum ResamplingQuality {
     /// Simple and fast, non bandlimited cubic interpolation. Your daily workhorse for e.g. real-time
