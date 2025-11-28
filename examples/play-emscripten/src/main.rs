@@ -8,11 +8,14 @@ use serde::Serialize;
 
 use phonic::{
     effects,
-    sources::PreloadedFileSource,
-    utils::{db_to_linear, pitch_from_note, speed_from_note},
-    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions, MixerId,
-    Parameter, ParameterType, Player, SynthPlaybackHandle, SynthPlaybackOptions,
+    sources::{generators::FunDspGenerator, PreloadedFileSource},
+    utils::{db_to_linear, speed_from_note},
+    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
+    GeneratorPlaybackHandle, MixerId, Parameter, ParameterType, PlaybackId, Player,
 };
+
+#[path = "../../common/synths/organ.rs"]
+mod organ_synth;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -82,7 +85,8 @@ struct App {
     player: Player,
     playback_beat_counter: u32,
     playback_start_time: u64,
-    playing_synth_notes: HashMap<u8, SynthPlaybackHandle>,
+    synth_handle: GeneratorPlaybackHandle,
+    playing_synth_notes: HashMap<u8, PlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer_id: MixerId,
     active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
@@ -131,12 +135,26 @@ impl App {
             player.output_sample_frame_position() + player.output_sample_rate() as u64;
         let playback_beat_counter = 0;
 
+        // add fundsp synth generator
+        let synth_handle = player.play_generator_source(
+            FunDspGenerator::new(
+                "example_synth",
+                organ_synth::voice_factory,
+                8,           // 8 voices
+                None,        // playback_status_send
+                sample_rate, // output rate
+            )?,
+            Some(synth_mixer_id),
+            None,
+        )?;
+
         let playing_synth_notes = HashMap::new();
 
         Ok(Self {
             player,
             playback_start_time,
             playback_beat_counter,
+            synth_handle,
             playing_synth_notes,
             samples,
             synth_mixer_id,
@@ -157,40 +175,23 @@ impl App {
         })
     }
 
-    // Create a new synth source.
-    fn create_synth_note(note: u8) -> Box<dyn fundsp::audiounit::AudioUnit> {
-        use fundsp::hacker32::*;
-        let freq = shared(pitch_from_note(note) as f32);
-        let fundamental = var(&freq) >> sine();
-        let harmonic_l1 = (var(&freq) * 2.01) >> sine();
-        let harmonic_h1 = (var(&freq) * 0.51) >> sine();
-        let harmonic_h2 = (var(&freq) * 0.249) >> sine();
-        let summed =
-            (fundamental + harmonic_l1 * 0.5 + harmonic_h1 * 0.5 + harmonic_h2 * 0.5) * 0.3;
-        let envelope = adsr_live(0.001, 0.1, 0.7, 0.5);
-        Box::new(envelope * summed)
-    }
-
-    // Schedule synth note on for playback
+    // Trigger a synth note on.
     fn synth_note_on(&mut self, note: u8) {
-        if let Some(playing_note) = self.playing_synth_notes.get(&note) {
-            let _ = playing_note.stop(None);
-            self.playing_synth_notes.remove(&note);
+        // If a note is already playing for this key, stop it first.
+        if let Some(note_id) = self.playing_synth_notes.remove(&note) {
+            let _ = self.synth_handle.note_off(note_id, None);
         }
-        if let Ok(playing_note) = self.player.play_fundsp_synth(
-            "synth_note",
-            Self::create_synth_note(note),
-            SynthPlaybackOptions::default().target_mixer(self.synth_mixer_id),
-        ) {
-            self.playing_synth_notes.insert(note, playing_note);
+
+        // Trigger the new note with velocity 0.3 and default panning
+        if let Ok(note_id) = self.synth_handle.note_on(note, Some(0.3), None, None) {
+            self.playing_synth_notes.insert(note, note_id);
         }
     }
 
-    // Stop a scheduled synth note on
+    // Trigger a synth note off.
     fn synth_note_off(&mut self, note: u8) {
-        if let Some(handle) = self.playing_synth_notes.get(&note) {
-            let _ = handle.stop(None);
-            self.playing_synth_notes.remove(&note);
+        if let Some(note_id) = self.playing_synth_notes.remove(&note) {
+            let _ = self.synth_handle.note_off(note_id, None);
         }
     }
 

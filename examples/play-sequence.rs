@@ -3,11 +3,13 @@
 
 use std::time::Duration;
 
-use phonic::{
-    sources::generators::Sampler,
-    utils::{ahdsr::AhdsrParameters, speed_from_note},
-    Error,
-};
+use phonic::{sources::generators::Sampler, utils::speed_from_note, Error};
+
+// Use a fundsp generator, if available, else a sampler
+#[cfg(feature = "fundsp")]
+use phonic::sources::generators::FunDspGenerator;
+#[cfg(not(feature = "fundsp"))]
+use phonic::utils::ahdsr::AhdsrParameters;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -21,6 +23,10 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 #[path = "./common/arguments.rs"]
 mod arguments;
 
+#[cfg(feature = "fundsp")]
+#[path = "./common/synths/bass.rs"]
+mod bass_synth;
+
 // -------------------------------------------------------------------------------------------------
 
 fn main() -> Result<(), Error> {
@@ -33,7 +39,7 @@ fn main() -> Result<(), Error> {
     // Stop playback until we've scheduled all notes
     player.stop();
 
-    // Create samplers
+    // Create metronome sampler
     let metronome = player.play_generator_source(
         Sampler::from_file(
             "assets/cowbell.wav",
@@ -46,6 +52,9 @@ fn main() -> Result<(), Error> {
         None,
         None,
     )?;
+
+    // Create bass sampler
+    #[cfg(not(feature = "fundsp"))]
     let bass = player.play_generator_source(
         Sampler::from_file(
             "assets/bass.wav",
@@ -59,6 +68,19 @@ fn main() -> Result<(), Error> {
             None,
             4,
             player.output_channel_count(),
+            player.output_sample_rate(),
+        )?,
+        None,
+        None,
+    )?;
+    // Create a fundsp bass generator FM synth
+    #[cfg(feature = "fundsp")]
+    let bass = player.play_generator_source(
+        FunDspGenerator::new(
+            "super_saw",
+            bass_synth::voice_factory,
+            8,
+            None,
             player.output_sample_rate(),
         )?,
         None,
@@ -90,12 +112,15 @@ fn main() -> Result<(), Error> {
 
     // Schedule bass line with glides (midi_note, duration_in_beats, glide, volume, pan)
     let bass_line = [
-        (60, 4.0, None, None, Some(0.0)),
-        (56, 1.0, Some(999.0), Some(0.75), Some(0.8)),
-        (58, 1.0, Some(999.0), Some(0.5), Some(-0.8)),
-        (65, 2.0, Some(12.0), None, Some(0.0)),
-        (56, 4.0, Some(96.0), Some(1.0), None),
+        (48, 4.0, None, None, Some(0.0)),
+        (44, 1.0, Some(999.0), Some(0.75), Some(0.8)),
+        (46, 1.0, Some(999.0), Some(0.5), Some(-0.8)),
+        (53, 2.0, Some(12.0), None, Some(0.0)),
+        (44, 4.0, Some(96.0), Some(1.0), None),
     ];
+
+    // pitch bass sample file by an octave
+    let bass_pitch: u8 = if cfg!(feature = "fundsp") { 0 } else { 12 };
 
     // Start bass with the first metronome beat
     current_time = output_start_time;
@@ -105,7 +130,12 @@ fn main() -> Result<(), Error> {
         match bass_note_id {
             // Glide existing note
             Some(bass_note_id) if glide.is_some() => {
-                bass.set_note_speed(bass_note_id, speed_from_note(*note), *glide, current_time)?;
+                bass.set_note_speed(
+                    bass_note_id,
+                    speed_from_note(*note + bass_pitch),
+                    *glide,
+                    current_time,
+                )?;
                 if let Some(volume) = volume {
                     bass.set_note_volume(bass_note_id, *volume, current_time)?;
                 }
@@ -115,7 +145,12 @@ fn main() -> Result<(), Error> {
             }
             // Play new note
             _ => {
-                bass_note_id = Some(bass.note_on(*note, *volume, *panning, current_time)?);
+                bass_note_id = Some(bass.note_on(
+                    *note + bass_pitch, //
+                    *volume,
+                    *panning,
+                    current_time,
+                )?);
             }
         }
         current_time += (*beats * samples_per_beat as f64) as u64;
