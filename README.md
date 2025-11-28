@@ -9,7 +9,7 @@ phonic is a cross-platform audio playback and DSP library for Rust. It provides 
 
 Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic was created to provide precise playback position monitoring - a feature lacking in other Rust audio libraries at the time. It is now also used in the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns) as the default sample playback engine.
 
-> [!NOTE] 
+> [!NOTE]
 > phonic has not yet reached a stable version, so expect breaking changes.
 
 ### Features
@@ -26,36 +26,35 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   - Automatic resampling and channel mapping via a fast custom resampler and [Rubato](https://github.com/HEnquist/rubato).
 
 - **Advanced Playback Control**:
-  - **Sample-precise scheduling** for accurate sequencing.
-  - Real-time monitoring of playback position and status for GUI integration.
-  - Dynamic control over volume, panning, and playback speed via playback handles.
+  - Sample-precise **scheduling** for accurate sequencing.
+  - Real-time **monitoring** of playback position and status for GUI integration.
+  - Dynamic control over volume, panning, and playback speed via `Sync` + `Send` playback handles.
 
 - **Custom Synthesis and DSPs**:
+  - Play preloaded sample files via a basic **sampler**.
+  - Play custom-built **synthesizers** or one-shot synth sounds using the optional [fundsp](https://github.com/SamiPerttu/fundsp) integration.
+  - Apply custom-built or use built-in **DSP effects**: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
-  - Play completely custom-built synthesizers or use the optional [fundsp](https://github.com/SamiPerttu/fundsp) integration for creating synth sources.
-  - Apply custom-built or use built-in DSP effects: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
-  - DSP effects are automatically bypassed to safe CPU cycles, when they receive no audible input.
+  - DSP effects are automatically bypassed to save CPU cycles when they receive no audible input.
 
 ### Documentation
 
 Rust docs for the last published versions are available at <https://docs.rs/phonic>
 
-
 ### Examples
 
 See [/examples](https://github.com/emuell/phonic/tree/master/examples) directory for more examples.
 
-
 #### File Playback with Monitoring
 
-Play, seek and stop audio files on the default audio output device.
+Play, seek, and stop audio files on the default audio output device.
 Monitor playback status of playing files.
 
 ```rust no_run
 use std::{time::Duration, sync::mpsc::sync_channel};
 
 use phonic::{
-    DefaultOutputDevice, Player, PlaybackStatusEvent, Error, 
+    DefaultOutputDevice, Player, PlaybackStatusEvent, Error,
     FilePlaybackOptions, SynthPlaybackOptions
 };
 
@@ -64,18 +63,18 @@ fn main() -> Result<(), Error> {
     let (playback_status_sender, playback_status_receiver) = sync_channel(32);
     let mut player = Player::new(DefaultOutputDevice::open()?, playback_status_sender);
 
-    // Start playing a file: The file below is going to be "preloaded" because it uses the 
+    // Start playing a file: The file below is going to be "preloaded" because it uses the
     // default playback options. Preloaded means it's entirely decoded first, then played back
-    // from a decoded buffer. All files played through the player are automatically resampled 
+    // from a decoded buffer. All files played through the player are automatically resampled
     // and channel-mapped to match the audio output's signal specs.
     // Preloaded files can also be cheaply cloned, so they can be allocated once and played back
     // many times too. The returned handle allows changing playback properties of the files.
     let small_file = player.play_file(
         "PATH_TO/some_small_file.wav",
         FilePlaybackOptions::default())?;
-    
+
     // The next file is going to be decoded and streamed on the fly, which is especially handy
-    // for long files, as it can start playing right away and won't need to allocate memory 
+    // for long files, as it can start playing right away and won't need to allocate memory
     // for the entire file.
     let long_file = player.play_file(
         "PATH_TO/some_long_file.mp3",
@@ -91,8 +90,8 @@ fn main() -> Result<(), Error> {
         while let Ok(event) = playback_status_receiver.recv() {
             match event {
                 PlaybackStatusEvent::Position { id, path, context: _, position } => {
-                    // `context` is an optional, user defined payload, which can be passed
-                    // along to the status with `player.play_file_with_context` 
+                    // `context` is an optional, user-defined payload, which can be passed
+                    // along to the status with `player.play_file_with_context`
                     println!("Playback pos of source #{id} '{path}': {pos}",
                         pos = position.as_secs_f32()
                     );
@@ -109,14 +108,14 @@ fn main() -> Result<(), Error> {
     });
 
     // The returned handles allow controlling playback properties of playing files.
-    // The second args is an optional sample time, where `None` means immediately.
+    // The second arg is an optional sample time, where `None` means immediately.
     long_file.seek(Duration::from_secs(5), None)?;
 
     // Using Some sample time args, we can schedule changes (sample-accurate).
     let now = player.output_sample_frame_position();
     let samples_per_second = player.output_sample_rate() as u64;
 
-    // Use the handle's `is_playing` functions to check if a file is still playing.
+    // Use the handle's `is_playing` function to check if a file is still playing.
     if long_file.is_playing() {
         long_file.set_volume(0.3, now + samples_per_second)?; // Fade down after 1 second
         long_file.stop(now + 2 * samples_per_second)?;  // Stop after 2 seconds
@@ -131,13 +130,13 @@ fn main() -> Result<(), Error> {
 }
 ```
 
-#### File playback with DSP Effects in a Mixer Graph
+#### File Playback with DSP Effects in a Mixer Graph
 
 Create DSP graphs by routing sources through different mixers and effects.
 
 ```rust no_run
 use phonic::{
-    DefaultOutputDevice, Player, Error, FilePlaybackOptions, 
+    DefaultOutputDevice, Player, Error, FilePlaybackOptions,
     effects::{ChorusEffect, ReverbEffect}
 };
 
@@ -156,7 +155,7 @@ fn main() -> Result<(), Error> {
     let chorus = player.add_effect(ChorusEffect::default(), chorus_mixer_id)?;
 
     // Effect parameters can be automated via the returned handles.
-    // The `None` arguments are optional sample times to schedule events. 
+    // The `None` arguments are optional sample times to schedule events.
     reverb.set_parameter(ReverbEffect::ROOM_SIZE_ID, 0.9f32, None)?;
     chorus.set_parameter_normalized(ChorusEffect::RATE_ID, 0.5, None)?;
 
@@ -180,7 +179,6 @@ fn main() -> Result<(), Error> {
 
 Patches are welcome! Please fork the latest git repository and create a feature or bugfix branch.
 
-
 ## License
 
-**phonic** is distributed under the terms of the [GNU Affero General Public License V3](https://www.gnu.org/licenses/agpl-3.0.html).
+phonic is distributed under the terms of the [GNU Affero General Public License V3](https://www.gnu.org/licenses/agpl-3.0.html).
