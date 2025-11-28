@@ -36,14 +36,17 @@ mod handles;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Unique ID for played back file, synth or generator sources.
+/// Unique source ID for played back file, synth or generator sources.
 pub type PlaybackId = usize;
 
-/// Unique ID for newly added mixers.
+/// Unique mixer ID for newly added mixers.
 pub type MixerId = usize;
 
 /// Unique ID for newly added effects.
 pub type EffectId = usize;
+
+/// Unique ID for individual sounds played in a generator.
+pub type NotePlaybackId = usize;
 
 // Playback handles for sources.
 pub use handles::{

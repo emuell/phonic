@@ -1,3 +1,5 @@
+//! Classic AHDSR envelope with optional curve scaling factors for attack, decay and release.
+
 use std::time::Duration;
 
 use crate::Error;

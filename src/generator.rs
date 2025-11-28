@@ -1,6 +1,10 @@
 //! Generator trait for sources that can be driven by sequencers.
 
-use std::sync::{mpsc::SyncSender, Arc};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc::SyncSender,
+    Arc,
+};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -9,7 +13,7 @@ use four_cc::FourCC;
 use crate::{
     parameter::{ClonableParameter, ParameterValueUpdate},
     source::Source,
-    Error, PlaybackId, PlaybackStatusEvent,
+    Error, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -21,34 +25,42 @@ pub mod fundsp;
 
 // -------------------------------------------------------------------------------------------------
 
+/// Generates a unique source id for a triggered note in a generator.
+pub(crate) fn unique_note_id() -> usize {
+    static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+    ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Events to start/stop, change playback properties or parameters **within** a [`Generator`].
 pub enum GeneratorPlaybackEvent {
     /// Trigger a note on event.
     NoteOn {
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         note: u8,
         volume: Option<f32>,
         panning: Option<f32>,
     },
     /// Trigger a note off event for a specific note playback.
-    NoteOff { note_playback_id: PlaybackId },
+    NoteOff { note_id: NotePlaybackId },
     /// Stop all currently playing notes.
     AllNotesOff,
 
     /// Set the speed/pitch of a specific note playback.
     SetSpeed {
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         speed: f64,
         glide: Option<f32>,
     },
     /// Set the volume of a specific note playback.
     SetVolume {
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         volume: f32,
     },
     /// Set the panning of a specific note playback.
     SetPanning {
-        note_playback_id: PlaybackId,
+        note_id: NotePlaybackId,
         panning: f32,
     },
 

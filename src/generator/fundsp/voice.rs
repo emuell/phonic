@@ -2,7 +2,7 @@ use fundsp::hacker32::*;
 
 use crate::{
     utils::buffer::{add_buffers, max_abs_sample},
-    PlaybackId,
+    NotePlaybackId,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -27,7 +27,7 @@ pub struct FunDspVoice {
     /// Shared variable for gate (note on/off)
     gate: Shared,
     /// Currently playing note's playback ID
-    playback_id: Option<PlaybackId>,
+    note_id: Option<NotePlaybackId>,
     /// Current note
     current_note: Option<u8>,
     /// Glide state for smooth frequency transitions
@@ -56,7 +56,7 @@ impl FunDspVoice {
             "Only mono or stereo voice units are supported"
         );
 
-        let playback_id = None;
+        let note_id = None;
         let current_note = None;
         let glide_state = None;
         let is_releasing = false;
@@ -70,7 +70,7 @@ impl FunDspVoice {
             volume,
             panning,
             gate,
-            playback_id,
+            note_id,
             current_note,
             glide_state,
             is_releasing,
@@ -81,15 +81,15 @@ impl FunDspVoice {
     }
 
     #[inline(always)]
-    pub fn playback_id(&self) -> Option<usize> {
-        self.playback_id
+    pub fn note_id(&self) -> Option<NotePlaybackId> {
+        self.note_id
     }
 
     #[inline(always)]
     pub fn is_active(&self) -> bool {
         // A voice is active if it has a playback ID (playing a note)
         // or if it's in its release phase (gate is off but sound is decaying)
-        self.playback_id.is_some() || self.is_releasing
+        self.note_id.is_some() || self.is_releasing
     }
 
     /// Returns true if the voice is in its release phase and has been silent for long enough.
@@ -111,8 +111,8 @@ impl FunDspVoice {
     }
 
     /// Start playback on the voice.
-    pub fn start(&mut self, playback_id: PlaybackId, note: u8, volume: f32, panning: f32) {
-        self.playback_id = Some(playback_id);
+    pub fn start(&mut self, note_id: NotePlaybackId, note: u8, volume: f32, panning: f32) {
+        self.note_id = Some(note_id);
         let freq = crate::utils::pitch_from_note(note);
         self.frequency.set_value(freq as f32);
         self.volume.set_value(volume);
@@ -128,7 +128,7 @@ impl FunDspVoice {
 
     /// Stop voice, starting fadeout.
     pub fn stop(&mut self, current_sample_frame: u64) {
-        if self.playback_id.is_some() {
+        if self.note_id.is_some() {
             self.gate.set_value(0.0); // Gate off - envelope will fade out
             self.is_releasing = true; // Mark as releasing
             self.silence_samples_count = 0; // Reset silence counter
@@ -138,7 +138,7 @@ impl FunDspVoice {
 
     /// Stop voice after a fadeout or brute force kill it.
     pub fn kill(&mut self) {
-        self.playback_id = None; // Free up the voice
+        self.note_id = None; // Free up the voice
         self.current_note = None;
         self.is_releasing = false;
         self.silence_samples_count = 0;

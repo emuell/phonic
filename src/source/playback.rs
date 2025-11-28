@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use crossbeam_queue::ArrayQueue;
 
-use super::{
-    amplified::AmplifiedSourceMessage, file::FilePlaybackMessage,
-    generator::GeneratorPlaybackMessage, panned::PannedSourceMessage, synth::SynthPlaybackMessage,
-};
 use crate::Error;
+
+use super::{
+    super::generator::GeneratorPlaybackMessage, amplified::AmplifiedSourceMessage,
+    file::FilePlaybackMessage, panned::PannedSourceMessage, synth::SynthPlaybackMessage,
+};
 
 // -------------------------------------------------------------------------------------------------
 

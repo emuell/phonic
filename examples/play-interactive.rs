@@ -13,9 +13,9 @@ use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 
 use phonic::{
     effects::{self, FilterEffectType},
-    sources::generators::{FunDspGenerator, Sampler},
+    generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
-    Error, FilePlaybackOptions, GeneratorPlaybackHandle, MixerId, PlaybackId, Player,
+    Error, FilePlaybackOptions, GeneratorPlaybackHandle, MixerId, NotePlaybackId, Player,
     ResamplingQuality,
 };
 
@@ -141,7 +141,9 @@ fn main() -> Result<(), Error> {
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
 
     // create global playback state
-    let playing_notes = Arc::new(Mutex::new(HashMap::<Keycode, (PlayMode, PlaybackId)>::new()));
+    let playing_notes = Arc::new(Mutex::new(
+        HashMap::<Keycode, (PlayMode, NotePlaybackId)>::new(),
+    ));
     let current_playmode = Arc::new(Mutex::new(PlayMode::Synth));
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
@@ -358,7 +360,7 @@ fn handle_note_on(
     note: u8,
     playmode: PlayMode,
     _mixer_id: MixerId,
-) -> PlaybackId {
+) -> NotePlaybackId {
     if playmode == PlayMode::Synth {
         synth_generator
             .note_on(note, Some(0.5), None, None)
@@ -374,7 +376,7 @@ fn handle_note_off(
     synth_generator: &GeneratorPlaybackHandle,
     sampler_generator: &GeneratorPlaybackHandle,
     playmode: PlayMode,
-    note_id: PlaybackId,
+    note_id: NotePlaybackId,
 ) {
     if playmode == PlayMode::Synth {
         let _ = synth_generator.note_off(note_id, None);
