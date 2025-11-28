@@ -2,14 +2,13 @@
 
 use std::{cell::RefCell, collections::HashMap, ffi};
 
-use dasp::{signal, Frame, Signal};
 use emscripten_rs_sys::emscripten_request_animation_frame_loop;
 use four_cc::FourCC;
 use serde::Serialize;
 
 use phonic::{
     effects,
-    sources::{DaspSynthSource, PreloadedFileSource},
+    sources::PreloadedFileSource,
     utils::{db_to_linear, pitch_from_note, speed_from_note},
     DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions, MixerId,
     Parameter, ParameterType, Player, SynthPlaybackHandle, SynthPlaybackOptions,
@@ -158,44 +157,18 @@ impl App {
         })
     }
 
-    // Create a new synth source for the given note
-    fn create_synth_source(
-        &self,
-        note: u8,
-    ) -> Result<DaspSynthSource<impl Signal<Frame = f64>>, Error> {
-        let sample_rate = self.player.output_sample_rate();
-        let pitch = pitch_from_note(note);
-        let duration_in_ms = 1000;
-        let duration_in_samples = (sample_rate as f64 / duration_in_ms as f64 * 1000.0) as usize;
-        // stack up slightly detuned sine waves
-        let fundamental = signal::rate(sample_rate as f64).const_hz(pitch);
-        let harmonic_l1 = signal::rate(sample_rate as f64).const_hz(pitch * 2.01);
-        let harmonic_h1 = signal::rate(sample_rate as f64).const_hz(pitch / 2.02);
-        let harmonic_h2 = signal::rate(sample_rate as f64).const_hz(pitch / 4.04);
-        // combine them, limit duration and apply a fade-out envelope
-        let signal = signal::from_iter(
-            fundamental
-                .sine()
-                .add_amp(harmonic_l1.sine().scale_amp(0.5))
-                .add_amp(harmonic_h1.sine().scale_amp(0.5))
-                .add_amp(harmonic_h2.sine().scale_amp(0.5))
-                .take(duration_in_samples)
-                .zip(0..duration_in_samples)
-                .map(move |(s, index)| {
-                    let env: f64 = (1.0 - (index as f64) / (duration_in_samples as f64)).powf(2.0);
-                    (s * env).to_float_frame()
-                }),
-        );
-        let options = SynthPlaybackOptions::default()
-            .volume_db(-6.0)
-            .target_mixer(self.synth_mixer_id);
-        DaspSynthSource::new(
-            signal,
-            format!("Synth Note #{}", note).as_str(),
-            options,
-            sample_rate,
-            None,
-        )
+    // Create a new synth source.
+    fn create_synth_note(note: u8) -> Box<dyn fundsp::audiounit::AudioUnit> {
+        use fundsp::hacker32::*;
+        let freq = shared(pitch_from_note(note) as f32);
+        let fundamental = var(&freq) >> sine();
+        let harmonic_l1 = (var(&freq) * 2.01) >> sine();
+        let harmonic_h1 = (var(&freq) * 0.51) >> sine();
+        let harmonic_h2 = (var(&freq) * 0.249) >> sine();
+        let summed =
+            (fundamental + harmonic_l1 * 0.5 + harmonic_h1 * 0.5 + harmonic_h2 * 0.5) * 0.3;
+        let envelope = adsr_live(0.001, 0.1, 0.7, 0.5);
+        Box::new(envelope * summed)
     }
 
     // Schedule synth note on for playback
@@ -204,10 +177,11 @@ impl App {
             let _ = playing_note.stop(None);
             self.playing_synth_notes.remove(&note);
         }
-        if let Ok(playing_note) = self
-            .player
-            .play_synth_source(self.create_synth_source(note).unwrap(), None)
-        {
+        if let Ok(playing_note) = self.player.play_fundsp_synth(
+            "synth_note",
+            Self::create_synth_note(note),
+            SynthPlaybackOptions::default().target_mixer(self.synth_mixer_id),
+        ) {
             self.playing_synth_notes.insert(note, playing_note);
         }
     }

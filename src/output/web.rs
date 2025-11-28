@@ -1,4 +1,4 @@
-#[cfg(feature = "assert_no_alloc")]
+#[cfg(feature = "assert-allocs")]
 use assert_no_alloc::*;
 
 use std::{
@@ -377,11 +377,11 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
                         / state.source.channel_count().max(1) as u64,
                     pos_instant: state.playback_pos_instant,
                 };
-                #[cfg(not(feature = "assert_no_alloc"))]
+                #[cfg(not(feature = "assert-allocs"))]
                 {
                     state.source.write(&mut output[..output_samples], &time)
                 }
-                #[cfg(feature = "assert_no_alloc")]
+                #[cfg(feature = "assert-allocs")]
                 {
                     assert_no_alloc(|| state.source.write(&mut output[..output_samples], &time))
                 }

@@ -165,12 +165,13 @@ pub mod sources {
         streamed::StreamedFileSource,
         FilePlaybackMessage,
     };
-    #[cfg(feature = "dasp")]
-    pub use super::source::synth::dasp::DaspSynthSource;
     pub use super::source::synth::{
         common::{SynthSourceGenerator, SynthSourceImpl},
         SynthPlaybackMessage,
     };
+
+    #[cfg(feature = "fundsp")]
+    pub use super::source::synth::fundsp::FunDspSynthSource;
 
     pub mod generators {
         //! Set of basic, common [`Generator`](crate::Generator) source implementations.

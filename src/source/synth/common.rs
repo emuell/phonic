@@ -22,10 +22,14 @@ use crate::{
 
 /// A generic sample generator for [`SynthSourceImpl`].
 pub trait SynthSourceGenerator {
+    /// Returns true when output is silent oan no more generate calls are required.
+    fn is_exhausted(&self) -> bool;
+
+    /// The generator produces sample frames with this number of channels.
+    fn channel_count(&self) -> usize;
+
     /// Fill passed output with generated samples and return samples generated.
     fn generate(&mut self, output: &mut [f32]) -> usize;
-    /// returns true when output is silent oan no more generate calls are required.
-    fn is_exhausted(&self) -> bool;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -37,6 +41,7 @@ where
 {
     generator: Box<Generator>,
     sample_rate: u32,
+    channel_count: usize,
     volume_fader: VolumeFader,
     playback_message_queue: Arc<ArrayQueue<SynthPlaybackMessage>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
@@ -53,20 +58,19 @@ impl<Generator> SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync,
 {
-    const CHANNEL_COUNT: usize = 1;
-
     #[allow(dead_code)]
     pub fn new(
-        generator: Generator,
         generator_name: &str,
+        generator: Generator,
         options: SynthPlaybackOptions,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         sample_rate: u32,
-        event_send: Option<SyncSender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // validate options
         options.validate()?;
+        let channel_count = generator.channel_count();
         // create volume fader
-        let mut volume_fader = VolumeFader::new(Self::CHANNEL_COUNT, sample_rate);
+        let mut volume_fader = VolumeFader::new(channel_count, sample_rate);
         if let Some(duration) = options.fade_in_duration {
             volume_fader.start_fade_in(duration);
         }
@@ -74,9 +78,10 @@ where
         Ok(Self {
             generator: Box::new(generator),
             sample_rate,
+            channel_count,
             volume_fader,
             playback_message_queue,
-            playback_status_send: event_send,
+            playback_status_send,
             playback_id: unique_source_id(),
             playback_status_context: None,
             playback_name: Arc::new(generator_name.to_string()),
@@ -98,7 +103,7 @@ where
     }
 
     fn samples_to_duration(&self, samples: u64) -> Duration {
-        let frames = samples / Self::CHANNEL_COUNT as u64;
+        let frames = samples / self.channel_count as u64;
         let seconds = frames as f64 / self.sample_rate as f64;
         Duration::from_millis((seconds * 1000.0) as u64)
     }
@@ -216,7 +221,7 @@ where
     }
 
     fn channel_count(&self) -> usize {
-        Self::CHANNEL_COUNT
+        self.channel_count
     }
 
     fn sample_rate(&self) -> u32 {
