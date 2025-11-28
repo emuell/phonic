@@ -9,21 +9,20 @@ use std::{
     time::Duration,
 };
 
-use dasp::{signal, Signal};
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use lazy_static::lazy_static;
 
 use phonic::{
     effects::{self, FilterEffectType},
-    sources::{DaspSynthSource, PreloadedFileSource},
+    sources::{FunDspSynthSource, PreloadedFileSource},
     utils::{pitch_from_note, speed_from_note},
     Error, FilePlaybackOptions, MixerId, Player, ResamplingQuality, SourcePlaybackHandle,
-    SynthPlaybackOptions,
+    SynthPlaybackOptions, SynthSource,
 };
 
 // -------------------------------------------------------------------------------------------------
 
-#[cfg(all(debug_assertions, feature = "assert_no_alloc"))]
+#[cfg(all(debug_assertions, feature = "assert-allocs"))]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
@@ -32,6 +31,8 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // Common example code
 #[path = "./common/arguments.rs"]
 mod arguments;
+
+// -------------------------------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------------------------------
 
@@ -123,7 +124,7 @@ fn main() -> Result<(), Error> {
     println!("  Arrow 'up/down' keys change the current octave.");
     println!("  Arrow 'left/right' to seek through the loop sample");
     println!();
-    println!("  To play a dasp signal synth, hit key '1'. For a sample based synth hit key '2'.");
+    println!("  To play a funDSP signal synth, hit key '1'. For a sample based synth hit key '2'.");
     println!();
     println!("  Alt + Arrow 'left/right' to change filter cutoff frequency.");
     println!("  Alt + 1,2,3,4 to change filter type (LP,BP,BR,HP).");
@@ -356,35 +357,35 @@ fn create_synth_source(
     note: u8,
     options: SynthPlaybackOptions,
     sample_rate: u32,
-) -> Result<DaspSynthSource<impl Signal<Frame = f64>>, Error> {
-    let pitch = pitch_from_note(note);
-    let duration_in_ms = 1000;
-    let duration_in_samples = (sample_rate as f64 / duration_in_ms as f64 * 1000.0) as usize;
-    // stack up slightly detuned sine waves
-    let fundamental = signal::rate(sample_rate as f64).const_hz(pitch);
-    let harmonic_l1 = signal::rate(sample_rate as f64).const_hz(pitch * 2.01);
-    let harmonic_h1 = signal::rate(sample_rate as f64).const_hz(pitch / 2.02);
-    let harmonic_h2 = signal::rate(sample_rate as f64).const_hz(pitch / 4.04);
-    // combine them, limit duration and apply a fade-out envelope
-    let signal = signal::from_iter(
-        fundamental
-            .sine()
-            .add_amp(harmonic_l1.sine().scale_amp(0.5))
-            .add_amp(harmonic_h1.sine().scale_amp(0.5))
-            .add_amp(harmonic_h2.sine().scale_amp(0.5))
-            .take(duration_in_samples)
-            .zip(0..duration_in_samples)
-            .map(move |(s, index)| {
-                let env: f64 = (1.0 - (index as f64) / (duration_in_samples as f64)).powf(2.0);
-                s * env
-            }),
-    );
-    DaspSynthSource::new(
-        signal,
+) -> Result<impl SynthSource, Error> {
+    FunDspSynthSource::new(
         format!("Synth Note #{note}").as_str(),
+        {
+            use fundsp::hacker32::*;
+            let pitch = pitch_from_note(note) as f32;
+            // Synth voice with detuned harmonics
+            let synth = 
+                // Fundamental
+                sine_hz(pitch)
+                // Lower octave harmonics (detuned)
+                + sine_hz(pitch / 2.02) * 0.5
+                + sine_hz(pitch / 4.04) * 0.5
+                // Upper harmonic (detuned)
+                + sine_hz(pitch * 2.01) * 0.5;
+            // Envelope
+            let duration_in_ms = 1000.0_f32;
+            let env = An(Envelope::new(duration_in_ms / 1000.0, 
+                move |t| {
+                   let progress = t / (duration_in_ms / 1000.0);
+                   (1.0 - progress).powf(2.0)
+               }
+           ));
+           // Final unit is the synth voice with envelope
+           Box::new(synth * env)
+        },
         options,
-        sample_rate,
         None,
+        sample_rate,
     )
 }
 

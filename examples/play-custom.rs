@@ -14,7 +14,7 @@ use phonic::{
 
 // -------------------------------------------------------------------------------------------------
 
-#[cfg(all(debug_assertions, feature = "assert_no_alloc"))]
+#[cfg(all(debug_assertions, feature = "assert-allocs"))]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
@@ -167,6 +167,9 @@ impl SineSynth {
 }
 
 impl SynthSourceGenerator for SineSynth {
+    fn channel_count(&self) -> usize {
+        1
+    }
     fn is_exhausted(&self) -> bool {
         self.samples_left == 0
     }
@@ -279,13 +282,13 @@ fn main() -> Result<(), Error> {
 
             // Create our custom synth source for the current note
             let bass = SineSynthSource::new(
+                "sine_synth",
                 SineSynth::new(*note, note_duration_samples, samples_per_sec),
-                "sin_synth",
                 SynthPlaybackOptions::default()
                     .volume_db(-5.0)
                     .target_mixer(bass_mixer_id),
-                samples_per_sec,
                 None,
+                samples_per_sec,
             )?;
             player.play_synth_source(bass, sample_time)?;
 

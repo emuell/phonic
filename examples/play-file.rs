@@ -7,7 +7,7 @@ use phonic::{utils::speed_from_note, Error, FilePlaybackOptions, PlaybackStatusE
 
 // -------------------------------------------------------------------------------------------------
 
-#[cfg(all(debug_assertions, feature = "assert_no_alloc"))]
+#[cfg(all(debug_assertions, feature = "assert-allocs"))]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 

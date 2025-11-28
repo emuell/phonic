@@ -101,8 +101,6 @@ impl Drop for PlayingSource {
 /// playing a source, you can specify a `target_mixer` in the playback options to direct its output
 /// to a specific sub-mixer. This allows for parallel processing paths, such as applying different
 /// effects to different groups of sounds.
-///
-/// NB: For playback of [`SynthSource`]s, the `dasp-synth` feature needs to be enabled.
 pub struct Player {
     output_device: Box<dyn OutputDevice>,
     playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,

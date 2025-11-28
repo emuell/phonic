@@ -9,75 +9,58 @@
       "request": "launch",
       "name": "Debug example 'play-file'",
       "cargo": {
-        "args": [
-          "build",
-          "--example=play-file",
-        ]
+        "args": ["build", "--example=play-file"]
       },
       "args": [
         // "--output", "output.wav"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "Debug example 'play-synth'",
       "cargo": {
-        "args": [
-          "build",
-          "--example=play-synth",
-          "--features=dasp-synth",
-        ]
+        "args": ["build", "--example=play-synth", "--features=fundsp"]
       },
       "args": [
         // "--output", "output.wav"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "Debug example 'play-sequence'",
       "cargo": {
-        "args": [
-          "build",
-          "--example=play-sequence",
-        ]
+        "args": ["build", "--example=play-sequence"]
       },
       "args": [
         // "--output", "output.wav"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "Debug example 'play-custom'",
       "cargo": {
-        "args": [
-          "build",
-          "--example=play-custom"
-        ]
+        "args": ["build", "--example=play-custom"]
       },
       "args": [
         // "--output", "output.wav"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "Debug example 'play-interactive'",
       "cargo": {
-        "args": [
-          "build",
-          "--example=play-interactive",
-          "--features=dasp-synth",
-        ]
+        "args": ["build", "--example=play-interactive", "--features=fundsp"]
       },
       "args": [],
-      "cwd": "${workspaceFolder}",
-    },
+      "cwd": "${workspaceFolder}"
+    }
   ]
 }

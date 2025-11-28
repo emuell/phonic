@@ -18,8 +18,8 @@ use crate::{
 
 pub mod common;
 
-#[cfg(feature = "dasp")]
-pub mod dasp;
+#[cfg(feature = "fundsp")]
+pub mod fundsp;
 
 // -------------------------------------------------------------------------------------------------
 

@@ -25,7 +25,6 @@ log = { version = "^0.4", features = [
 
 strum = { version = "^0.27", default-features = false, features = ["derive"] }
 four-cc = { version = "^0.4", default-features = false }
-lazy_static = { version = "^1.4" }
 crossbeam-queue = { version = "^0.3", default-features = false, features = [
     "alloc",
 ] }
@@ -52,7 +51,7 @@ riff = { version = "^2.0" }
 assert_no_alloc = { version = "^1.1", features = [
     "warn_debug",
 ], optional = true }
-dasp = { version = "^0.11", features = ["signal"], optional = true }
+fundsp = { version = "^0.20", optional = true, default-features = false }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
 
@@ -73,21 +72,24 @@ svg = { version = "^0.18" }
 [profile.release]
 debug = 1 # debug info for profiling
 
+# enable optimization for slow DSP packages in debug builds
 [profile.dev.package.rubato]
-opt-level = 2 # enable optimization for slow DSP packages in debug builds
+opt-level = 2
+[profile.dev.package.fundsp]
+opt-level = 2
 
 [features]
-assert-allocs = ["assert_no_alloc"]
-cpal-output = ["cpal"]
-wav-output = ["hound"]
+assert-allocs = ["dep:assert_no_alloc"]
+cpal-output = ["dep:cpal"]
+wav-output = ["dep:hound"]
 web-output = []
-dasp-synth = ["dasp"]
-default = ["cpal-output", "wav-output", "dasp-synth", "assert-allocs"]
+fundsp = ["dep:fundsp"]
+default = ["cpal-output", "wav-output", "fundsp", "assert-allocs"]
 
 [package.metadata.docs.rs]
 # don't include "web-audio" here: it fails to compile at docs.rs because of emscripten
 no-default-features = true
-features = ["cpal-output", "wav-output", "dasp-synth"]
+features = ["cpal-output", "wav-output", "fundsp"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
@@ -95,10 +97,10 @@ name = "play-file"
 required-features = ["wav-output"]
 [[example]]
 name = "play-synth"
-required-features = ["wav-output", "dasp-synth"]
+required-features = ["wav-output", "fundsp"]
 [[example]]
 name = "play-interactive"
-required-features = ["wav-output", "dasp-synth"]
+required-features = ["wav-output", "fundsp"]
 [[example]]
 name = "play-custom"
 required-features = ["wav-output"]

@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-#[cfg(feature = "assert_no_alloc")]
+#[cfg(feature = "assert-allocs")]
 use assert_no_alloc::*;
 
 use cpal::{
@@ -515,9 +515,9 @@ impl StreamCallback {
             pos_instant: self.playback_pos_instant,
         };
         // Write out as many samples as possible from the audio source to the output buffer.
-        #[cfg(not(feature = "assert_no_alloc"))]
+        #[cfg(not(feature = "assert-allocs"))]
         let written = self.source.write(output, &time);
-        #[cfg(feature = "assert_no_alloc")]
+        #[cfg(feature = "assert-allocs")]
         let written = assert_no_alloc(|| self.source.write(output, &time));
         // Apply the global volume level
         apply_smoothed_gain(&mut output[..written], &mut self.volume);
