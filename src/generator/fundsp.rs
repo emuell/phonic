@@ -61,6 +61,7 @@ pub struct FunDspGenerator {
     playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     voices: Vec<FunDspVoice>,
+    active_voices: usize,
     shared_parameters: HashMap<FourCC, FunDspFloatParameterValue>,
     stopping: bool, // True if stop has been called and we are waiting for voices to decay
     stopped: bool,  // True if all voices have decayed after a stop call
@@ -132,6 +133,7 @@ impl FunDspGenerator {
                 output_sample_rate,
             ));
         }
+        let active_voices = 0;
 
         let shared_parameters = HashMap::new();
 
@@ -144,6 +146,7 @@ impl FunDspGenerator {
             playback_message_queue,
             playback_status_send,
             voices,
+            active_voices,
             shared_parameters,
             stopping,
             stopped,
@@ -250,6 +253,7 @@ impl FunDspGenerator {
                 output_sample_rate,
             ));
         }
+        let active_voices = 0;
 
         let stopping = false;
         let stopped = false;
@@ -260,6 +264,7 @@ impl FunDspGenerator {
             playback_message_queue,
             playback_status_send,
             voices,
+            active_voices,
             shared_parameters,
             stopping,
             stopped,
@@ -306,6 +311,13 @@ impl FunDspGenerator {
         candidate_index
     }
 
+    fn stop(&mut self, current_sample_frame: u64) {
+        // Mark source as about to stop
+        self.stopping = true;
+        // Stop all active voices, if any
+        self.trigger_all_notes_off(current_sample_frame);
+    }
+
     fn trigger_note_on(
         &mut self,
         note_id: NotePlaybackId,
@@ -317,6 +329,8 @@ impl FunDspGenerator {
         let voice_index = self.next_free_voice_index(current_sample_frame);
         let voice = &mut self.voices[voice_index];
         voice.start(note_id, note, volume.unwrap_or(1.0), panning.unwrap_or(0.0));
+        // Ensure we're checking in the upcoming `write` if any voice needs processing.
+        self.active_voices += 1;
     }
 
     fn trigger_note_off(&mut self, note_id: NotePlaybackId, current_sample_frame: u64) {
@@ -326,6 +340,14 @@ impl FunDspGenerator {
             .find(|v| v.note_id() == Some(note_id))
         {
             voice.stop(current_sample_frame);
+            // NB: do not modify `active_voices` here: it's updated in `write`.
+        }
+    }
+
+    fn trigger_all_notes_off(&mut self, current_sample_frame: u64) {
+        for voice in &mut self.voices {
+            voice.stop(current_sample_frame);
+            // NB: do not modify `active_voices` here: it's updated in `write`.
         }
     }
 
@@ -363,19 +385,14 @@ impl FunDspGenerator {
         while let Some(message) = self.playback_message_queue.pop() {
             match message {
                 GeneratorPlaybackMessage::Stop => {
-                    self.stopping = true; // Mark generator as stopping
-                    for voice in &mut self.voices {
-                        voice.stop(current_sample_frame); // Trigger release for all voices
-                    }
+                    self.stop(current_sample_frame);
                 }
                 GeneratorPlaybackMessage::Trigger { event } => {
                     // Ignore all events while stopping
                     if !self.stopping {
                         match event {
                             GeneratorPlaybackEvent::AllNotesOff => {
-                                for voice in &mut self.voices {
-                                    voice.stop(current_sample_frame);
-                                }
+                                self.trigger_all_notes_off(current_sample_frame);
                             }
                             GeneratorPlaybackEvent::NoteOn {
                                 note_id,
@@ -450,8 +467,8 @@ impl Source for FunDspGenerator {
         // Process pending messages, if any
         self.process_playback_messages(time.pos_in_frames);
 
-        // Return empty handle where we stopped
-        if self.stopped {
+        // Return empty handed when exhausted or when there are no active voices
+        if self.stopped || (self.active_voices == 0 && !self.stopping) {
             return 0;
         }
 
@@ -459,23 +476,22 @@ impl Source for FunDspGenerator {
         clear_buffer(output);
 
         // Mix all active voices
-        let mut active_voices_count = 0;
+        let mut active_voices = 0;
         for voice in &mut self.voices {
             if voice.is_active() {
-                // Process the entire voice using block processing
                 voice.process(output);
-                // Check if a releasing voice has become exhausted
-                if voice.is_exhausted() {
-                    voice.kill();
-                } else if voice.is_active() {
-                    // Count voices that are either playing or still decaying
-                    active_voices_count += 1;
+                if voice.is_active() {
+                    // count voices that are still active after processed
+                    active_voices += 1;
                 }
             }
         }
 
+        // Update `active_voices` based on the actual state
+        self.active_voices = active_voices;
+
         // If the generator was stopping and all voices become inactive report as stopped.
-        if self.stopping && active_voices_count == 0 {
+        if self.stopping && active_voices == 0 {
             self.stopped = true;
             if let Some(sender) = &self.playback_status_send {
                 if let Err(err) = sender.send(PlaybackStatusEvent::Stopped {

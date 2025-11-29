@@ -190,8 +190,8 @@ impl FunDspVoice {
     }
 
     pub fn process(&mut self, output: &mut [f32]) {
-        const BLOCK_SIZE: usize = 64; // Block size for SIMD processing
-
+        // Process in SIMD friendly blocks as long as possible
+        const BLOCK_SIZE: usize = 64;
         let frame_count = output.len() / self.audio_unit.outputs();
         for block_start in (0..frame_count).step_by(BLOCK_SIZE) {
             let block_end = std::cmp::min(block_start + BLOCK_SIZE, frame_count);
@@ -200,7 +200,6 @@ impl FunDspVoice {
             if self.glide_state.is_some() {
                 self.update_glide(block_len);
             }
-
             match self.audio_unit.outputs() {
                 1 => {
                     // Mono processing
@@ -263,6 +262,10 @@ impl FunDspVoice {
                 }
                 _ => unreachable!("Expected mono or stereo funDSP voices"),
             }
+        }
+        // kill the voice when it got exhausted
+        if self.is_exhausted() {
+            self.kill();
         }
     }
 

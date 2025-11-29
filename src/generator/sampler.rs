@@ -37,6 +37,7 @@ pub struct Sampler {
     playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
     file_path: Arc<String>,
     voices: Vec<SamplerVoice>,
+    active_voices: usize,
     envelope_parameters: Option<AhdsrParameters>,
     active_parameters: Vec<Box<dyn ClonableParameter + Send + Sync>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
@@ -145,6 +146,7 @@ impl Sampler {
                     ))
                 })?;
         }
+        let active_voices = 0;
 
         // Collect active parameters
         let mut active_parameters = Vec::<Box<dyn ClonableParameter + Send + Sync>>::new();
@@ -175,6 +177,7 @@ impl Sampler {
             playback_status_send,
             file_path,
             voices,
+            active_voices,
             envelope_parameters,
             active_parameters,
             stopping,
@@ -238,10 +241,8 @@ impl Sampler {
     fn stop(&mut self, current_sample_frame: u64) {
         // Mark source as about to stop
         self.stopping = true;
-        // Stop all active voices
-        for voice in &mut self.voices {
-            voice.stop(&self.envelope_parameters, current_sample_frame);
-        }
+        // Stop all active voices, if any
+        self.trigger_all_notes_off(current_sample_frame);
     }
 
     /// Immediately trigger a note on (used by event processor)
@@ -262,6 +263,8 @@ impl Sampler {
             panning.unwrap_or(0.0),
             &self.envelope_parameters,
         );
+        // Ensure we're checking in the upcoming `write` if any voice needs processing.
+        self.active_voices += 1;
     }
 
     fn trigger_note_off(&mut self, note_id: NotePlaybackId, current_sample_frame: u64) {
@@ -271,12 +274,14 @@ impl Sampler {
             .find(|v| v.note_id() == Some(note_id))
         {
             voice.stop(&self.envelope_parameters, current_sample_frame);
+            // NB: do not modify `active_voices` here. it's updated in `write`
         }
     }
 
     fn trigger_all_notes_off(&mut self, current_sample_frame: u64) {
         for voice in &mut self.voices {
             voice.stop(&self.envelope_parameters, current_sample_frame);
+            // NB: do not modify `active_voices` here. it's updated in `write`
         }
     }
 
@@ -391,8 +396,8 @@ impl Source for Sampler {
         // Process playback messages
         self.process_playback_messages(time.pos_in_frames);
 
-        // Return empty handed when exhausted
-        if self.stopped {
+        // Return empty handed when exhausted or when there are no active voices
+        if self.stopped || (self.active_voices == 0 && !self.stopping) {
             return 0;
         }
 
@@ -403,7 +408,6 @@ impl Source for Sampler {
         let mut active_voices = 0;
         for voice in &mut self.voices {
             if voice.is_active() {
-                active_voices += 1;
                 assert!(self.temp_buffer.len() >= output.len());
                 let mix_buffer = &mut self.temp_buffer[..output.len()];
                 clear_buffer(mix_buffer);
@@ -414,8 +418,15 @@ impl Source for Sampler {
                     time,
                 );
                 add_buffers(&mut output[..written], &mix_buffer[..written]);
+                if voice.is_active() {
+                    // count voices that are still active after processed
+                    active_voices += 1;
+                }
             }
         }
+
+        // Update `active_voices` based on the actual state
+        self.active_voices = active_voices;
 
         // Send a stop message when we got requested to stop and are now exhausted
         if self.stopping && active_voices == 0 {

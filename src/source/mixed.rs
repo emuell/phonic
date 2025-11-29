@@ -518,9 +518,12 @@ impl MixedSource {
                 total_written += written;
                 produced_output |= written > 0;
 
-                // stop processing sources which are now exhausted
                 if source.is_exhausted() {
+                    // source is now exhausted: remove source
                     playing_source.is_active = false;
+                    break 'source;
+                } else if written == 0 {
+                    // source produced no output but is not exhausted: just skip processing for now
                     break 'source;
                 }
             }
