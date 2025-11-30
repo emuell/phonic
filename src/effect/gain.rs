@@ -20,7 +20,15 @@ pub struct GainEffect {
 
 impl GainEffect {
     pub const EFFECT_NAME: &str = "GainEffect";
-    pub const GAIN_ID: FourCC = FourCC(*b"gain");
+
+    pub const GAIN: FloatParameter = FloatParameter::new(
+        FourCC(*b"gain"),
+        "Gain",
+        0.000001..=15.848_932, // Self::MIN_DB..=Self::MAX_DB,
+        1.0,                   // 0dB
+    )
+    .with_unit("dB")
+    .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB));
 
     const MIN_DB: f32 = -60.0;
     const MAX_DB: f32 = 12.0;
@@ -46,15 +54,9 @@ impl GainEffect {
         Self {
             channel_count: 0,
             gain: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::GAIN_ID,
-                    "Gain",
-                    db_to_linear(Self::MIN_DB)..=db_to_linear(Self::MAX_DB),
-                    1.0, // 0dB = unity gain
-                )
-                .with_unit("dB")
-                .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB))
-                .with_display(gain_to_string, string_to_gain),
+                Self::GAIN
+                    .clone()
+                    .with_display(gain_to_string, string_to_gain),
             ),
         }
     }
@@ -119,7 +121,7 @@ impl Effect for GainEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::GAIN_ID => {
+            _ if id == Self::GAIN.id() => {
                 self.gain.apply_update(value);
                 Ok(())
             }

@@ -1,7 +1,6 @@
 use std::{fmt::Debug, fmt::Display, str::FromStr, sync::Arc};
 
 use four_cc::FourCC;
-use strum::IntoEnumIterator;
 
 use super::{Parameter, ParameterType, ParameterValueUpdate};
 
@@ -12,7 +11,7 @@ use super::{Parameter, ParameterType, ParameterValueUpdate};
 pub struct EnumParameter {
     id: FourCC,
     name: &'static str,
-    values: Vec<String>,
+    values: &'static [&'static str],
     default_index: usize,
     #[allow(clippy::type_complexity)]
     value_to_string: Option<Arc<dyn Fn(&String) -> String + Send + Sync>>,
@@ -34,14 +33,23 @@ impl Debug for EnumParameter {
 }
 
 impl EnumParameter {
-    /// Create a new enum parameter descriptor.
-    pub fn new<E: IntoEnumIterator + ToString + PartialEq>(
+    /// Create a new enum parameter descriptor from a static array of string slices.
+    ///
+    /// This constructor is `const` compatible, allowing enum parameters to be defined as constants.
+    ///
+    /// See also `Self::from_enum` for an alternative non const constructor which uses existing rust
+    /// enum definiitions via the strum crate.
+    pub const fn new(
         id: FourCC,
         name: &'static str,
-        default: E,
+        values: &'static [&'static str],
+        default_index: usize,
     ) -> Self {
-        let values = E::iter().map(|v| v.to_string()).collect::<Vec<_>>();
-        let default_index = E::iter().position(|r| r == default).unwrap_or(0);
+        assert!(!values.is_empty(), "EnumParameter values cannot be empty");
+        assert!(
+            default_index < values.len(),
+            "Default index out of bounds for EnumParameter"
+        );
         Self {
             id,
             name,
@@ -52,33 +60,20 @@ impl EnumParameter {
         }
     }
 
-    /// The parameter's default value.
-    pub fn default_value(&self) -> &String {
-        &self.values[self.default_index]
-    }
-
-    /// Clamp the given plain value to the parameter's range of valid enum values.
-    pub fn clamp_value(&self, value: String) -> String {
-        if self.values.contains(&value) {
-            value
-        } else {
-            self.default_value().clone()
-        }
-    }
-
-    /// Normalize the given plain value to a 0.0-1.0 range.
-    pub fn normalize_value(&self, value: &String) -> f32 {
-        if let Some(index) = self.values.iter().position(|v| v == value) {
-            return index as f32 / (self.values.len() - 1) as f32;
-        }
-        0.0
-    }
-
-    /// Denormalize a 0.0-1.0 ranged value to the corresponding plain value.
-    pub fn denormalize_value(&self, normalized: f32) -> &String {
-        assert!((0.0..=1.0).contains(&normalized));
-        let index = (normalized * (self.values.len() - 1) as f32).round() as usize;
-        &self.values[index]
+    /// Create a new enum parameter descriptor from a Rust enum type that implements
+    /// `strum::VariantNames`, `PartialEq` and `ToString`.
+    pub fn from_enum<E: strum::VariantNames + PartialEq + ToString>(
+        id: FourCC,
+        name: &'static str,
+        default_value: E,
+    ) -> Self {
+        let values = E::VARIANTS;
+        let default_string = default_value.to_string();
+        let default_index = values
+            .iter()
+            .position(|v| v == &default_string)
+            .expect("Failed to resolve enum default value");
+        Self::new(id, name, values, default_index)
     }
 
     /// Optional custom conversion functions to convert a plain value to a string and string
@@ -99,21 +94,54 @@ impl EnumParameter {
         self
     }
 
+    /// The parameter's identifier.
+    pub const fn id(&self) -> FourCC {
+        self.id
+    }
+
+    /// The parameter's default value.
+    pub const fn default_value(&self) -> &str {
+        self.values[self.default_index]
+    }
+
+    /// Clamp the given plain value to the parameter's set of valid enum values.
+    pub fn clamp_value<'a>(&self, value: &'a str) -> &'a str {
+        if self.values.contains(&value) {
+            value
+        } else {
+            self.values[self.default_index]
+        }
+    }
+
+    /// Normalize the given plain value to a 0.0-1.0 range.
+    pub fn normalize_value(&self, value: &str) -> f32 {
+        if let Some(index) = self.values.iter().position(|v| v == &value) {
+            return index as f32 / (self.values.len() - 1) as f32;
+        }
+        0.0
+    }
+
+    /// Denormalize a 0.0-1.0 ranged value to the corresponding plain value.
+    pub fn denormalize_value(&self, normalized: f32) -> &str {
+        assert!((0.0..=1.0).contains(&normalized));
+        let index = (normalized * (self.values.len() - 1) as f32).round() as usize;
+        self.values[index]
+    }
+
     /// Convert the given plain value to a string, using a custom conversion function if provided.
-    pub fn value_to_string(&self, value: &String) -> String {
+    pub fn value_to_string(&self, value: &str) -> String {
         match &self.value_to_string {
-            Some(f) => f(value),
-            None => value.clone(),
+            Some(f) => f(&value.to_owned()),
+            None => value.to_owned(),
         }
     }
 
     /// Convert the given string to a plain value, using a custom conversion function if provided.
     pub fn string_to_value(&self, string: &str) -> Option<String> {
-        let value = match &self.string_to_value {
-            Some(f) => f(string.trim()),
-            None => Some(string.trim().to_string()),
-        }?;
-        Some(self.clamp_value(value))
+        match &self.string_to_value {
+            Some(f) => f(string.trim()).map(|v| self.clamp_value(&v).to_owned()),
+            None => Some(self.clamp_value(string.trim()).to_owned()),
+        }
     }
 }
 
@@ -128,7 +156,7 @@ impl Parameter for EnumParameter {
 
     fn parameter_type(&self) -> ParameterType {
         ParameterType::Enum {
-            values: self.values.clone(),
+            values: self.values.iter().map(|v| v.to_string()).collect(),
         }
     }
 
@@ -158,14 +186,18 @@ pub struct EnumParameterValue<T: Clone> {
     value: T,
 }
 
-impl<T: Copy + Clone + FromStr + ToString + 'static> EnumParameterValue<T>
+impl<T: Clone> EnumParameterValue<T>
 where
-    <T as FromStr>::Err: Debug,
+    T: FromStr + 'static,
 {
     /// Create a new parameter value with the given parameter description, initialized to the
     /// parameter's default value.
-    pub fn from_description(description: EnumParameter) -> Self {
-        let value = T::from_str(description.default_value()).unwrap();
+    pub fn from_description(description: EnumParameter) -> Self
+    where
+        <T as FromStr>::Err: Debug,
+    {
+        let value = T::from_str(description.default_value())
+            .expect("Failed to convert default enum string value to the actual enum type");
         Self { value, description }
     }
 
@@ -183,7 +215,7 @@ where
     /// Access to the current value.
     #[inline(always)]
     pub fn value(&self) -> T {
-        self.value
+        self.value.clone()
     }
 
     /// Set a new value.
@@ -196,10 +228,10 @@ where
         match update {
             ParameterValueUpdate::Raw(raw) => {
                 if let Some(value) = raw.downcast_ref::<T>() {
-                    self.set_value(*value);
+                    self.value = value.clone();
                 } else if let Some(value_str) = raw.downcast_ref::<String>() {
                     if let Ok(value) = T::from_str(value_str) {
-                        self.set_value(value);
+                        self.value = value;
                     } else {
                         log::warn!(
                             "Invalid string value for enum parameter '{}'",
@@ -219,15 +251,20 @@ where
                     .denormalize_value(normalized.clamp(0.0, 1.0));
                 if let Ok(value) = T::from_str(value_str) {
                     self.set_value(value);
+                } else {
+                    log::warn!(
+                        "Invalid value string for enum parameter '{}'",
+                        self.description.id()
+                    );
                 }
             }
         }
     }
 }
 
-impl<T: Clone + FromStr + ToString> Display for EnumParameterValue<T>
+impl<T: Clone> Display for EnumParameterValue<T>
 where
-    <T as FromStr>::Err: Debug,
+    T: ToString,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value_str = self.value.to_string();

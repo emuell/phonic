@@ -43,26 +43,6 @@ impl BooleanParameter {
         }
     }
 
-    /// The parameter's default value.
-    pub fn default_value(&self) -> bool {
-        self.default
-    }
-
-    /// Normalize the given plain value to a 0.0-1.0 range.
-    pub fn normalize_value(&self, value: bool) -> f32 {
-        if value {
-            1.0
-        } else {
-            0.0
-        }
-    }
-
-    /// Denormalize a 0.0-1.0 ranged value to the corresponding plain value.
-    pub fn denormalize_value(&self, normalized: f32) -> bool {
-        assert!((0.0..=1.0).contains(&normalized));
-        normalized >= 0.5
-    }
-
     /// Optional custom conversion functions to convert the boolean value to a string
     /// and a string back to to a plain value.
     ///
@@ -78,6 +58,31 @@ impl BooleanParameter {
         self.value_to_string = Some(Arc::new(value_to_string));
         self.string_to_value = Some(Arc::new(string_to_value));
         self
+    }
+
+    /// The parameter's identifier.
+    pub const fn id(&self) -> FourCC {
+        self.id
+    }
+
+    /// The parameter's default value.
+    pub const fn default_value(&self) -> bool {
+        self.default
+    }
+
+    /// Normalize the given plain value to a 0.0-1.0 range.
+    pub const fn normalize_value(&self, value: bool) -> f32 {
+        if value {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Denormalize a 0.0-1.0 ranged value to the corresponding plain value.
+    pub fn denormalize_value(&self, normalized: f32) -> bool {
+        assert!((0.0..=1.0).contains(&normalized));
+        normalized >= 0.5
     }
 
     /// Convert the given plain value to a string, using a custom conversion function if provided.

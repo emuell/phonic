@@ -14,7 +14,7 @@ use crate::{
     parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
-    Error, Generator, NotePlaybackId, Parameter, PlaybackId, PlaybackStatusEvent,
+    Error, Generator, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------

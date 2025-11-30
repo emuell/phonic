@@ -1,7 +1,7 @@
 use std::{any::Any, f64::consts::PI};
 
 use four_cc::FourCC;
-use strum::{Display, EnumIter, EnumString};
+use strum::VariantNames;
 
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
@@ -43,7 +43,9 @@ impl EffectMessage for ChorusEffectMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// Filter type used in `ChorusEffect`.
-#[derive(Default, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
+#[derive(
+    Default, Clone, Copy, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 #[allow(unused)]
 pub enum ChorusEffectFilterType {
     #[default]
@@ -96,15 +98,69 @@ pub struct ChorusEffect {
 
 impl ChorusEffect {
     pub const EFFECT_NAME: &str = "ChorusEffect";
-    pub const RATE_ID: FourCC = FourCC(*b"rate");
-    pub const PHASE_ID: FourCC = FourCC(*b"phas");
-    pub const DEPTH_ID: FourCC = FourCC(*b"dpth");
-    pub const FEEDBACK_ID: FourCC = FourCC(*b"fdbk");
-    pub const DELAY_ID: FourCC = FourCC(*b"dlay");
-    pub const WET_ID: FourCC = FourCC(*b"wet_");
-    pub const FILTER_TYPE_ID: FourCC = FourCC(*b"fltt");
-    pub const FILTER_FREQ_ID: FourCC = FourCC(*b"fltf");
-    pub const FILTER_Q_ID: FourCC = FourCC(*b"fltq");
+
+    pub const RATE: FloatParameter = FloatParameter::new(
+        FourCC(*b"rate"),
+        "Rate",
+        0.01..=10.0,
+        1.0, //
+    )
+    .with_unit("Hz");
+    pub const PHASE: FloatParameter = FloatParameter::new(
+        FourCC(*b"phas"), //
+        "Phase",
+        0.0..=PI as f32,
+        PI as f32 / 2.0,
+    )
+    .with_unit("°");
+    pub const DEPTH: FloatParameter = FloatParameter::new(
+        FourCC(*b"dpth"),
+        "Depth",
+        0.0..=1.0,
+        0.25, //
+    )
+    .with_unit("%");
+    pub const FEEDBACK: FloatParameter = FloatParameter::new(
+        FourCC(*b"fdbk"),
+        "Feedback",
+        -1.0..=1.0,
+        0.5, //
+    )
+    .with_unit("%");
+    pub const DELAY: FloatParameter = FloatParameter::new(
+        FourCC(*b"dlay"),
+        "Delay",
+        0.0..=100.0,
+        12.0, //
+    )
+    .with_unit("ms");
+    pub const WET_MIX: FloatParameter = FloatParameter::new(
+        FourCC(*b"wet_"),
+        "Wet",
+        0.0..=1.0,
+        0.5, //
+    )
+    .with_unit("%");
+    pub const FILTER_TYPE: EnumParameter = EnumParameter::new(
+        FourCC(*b"fltt"),
+        "Filter Type",
+        ChorusEffectFilterType::VARIANTS,
+        0,
+    );
+    pub const FILTER_FREQ: FloatParameter = FloatParameter::new(
+        FourCC(*b"fltf"),
+        "Filter Freq",
+        20.0..=20000.0,
+        400.0, //
+    )
+    .with_unit("Hz")
+    .with_scaling(ParameterScaling::Exponential(2.5));
+    pub const FILTER_Q: FloatParameter = FloatParameter::new(
+        FourCC(*b"fltq"),
+        "Filter Q",
+        0.001..=4.0,
+        0.707, //
+    );
 
     const MAX_APPLIED_RANGE_IN_SAMPLES: f32 = 256.0;
     const MAX_APPLIED_DELAY_IN_MS: f32 = 100.0;
@@ -117,96 +173,38 @@ impl ChorusEffect {
         let to_string_degrees = |v: f32| v.to_degrees().round().to_string();
         let from_string_degrees = |v: &str| v.parse::<f32>().map(|f| f.to_radians()).ok();
 
-        let mut rate_smoother = LinearSmoothedValue::default();
-        rate_smoother.set_step(0.005);
-
-        let mut phase_smoother = LinearSmoothedValue::default();
-        phase_smoother.set_step(0.001);
-
-        let mut delay_smoother = LinearSmoothedValue::default();
-        delay_smoother.set_step(0.01);
-
         Self {
             sample_rate: 0,
             channel_count: 0,
 
-            rate: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::RATE_ID,
-                    "Rate",
-                    0.01..=10.0,
-                    1.0, //
-                )
-                .with_unit("Hz"),
-            )
-            .with_smoother(rate_smoother),
+            rate: SmoothedParameterValue::from_description(Self::RATE) //
+                .with_smoother(LinearSmoothedValue::default().with_step(0.005)),
             phase: SmoothedParameterValue::from_description(
-                FloatParameter::new(Self::PHASE_ID, "Phase", 0.0..=PI as f32, PI as f32 / 2.0)
-                    .with_unit("°")
+                Self::PHASE
+                    .clone()
                     .with_display(to_string_degrees, from_string_degrees),
             )
-            .with_smoother(phase_smoother),
+            .with_smoother(LinearSmoothedValue::default().with_step(0.001)),
             depth: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::DEPTH_ID,
-                    "Depth",
-                    0.0..=1.0,
-                    0.25, //
-                )
-                .with_unit("%")
-                .with_display(to_string_percent, from_string_percent),
+                Self::DEPTH
+                    .clone()
+                    .with_display(to_string_percent, from_string_percent),
             ),
             feedback: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::FEEDBACK_ID,
-                    "Feedback",
-                    -1.0..=1.0,
-                    0.5, //
-                )
-                .with_unit("%")
-                .with_display(to_string_percent, from_string_percent),
+                Self::FEEDBACK
+                    .clone()
+                    .with_display(to_string_percent, from_string_percent),
             ),
-            delay: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::DELAY_ID,
-                    "Delay",
-                    0.0..=100.0,
-                    12.0, //
-                )
-                .with_unit("ms"),
-            )
-            .with_smoother(delay_smoother),
+            delay: SmoothedParameterValue::from_description(Self::DELAY)
+                .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
             wet_mix: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::WET_ID,
-                    "Wet",
-                    0.0..=1.0,
-                    0.5, //
-                )
-                .with_unit("%")
-                .with_display(to_string_percent, from_string_percent),
+                Self::WET_MIX
+                    .clone()
+                    .with_display(to_string_percent, from_string_percent),
             ),
-            filter_type: EnumParameterValue::from_description(EnumParameter::new(
-                Self::FILTER_TYPE_ID,
-                "Filter Type",
-                ChorusEffectFilterType::Highpass,
-            )),
-            filter_freq: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::FILTER_FREQ_ID,
-                    "Filter Freq",
-                    20.0..=20000.0,
-                    400.0, //
-                )
-                .with_unit("Hz")
-                .with_scaling(ParameterScaling::Exponential(2.5)),
-            ),
-            filter_resonance: SmoothedParameterValue::from_description(FloatParameter::new(
-                Self::FILTER_Q_ID,
-                "Filter Q",
-                0.001..=4.0,
-                0.707, //
-            )),
+            filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
+            filter_freq: SmoothedParameterValue::from_description(Self::FILTER_FREQ),
+            filter_resonance: SmoothedParameterValue::from_description(Self::FILTER_Q),
 
             lfo_range: 0.0,
             current_phase: 0.0,
@@ -479,15 +477,15 @@ impl Effect for ChorusEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::RATE_ID => self.rate.apply_update(value),
-            Self::PHASE_ID => self.phase.apply_update(value),
-            Self::DEPTH_ID => self.depth.apply_update(value),
-            Self::FEEDBACK_ID => self.feedback.apply_update(value),
-            Self::DELAY_ID => self.delay.apply_update(value),
-            Self::WET_ID => self.wet_mix.apply_update(value),
-            Self::FILTER_TYPE_ID => self.filter_type.apply_update(value),
-            Self::FILTER_FREQ_ID => self.filter_freq.apply_update(value),
-            Self::FILTER_Q_ID => self.filter_resonance.apply_update(value),
+            _ if id == Self::RATE.id() => self.rate.apply_update(value),
+            _ if id == Self::PHASE.id() => self.phase.apply_update(value),
+            _ if id == Self::DEPTH.id() => self.depth.apply_update(value),
+            _ if id == Self::FEEDBACK.id() => self.feedback.apply_update(value),
+            _ if id == Self::DELAY.id() => self.delay.apply_update(value),
+            _ if id == Self::WET_MIX.id() => self.wet_mix.apply_update(value),
+            _ if id == Self::FILTER_TYPE.id() => self.filter_type.apply_update(value),
+            _ if id == Self::FILTER_FREQ.id() => self.filter_freq.apply_update(value),
+            _ if id == Self::FILTER_Q.id() => self.filter_resonance.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",
@@ -496,7 +494,7 @@ impl Effect for ChorusEffect {
             }
         };
         match id {
-            Self::FILTER_TYPE_ID => self
+            _ if id == Self::FILTER_TYPE.id() => self
                 .filter_coefficients
                 .set_filter_type(self.filter_type.value().into()),
             _ => Ok(()),

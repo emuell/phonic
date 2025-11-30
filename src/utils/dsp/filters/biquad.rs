@@ -1,13 +1,13 @@
 use std::{f32, f64};
 
-use strum::{Display, EnumIter, EnumString};
-
 use crate::Error;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Available filter types for the State Variable Filter.
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Display, EnumIter, EnumString)]
+/// Available filter types for the Biquad Filter.
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 #[allow(unused)]
 pub enum BiquadFilterType {
     #[default]

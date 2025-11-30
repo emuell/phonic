@@ -1,4 +1,5 @@
 use four_cc::FourCC;
+use strum::VariantNames;
 
 use crate::{
     effect::{Effect, EffectTime},
@@ -27,7 +28,13 @@ pub struct DcFilterEffect {
 
 impl DcFilterEffect {
     pub const EFFECT_NAME: &str = "DcFilterEffect";
-    pub const MODE_ID: FourCC = FourCC(*b"mode");
+
+    pub const MODE: EnumParameter = EnumParameter::new(
+        FourCC(*b"mode"),
+        "Mode",
+        DcFilterEffectMode::VARIANTS,
+        1, // DcFilterEffectMode::Default
+    );
 
     /// Creates a new `DcFilterEffect` with default parameter values.
     pub fn new() -> Self {
@@ -35,11 +42,7 @@ impl DcFilterEffect {
             channel_count: 0,
             sample_rate: 0,
             filters: Vec::new(),
-            mode: EnumParameterValue::from_description(EnumParameter::new(
-                Self::MODE_ID,
-                "Mode",
-                DcFilterEffectMode::Default,
-            )),
+            mode: EnumParameterValue::from_description(Self::MODE),
         }
     }
 
@@ -107,7 +110,7 @@ impl Effect for DcFilterEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::MODE_ID => self.mode.apply_update(value),
+            _ if id == Self::MODE.id() => self.mode.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",

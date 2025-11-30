@@ -12,7 +12,7 @@ use fundsp::hacker32::*;
 
 use phonic::{
     generators::shared_ahdsr, parameters::FloatParameter, Error, GeneratorPlaybackHandle,
-    Parameter, ParameterScaling,
+    ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------

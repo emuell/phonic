@@ -152,8 +152,21 @@ pub struct ReverbEffect {
 
 impl ReverbEffect {
     pub const EFFECT_NAME: &str = "Reverb";
-    pub const ROOM_SIZE_ID: FourCC = FourCC(*b"room");
-    pub const WET_ID: FourCC = FourCC(*b"wet ");
+
+    pub const ROOM_SIZE: FloatParameter = FloatParameter::new(
+        FourCC(*b"room"),
+        "Room Size",
+        0.0..=1.0,
+        0.6, //
+    )
+    .with_unit("%");
+    pub const WET: FloatParameter = FloatParameter::new(
+        FourCC(*b"wet "),
+        "Wet",
+        0.0..=1.0,
+        0.35, //
+    )
+    .with_unit("%");
 
     /// Creates a new `ReverbEffect` with default parameter values.
     pub fn new() -> Self {
@@ -190,24 +203,14 @@ impl ReverbEffect {
             sample_rate: 0,
             channel_count: 0,
             room_size: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::ROOM_SIZE_ID,
-                    "Room Size",
-                    0.0..=1.0,
-                    0.6, //
-                )
-                .with_unit("%")
-                .with_display(to_string_percent, from_string_percent),
+                Self::ROOM_SIZE
+                    .clone()
+                    .with_display(to_string_percent, from_string_percent),
             ),
             wet: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::WET_ID,
-                    "Wet",
-                    0.0..=1.0,
-                    0.35, //
-                )
-                .with_unit("%")
-                .with_display(to_string_percent, from_string_percent),
+                Self::WET
+                    .clone()
+                    .with_display(to_string_percent, from_string_percent),
             ),
             biquad_a_coefficients: BiquadFilterCoefficients::default(),
             biquad_a_l: BiquadFilter::default(),
@@ -792,8 +795,8 @@ impl Effect for ReverbEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::ROOM_SIZE_ID => self.room_size.apply_update(value),
-            Self::WET_ID => self.wet.apply_update(value),
+            _ if id == Self::ROOM_SIZE.id() => self.room_size.apply_update(value),
+            _ if id == Self::WET.id() => self.wet.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",

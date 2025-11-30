@@ -1,11 +1,11 @@
 //! DC removal filter.
 
-use strum::{Display, EnumIter, EnumString};
-
 // -------------------------------------------------------------------------------------------------
 
 /// DC filter modes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Display, EnumIter, EnumString)]
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 #[allow(unused)]
 pub enum DcFilterMode {
     /// ~1Hz cutoff: very gentle, might not remove all DC offset.

@@ -39,13 +39,54 @@ pub struct CompressorEffect {
 
 impl CompressorEffect {
     pub const EFFECT_NAME: &str = "CompressorEffect";
-    pub const THRESHOLD_ID: FourCC = FourCC(*b"thrs");
-    pub const RATIO_ID: FourCC = FourCC(*b"rato");
-    pub const ATTACK_ID: FourCC = FourCC(*b"attk");
-    pub const RELEASE_ID: FourCC = FourCC(*b"rels");
-    pub const MAKEUP_GAIN_ID: FourCC = FourCC(*b"gain");
-    pub const KNEE_ID: FourCC = FourCC(*b"knee");
-    pub const LOOKAHEAD_ID: FourCC = FourCC(*b"look");
+
+    pub const THRESHOLD: FloatParameter = FloatParameter::new(
+        FourCC(*b"thrs"),
+        "Threshold",
+        -60.0..=0.0,
+        -12.0, //
+    )
+    .with_unit("dB");
+    pub const RATIO: FloatParameter = FloatParameter::new(
+        FourCC(*b"rato"),
+        "Ratio",
+        1.0..=20.0,
+        8.0, //
+    );
+    pub const KNEE_WIDTH: FloatParameter = FloatParameter::new(
+        FourCC(*b"knee"), //
+        "Knee",
+        0.0..=12.0,
+        3.0,
+    );
+    pub const ATTACK_TIME: FloatParameter = FloatParameter::new(
+        FourCC(*b"attk"),
+        "Attack",
+        0.001..=0.5,
+        0.02, //
+    )
+    .with_unit("ms");
+    pub const RELEASE_TIME: FloatParameter = FloatParameter::new(
+        FourCC(*b"rels"),
+        "Release",
+        0.1..=2.0,
+        2.0, //
+    )
+    .with_unit("ms");
+    pub const MAKEUP_GAIN: FloatParameter = FloatParameter::new(
+        FourCC(*b"gain"),
+        "Makeup Gain",
+        -24.0..=24.0,
+        6.0, //
+    )
+    .with_unit("dB");
+    pub const LOOKAHEAD_TIME: FloatParameter = FloatParameter::new(
+        FourCC(*b"look"),
+        "Lookahead",
+        0.001..=0.2,
+        0.04, //
+    )
+    .with_unit("ms");
 
     const DEFAULT_LIMITER_THRESHOLD: f32 = -0.01;
 
@@ -72,66 +113,17 @@ impl CompressorEffect {
         Self {
             sample_rate: 0,
             channel_count: 0,
-            threshold: FloatParameterValue::from_description(
-                FloatParameter::new(
-                    Self::THRESHOLD_ID,
-                    "Threshold",
-                    -60.0..=0.0,
-                    -12.0, //
-                )
-                .with_unit("dB"),
-            ),
+            threshold: FloatParameterValue::from_description(Self::THRESHOLD),
             ratio: FloatParameterValue::from_description(
-                FloatParameter::new(
-                    Self::RATIO_ID,
-                    "Ratio",
-                    1.0..=20.0,
-                    8.0, //
-                )
-                .with_display(ratio_to_string, string_to_ratio),
+                Self::RATIO
+                    .clone()
+                    .with_display(ratio_to_string, string_to_ratio),
             ),
-            knee_width: FloatParameterValue::from_description(FloatParameter::new(
-                Self::KNEE_ID,
-                "Knee",
-                0.0..=12.0,
-                3.0,
-            )),
-            attack_time: FloatParameterValue::from_description(
-                FloatParameter::new(
-                    Self::ATTACK_ID,
-                    "Attack",
-                    0.001..=0.5,
-                    0.02, //
-                )
-                .with_unit("ms"),
-            ),
-            release_time: FloatParameterValue::from_description(
-                FloatParameter::new(
-                    Self::RELEASE_ID,
-                    "Release",
-                    0.1..=2.0,
-                    2.0, //
-                )
-                .with_unit("ms"),
-            ),
-            makeup_gain: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::MAKEUP_GAIN_ID,
-                    "Makeup Gain",
-                    -24.0..=24.0,
-                    6.0, //
-                )
-                .with_unit("dB"),
-            ),
-            lookahead_time: FloatParameterValue::from_description(
-                FloatParameter::new(
-                    Self::LOOKAHEAD_ID,
-                    "Lookahead",
-                    0.001..=0.2,
-                    0.04, //
-                )
-                .with_unit("ms"),
-            ),
+            knee_width: FloatParameterValue::from_description(Self::KNEE_WIDTH),
+            attack_time: FloatParameterValue::from_description(Self::ATTACK_TIME),
+            release_time: FloatParameterValue::from_description(Self::RELEASE_TIME),
+            makeup_gain: SmoothedParameterValue::from_description(Self::MAKEUP_GAIN),
+            lookahead_time: FloatParameterValue::from_description(Self::LOOKAHEAD_TIME),
             envelope_follower: EnvelopeFollower::default(),
             input_buffer: Vec::new(),
             delay_line: LookupDelayLine::<2>::default(),
@@ -332,13 +324,13 @@ impl Effect for CompressorEffect {
     ) -> Result<(), Error> {
         let old_lookahead = self.lookahead_time.value();
         match id {
-            Self::THRESHOLD_ID => self.threshold.apply_update(value),
-            Self::RATIO_ID => self.ratio.apply_update(value),
-            Self::KNEE_ID => self.knee_width.apply_update(value),
-            Self::ATTACK_ID => self.attack_time.apply_update(value),
-            Self::RELEASE_ID => self.release_time.apply_update(value),
-            Self::MAKEUP_GAIN_ID => self.makeup_gain.apply_update(value),
-            Self::LOOKAHEAD_ID => self.lookahead_time.apply_update(value),
+            _ if id == Self::THRESHOLD.id() => self.threshold.apply_update(value),
+            _ if id == Self::RATIO.id() => self.ratio.apply_update(value),
+            _ if id == Self::KNEE_WIDTH.id() => self.knee_width.apply_update(value),
+            _ if id == Self::ATTACK_TIME.id() => self.attack_time.apply_update(value),
+            _ if id == Self::RELEASE_TIME.id() => self.release_time.apply_update(value),
+            _ if id == Self::MAKEUP_GAIN.id() => self.makeup_gain.apply_update(value),
+            _ if id == Self::LOOKAHEAD_TIME.id() => self.lookahead_time.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",

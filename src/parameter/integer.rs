@@ -86,13 +86,18 @@ impl IntegerParameter {
         self
     }
 
+    /// The parameter's identifier.
+    pub const fn id(&self) -> FourCC {
+        self.id
+    }
+
     /// The parameter's value range.
-    pub fn range(&self) -> &RangeInclusive<i32> {
+    pub const fn range(&self) -> &RangeInclusive<i32> {
         &self.range
     }
 
     /// The parameter's default value.
-    pub fn default_value(&self) -> i32 {
+    pub const fn default_value(&self) -> i32 {
         self.default
     }
 

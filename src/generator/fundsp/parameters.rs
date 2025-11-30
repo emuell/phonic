@@ -1,4 +1,4 @@
-use crate::{parameters::FloatParameter, Parameter, ParameterValueUpdate};
+use crate::{parameters::FloatParameter, ParameterValueUpdate};
 
 use fundsp::hacker32::Shared;
 

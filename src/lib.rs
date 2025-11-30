@@ -62,7 +62,7 @@
 //!
 //!     // Change effect parameters via the returned handles.
 //!     // Schedule a parameter change 3 seconds from now (sample-accurate).
-//!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN_ID, 3.0, now + 3 * samples_per_sec);
+//!     limiter.set_parameter(CompressorEffect::MAKEUP_GAIN.id(), 3.0, now + 3 * samples_per_sec);
 //!
 //!     // Play a file and get a handle to control it.
 //!     let file = player.play_file("path/to/your/file.wav",

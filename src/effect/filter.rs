@@ -1,5 +1,5 @@
 use four_cc::FourCC;
-use strum::{Display, EnumIter, EnumString};
+use strum::VariantNames;
 
 use crate::{
     effect::{Effect, EffectTime},
@@ -18,7 +18,9 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 /// Filter type used in `FilterEffect`.
-#[derive(Default, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
+#[derive(
+    Default, Clone, Copy, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 #[allow(unused)]
 pub enum FilterEffectType {
     #[default]
@@ -55,9 +57,28 @@ pub struct FilterEffect {
 
 impl FilterEffect {
     pub const EFFECT_NAME: &str = "FilterEffect";
-    pub const TYPE_ID: FourCC = FourCC(*b"type");
-    pub const CUTOFF_ID: FourCC = FourCC(*b"cuto");
-    pub const Q_ID: FourCC = FourCC(*b"fltq");
+
+    pub const TYPE: EnumParameter = EnumParameter::new(
+        FourCC(*b"type"),
+        "Type",
+        FilterEffectType::VARIANTS,
+        0, // Default index for FilterEffectType::Lowpass
+    );
+    pub const CUTOFF: FloatParameter = FloatParameter::new(
+        FourCC(*b"cuto"),
+        "Cutoff",
+        20.0..=20000.0,
+        20000.0, //
+    )
+    .with_unit("Hz")
+    .with_scaling(ParameterScaling::Exponential(2.5));
+
+    pub const Q: FloatParameter = FloatParameter::new(
+        FourCC(*b"fltq"),
+        "Resonance",
+        0.001..=4.0,
+        0.707, //
+    );
 
     /// Creates a new `FilterEffect` with default parameter values.
     pub fn new() -> Self {
@@ -73,27 +94,9 @@ impl FilterEffect {
                 0.0,
             )
             .expect("Failed to create default filter"),
-            filter_type: EnumParameterValue::from_description(EnumParameter::new(
-                Self::TYPE_ID,
-                "Type",
-                FilterEffectType::Lowpass,
-            )),
-            cutoff: SmoothedParameterValue::from_description(
-                FloatParameter::new(
-                    Self::CUTOFF_ID,
-                    "Cutoff",
-                    20.0..=20000.0,
-                    20000.0, //
-                )
-                .with_unit("Hz")
-                .with_scaling(ParameterScaling::Exponential(2.5)),
-            ),
-            q: SmoothedParameterValue::from_description(FloatParameter::new(
-                Self::Q_ID,
-                "Resonance",
-                0.001..=4.0,
-                0.707, //
-            )),
+            filter_type: EnumParameterValue::from_description(Self::TYPE),
+            cutoff: SmoothedParameterValue::from_description(Self::CUTOFF),
+            q: SmoothedParameterValue::from_description(Self::Q),
         }
     }
 
@@ -204,9 +207,9 @@ impl Effect for FilterEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::TYPE_ID => self.filter_type.apply_update(value),
-            Self::CUTOFF_ID => self.cutoff.apply_update(value),
-            Self::Q_ID => self.q.apply_update(value),
+            _ if id == Self::TYPE.id() => self.filter_type.apply_update(value),
+            _ if id == Self::CUTOFF.id() => self.cutoff.apply_update(value),
+            _ if id == Self::Q.id() => self.q.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",
@@ -216,7 +219,7 @@ impl Effect for FilterEffect {
         };
 
         let result = match id {
-            Self::TYPE_ID => self
+            _ if id == Self::TYPE.id() => self
                 .filter_coefficients
                 .set_filter_type(self.filter_type.value().into()),
             _ => Ok(()),

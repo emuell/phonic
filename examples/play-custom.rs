@@ -35,17 +35,13 @@ struct TanhDistortion {
 
 impl TanhDistortion {
     const EFFECT_NAME: &str = "TanhDistortion";
-    const GAIN_ID: FourCC = FourCC(*b"gain");
+
+    const GAIN: FloatParameter = FloatParameter::new(FourCC(*b"gain"), "Gain", 0.0..=1.0, 0.7);
 
     fn new() -> Self {
         Self {
             channel_count: 0,
-            gain: SmoothedParameterValue::from_description(FloatParameter::new(
-                Self::GAIN_ID,
-                "Gain",
-                0.0..=1.0,
-                0.7,
-            )),
+            gain: SmoothedParameterValue::from_description(Self::GAIN),
         }
     }
 
@@ -109,7 +105,7 @@ impl Effect for TanhDistortion {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::GAIN_ID => {
+            _ if id == Self::GAIN.id() => {
                 self.gain.apply_update(value);
             }
             _ => return Err(Error::ParameterError(format!("Unknown parameter: {id}"))),
@@ -294,7 +290,7 @@ fn main() -> Result<(), Error> {
 
             // Set a new random Tanh dist gain with every note
             tanh_distortion.set_parameter(
-                TanhDistortion::GAIN_ID,
+                TanhDistortion::GAIN.id(),
                 rand::random_range(0.8..1.0),
                 sample_time,
             )?;

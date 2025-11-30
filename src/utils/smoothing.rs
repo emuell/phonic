@@ -142,10 +142,10 @@ impl ExponentialSmoothedValue {
     const UNINITIALIZED_SAMPLE_RATE_COMP: f32 = 44100.0 / Self::UNINITIALIZED_SAMPLE_RATE as f32;
 
     pub const fn new(value: f32, sample_rate: u32) -> Self {
-        Self::with_inertia(value, Self::DEFAULT_INERTIA, sample_rate)
+        Self::from_inertia(value, Self::DEFAULT_INERTIA, sample_rate)
     }
 
-    pub const fn with_inertia(value: f32, inertia: f32, sample_rate: u32) -> Self {
+    pub const fn from_inertia(value: f32, inertia: f32, sample_rate: u32) -> Self {
         assert!(inertia > 0.0 && inertia <= 1.0, "Invalid inertia");
         assert!(sample_rate > 0, "Invalid sample rate");
 
@@ -159,6 +159,11 @@ impl ExponentialSmoothedValue {
             inertia,
             sample_rate_comp,
         }
+    }
+
+    pub fn with_inertia(mut self, inertia: f32) -> Self {
+        self.set_inertia(inertia);
+        self
     }
 
     #[inline(always)]
@@ -256,10 +261,10 @@ impl LinearSmoothedValue {
     const UNINITIALIZED_SAMPLE_RATE_COMP: f32 = 44100.0 / Self::UNINITIALIZED_SAMPLE_RATE as f32;
 
     pub const fn new(value: f32, sample_rate: u32) -> Self {
-        Self::with_step(value, Self::DEFAULT_STEP, sample_rate)
+        Self::from_step(value, Self::DEFAULT_STEP, sample_rate)
     }
 
-    pub const fn with_step(value: f32, step: f32, sample_rate: u32) -> Self {
+    pub const fn from_step(value: f32, step: f32, sample_rate: u32) -> Self {
         assert!(step > 0.0, "Invalid step");
         assert!(sample_rate > 0, "Invalid sample rate");
 
@@ -277,6 +282,11 @@ impl LinearSmoothedValue {
             num_pending_steps,
             sample_rate_comp,
         }
+    }
+
+    pub fn with_step(mut self, step: f32) -> Self {
+        self.set_step(step);
+        self
     }
 
     #[inline(always)]
@@ -428,10 +438,10 @@ impl SigmoidSmoothedValue {
     const UNINITIALIZED_SAMPLE_RATE_COMP: f32 = 44100.0 / Self::UNINITIALIZED_SAMPLE_RATE as f32;
 
     pub const fn new(value: f32, sample_rate: u32) -> Self {
-        Self::with_duration(value, Self::DEFAULT_DURATION, sample_rate)
+        Self::from_duration(value, Self::DEFAULT_DURATION, sample_rate)
     }
 
-    pub const fn with_duration(value: f32, duration: usize, sample_rate: u32) -> Self {
+    pub const fn from_duration(value: f32, duration: usize, sample_rate: u32) -> Self {
         assert!(duration > 0, "Invalid duration");
         assert!(sample_rate > 0, "Invalid sample rate");
 
@@ -453,6 +463,11 @@ impl SigmoidSmoothedValue {
             step,
             sample_rate_comp,
         }
+    }
+
+    pub fn with_duration(mut self, duration: usize) -> Self {
+        self.set_duration(duration);
+        self
     }
 
     pub fn duration(&self) -> usize {

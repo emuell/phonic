@@ -35,130 +35,135 @@ pub struct Eq5Effect {
 impl Eq5Effect {
     pub const EFFECT_NAME: &str = "Eq5Effect";
 
-    // Parameter IDs
-    pub const GAIN1_ID: FourCC = FourCC(*b"gan1");
-    pub const FREQ1_ID: FourCC = FourCC(*b"frq1");
-    pub const BW1_ID: FourCC = FourCC(*b"bw_1");
-
-    pub const GAIN2_ID: FourCC = FourCC(*b"gan2");
-    pub const FREQ2_ID: FourCC = FourCC(*b"frq2");
-    pub const BW2_ID: FourCC = FourCC(*b"bw_2");
-
-    pub const GAIN3_ID: FourCC = FourCC(*b"gan3");
-    pub const FREQ3_ID: FourCC = FourCC(*b"frq3");
-    pub const BW3_ID: FourCC = FourCC(*b"bw_3");
-
-    pub const GAIN4_ID: FourCC = FourCC(*b"gan4");
-    pub const FREQ4_ID: FourCC = FourCC(*b"frq4");
-    pub const BW4_ID: FourCC = FourCC(*b"bw_4");
-
-    pub const GAIN5_ID: FourCC = FourCC(*b"gan5");
-    pub const FREQ5_ID: FourCC = FourCC(*b"frq5");
-    pub const BW5_ID: FourCC = FourCC(*b"bw_5");
-
-    // Default values
-    const DEFAULT_FREQUENCIES: [f32; 5] = [100.0, 1000.0, 4000.0, 8000.0, 12000.0];
-    const DEFAULT_BANDWIDTHS: [f32; 5] = [1.0, 4.0, 4.0, 4.0, 1.0];
-
-    const FREQUENCY_NAMES: [&str; 5] = [
-        "Frequency 1",
-        "Frequency 2",
-        "Frequency 3",
-        "Frequency 4",
-        "Frequency 5",
+    pub const GAINS: [FloatParameter; 5] = [
+        FloatParameter::new(
+            FourCC(*b"gan1"), //
+            "Gain 1",
+            -20.0..=20.0,
+            0.0,
+        )
+        .with_unit("dB"),
+        FloatParameter::new(
+            FourCC(*b"gan2"), //
+            "Gain 2",
+            -20.0..=20.0,
+            0.0,
+        )
+        .with_unit("dB"),
+        FloatParameter::new(
+            FourCC(*b"gan3"), //
+            "Gain 3",
+            -20.0..=20.0,
+            0.0,
+        )
+        .with_unit("dB"),
+        FloatParameter::new(
+            FourCC(*b"gan4"), //
+            "Gain 4",
+            -20.0..=20.0,
+            0.0,
+        )
+        .with_unit("dB"),
+        FloatParameter::new(
+            FourCC(*b"gan5"), //
+            "Gain 5",
+            -20.0..=20.0,
+            0.0,
+        )
+        .with_unit("dB"),
     ];
-    const BANDWIDTH_NAMES: [&str; 5] = [
-        "Bandwidth 1",
-        "Bandwidth 2",
-        "Bandwidth 3",
-        "Bandwidth 4",
-        "Bandwidth 5",
+
+    pub const FREQUENCIES: [FloatParameter; 5] = [
+        FloatParameter::new(
+            FourCC(*b"frq1"), //
+            "Frequency 1",
+            20.0..=20000.0,
+            100.0,
+        )
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.5)),
+        FloatParameter::new(
+            FourCC(*b"frq2"), //
+            "Frequency 2",
+            20.0..=20000.0,
+            1000.0,
+        )
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.5)),
+        FloatParameter::new(
+            FourCC(*b"frq3"), //
+            "Frequency 3",
+            20.0..=20000.0,
+            4000.0,
+        )
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.5)),
+        FloatParameter::new(
+            FourCC(*b"frq4"), //
+            "Frequency 4",
+            20.0..=20000.0,
+            8000.0,
+        )
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.5)),
+        FloatParameter::new(
+            FourCC(*b"frq5"), //
+            "Frequency 5",
+            20.0..=20000.0,
+            12000.0,
+        )
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.5)),
     ];
-    const GAIN_NAMES: [&str; 5] = ["Gain 1", "Gain 2", "Gain 3", "Gain 4", "Gain 5"];
+
+    pub const BANDWIDTHS: [FloatParameter; 5] = [
+        FloatParameter::new(
+            FourCC(*b"bw_1"), // Lowshelf
+            "Bandwidth 1",
+            0.0001..=1.0,
+            1.0,
+        ),
+        FloatParameter::new(
+            FourCC(*b"bw_2"), //
+            "Bandwidth 2",
+            0.0001..=4.0,
+            4.0,
+        ),
+        FloatParameter::new(
+            FourCC(*b"bw_3"), //
+            "Bandwidth 3",
+            0.0001..=4.0,
+            4.0,
+        ),
+        FloatParameter::new(
+            FourCC(*b"bw_4"), //
+            "Bandwidth 4",
+            0.0001..=4.0,
+            4.0,
+        ),
+        FloatParameter::new(
+            FourCC(*b"bw_5"), // Highshelf
+            "Bandwidth 5",
+            0.0001..=1.0,
+            1.0,
+        ),
+    ];
 
     /// Creates a new `Eq5Effect` with default parameter values.
     pub fn new() -> Self {
-        let gain_ids = [
-            Self::GAIN1_ID,
-            Self::GAIN2_ID,
-            Self::GAIN3_ID,
-            Self::GAIN4_ID,
-            Self::GAIN5_ID,
-        ];
-
-        let freq_ids = [
-            Self::FREQ1_ID,
-            Self::FREQ2_ID,
-            Self::FREQ3_ID,
-            Self::FREQ4_ID,
-            Self::FREQ5_ID,
-        ];
-
-        let bw_ids = [
-            Self::BW1_ID,
-            Self::BW2_ID,
-            Self::BW3_ID,
-            Self::BW4_ID,
-            Self::BW5_ID,
-        ];
-
-        let mut bandwidth_smoother = LinearSmoothedValue::default();
-        bandwidth_smoother.set_step(0.05);
-
         Self {
             sample_rate: 0,
             channel_count: 0,
-
-            gains: gain_ids
-                .iter()
-                .zip(Self::GAIN_NAMES)
-                .map(|(id, name)| {
-                    let range = -20.0..=20.0;
-                    let default = 0.0;
-                    SmoothedParameterValue::from_description(
-                        FloatParameter::new(*id, name, range, default).with_unit("dB"),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-
-            frequencies: freq_ids
-                .iter()
-                .zip(Self::FREQUENCY_NAMES)
-                .zip(Self::DEFAULT_FREQUENCIES)
-                .map(|((id, name), default)| {
-                    let range = 20.0..=20000.0;
-                    SmoothedParameterValue::from_description(
-                        FloatParameter::new(*id, name, range, default)
-                            .with_unit("Hz")
-                            .with_scaling(ParameterScaling::Exponential(2.5)),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-
-            bandwidths: bw_ids
-                .iter()
-                .zip(Self::BANDWIDTH_NAMES)
-                .zip(Self::DEFAULT_BANDWIDTHS)
-                .enumerate()
-                .map(|(i, ((id, name), default))| {
-                    let range = if i == 0 || i == 4 {
-                        0.0001..=1.0
-                    } else {
-                        0.0001..=4.0
-                    };
-                    SmoothedParameterValue::from_description(FloatParameter::new(
-                        *id, name, range, default,
-                    ))
-                    .with_smoother(bandwidth_smoother.clone())
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-
+            gains: Self::GAINS.map(
+                SmoothedParameterValue::from_description, //
+            ),
+            frequencies: Self::FREQUENCIES.map(
+                SmoothedParameterValue::from_description, //
+            ),
+            bandwidths: Self::BANDWIDTHS.map(|p| {
+                SmoothedParameterValue::from_description(p)
+                    .with_smoother(LinearSmoothedValue::default())
+            }),
             filter_coeffs: Default::default(),
             filters: Vec::new(),
         }
@@ -324,21 +329,21 @@ impl Effect for Eq5Effect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::GAIN1_ID => self.gains[0].apply_update(value),
-            Self::GAIN2_ID => self.gains[1].apply_update(value),
-            Self::GAIN3_ID => self.gains[2].apply_update(value),
-            Self::GAIN4_ID => self.gains[3].apply_update(value),
-            Self::GAIN5_ID => self.gains[4].apply_update(value),
-            Self::FREQ1_ID => self.frequencies[0].apply_update(value),
-            Self::FREQ2_ID => self.frequencies[1].apply_update(value),
-            Self::FREQ3_ID => self.frequencies[2].apply_update(value),
-            Self::FREQ4_ID => self.frequencies[3].apply_update(value),
-            Self::FREQ5_ID => self.frequencies[4].apply_update(value),
-            Self::BW1_ID => self.bandwidths[0].apply_update(value),
-            Self::BW2_ID => self.bandwidths[1].apply_update(value),
-            Self::BW3_ID => self.bandwidths[2].apply_update(value),
-            Self::BW4_ID => self.bandwidths[3].apply_update(value),
-            Self::BW5_ID => self.bandwidths[4].apply_update(value),
+            _ if id == Self::GAINS[0].id() => self.gains[0].apply_update(value),
+            _ if id == Self::GAINS[1].id() => self.gains[1].apply_update(value),
+            _ if id == Self::GAINS[2].id() => self.gains[2].apply_update(value),
+            _ if id == Self::GAINS[3].id() => self.gains[3].apply_update(value),
+            _ if id == Self::GAINS[4].id() => self.gains[4].apply_update(value),
+            _ if id == Self::FREQUENCIES[0].id() => self.frequencies[0].apply_update(value),
+            _ if id == Self::FREQUENCIES[1].id() => self.frequencies[1].apply_update(value),
+            _ if id == Self::FREQUENCIES[2].id() => self.frequencies[2].apply_update(value),
+            _ if id == Self::FREQUENCIES[3].id() => self.frequencies[3].apply_update(value),
+            _ if id == Self::FREQUENCIES[4].id() => self.frequencies[4].apply_update(value),
+            _ if id == Self::BANDWIDTHS[0].id() => self.bandwidths[0].apply_update(value),
+            _ if id == Self::BANDWIDTHS[1].id() => self.bandwidths[1].apply_update(value),
+            _ if id == Self::BANDWIDTHS[2].id() => self.bandwidths[2].apply_update(value),
+            _ if id == Self::BANDWIDTHS[3].id() => self.bandwidths[3].apply_update(value),
+            _ if id == Self::BANDWIDTHS[4].id() => self.bandwidths[4].apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",

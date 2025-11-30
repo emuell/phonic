@@ -210,7 +210,7 @@ fn main() -> Result<(), Error> {
                     };
                     println!("Filter type: {filter_type}");
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::TYPE_ID, filter_type, None)
+                        .set_parameter(effects::FilterEffect::TYPE.id(), filter_type, None)
                         .unwrap_or_default();
                 }
                 Keycode::Key1 => {
@@ -242,7 +242,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff * 1.1_f32).min(20000.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF_ID, *cutoff, None)
+                        .set_parameter(effects::FilterEffect::CUTOFF.id(), *cutoff, None)
                         .unwrap_or_default();
                 }
                 Keycode::Left if alt_key => {
@@ -250,7 +250,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff / 1.1_f32).max(20.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF_ID, *cutoff, None)
+                        .set_parameter(effects::FilterEffect::CUTOFF.id(), *cutoff, None)
                         .unwrap_or_default();
                 }
                 Keycode::Left => {

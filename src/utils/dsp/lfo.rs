@@ -1,12 +1,13 @@
 //! Oscillators for modulation.
 
 use std::f64::consts::PI;
-use strum::{Display, EnumIter, EnumString};
 
 // -------------------------------------------------------------------------------------------------
 
 /// Waveform types for LFO oscillators.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Display, EnumIter, EnumString)]
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 pub enum LfoWaveform {
     #[default]
     Sine,

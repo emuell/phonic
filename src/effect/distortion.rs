@@ -1,5 +1,5 @@
 use four_cc::FourCC;
-use strum::{Display, EnumIter, EnumString};
+use strum::VariantNames;
 
 use crate::{
     effect::{Effect, EffectTime},
@@ -17,7 +17,9 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 /// Type of distortion applied in `DistortionEffect`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Display, EnumIter, EnumString)]
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 pub enum DistortionType {
     /// No distortion.
     #[default]
@@ -57,9 +59,27 @@ pub struct DistortionEffect {
 
 impl DistortionEffect {
     pub const EFFECT_NAME: &str = "DistortionEffect";
-    pub const TYPE_ID: FourCC = FourCC(*b"type");
-    pub const DRIVE_ID: FourCC = FourCC(*b"driv");
-    pub const MIX_ID: FourCC = FourCC(*b"mix ");
+
+    pub const TYPE: EnumParameter = EnumParameter::new(
+        FourCC(*b"type"),
+        "Type",
+        DistortionType::VARIANTS,
+        3, // DistortionType::Diode
+    );
+    pub const DRIVE: FloatParameter = FloatParameter::new(
+        FourCC(*b"driv"),
+        "Drive",
+        0.0..=2.0,
+        0.5, //
+    )
+    .with_unit("x");
+    pub const MIX: FloatParameter = FloatParameter::new(
+        FourCC(*b"mix "),
+        "Mix",
+        0.0..=1.0,
+        1.0, //
+    )
+    .with_unit("%");
 
     /// Creates a new `DistortionEffect` with default parameter values.
     pub fn new() -> Self {
@@ -68,32 +88,19 @@ impl DistortionEffect {
 
         let channel_count = 0;
 
-        let distortion_type = EnumParameterValue::from_description(EnumParameter::new(
-            Self::TYPE_ID,
-            "Type",
-            DistortionType::Diode,
-        ));
+        let distortion_type = EnumParameterValue::from_description(Self::TYPE);
+
         let drive = SmoothedParameterValue::from_description(
-            FloatParameter::new(
-                Self::DRIVE_ID,
-                "Drive",
-                0.0..=2.0,
-                0.5, //
-            )
-            .with_unit("x"),
+            Self::DRIVE, //
         )
-        .with_smoother(LinearSmoothedValue::with_step(0.0, 0.01, 44100));
+        .with_smoother(LinearSmoothedValue::default().with_step(0.01));
+
         let mix = SmoothedParameterValue::from_description(
-            FloatParameter::new(
-                Self::MIX_ID,
-                "Mix",
-                0.0..=1.0,
-                1.0, //
-            )
-            .with_unit("%")
-            .with_display(to_string_percent, from_string_percent),
+            Self::MIX
+                .clone()
+                .with_display(to_string_percent, from_string_percent),
         )
-        .with_smoother(ExponentialSmoothedValue::with_inertia(1.0, 0.1, 44100));
+        .with_smoother(ExponentialSmoothedValue::default().with_inertia(0.1));
 
         Self {
             channel_count,
@@ -242,9 +249,9 @@ impl Effect for DistortionEffect {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         match id {
-            Self::TYPE_ID => self.distortion_type.apply_update(value),
-            Self::DRIVE_ID => self.drive.apply_update(value),
-            Self::MIX_ID => self.mix.apply_update(value),
+            _ if id == Self::TYPE.id() => self.distortion_type.apply_update(value),
+            _ if id == Self::DRIVE.id() => self.drive.apply_update(value),
+            _ if id == Self::MIX.id() => self.mix.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",

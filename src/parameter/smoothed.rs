@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 
 use crate::utils::smoothing::{ExponentialSmoothedValue, SmoothedValue};
 
-use super::{FloatParameter, Parameter, ParameterValueUpdate};
+use super::{FloatParameter, ParameterValueUpdate};
 
 // -------------------------------------------------------------------------------------------------
 
