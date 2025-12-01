@@ -1,66 +1,71 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-file'",
-      "cargo": {
-        "args": ["build", "--example=play-file"]
-      },
-      "args": [
-        // "--output", "output.wav"
-      ],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-synth'",
-      "cargo": {
-        "args": ["build", "--example=play-synth", "--features=fundsp"]
-      },
-      "args": [
-        // "--output", "output.wav"
-      ],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-sequence'",
-      "cargo": {
-        "args": ["build", "--example=play-sequence"]
-      },
-      "args": [
-        // "--output", "output.wav"
-      ],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-custom'",
-      "cargo": {
-        "args": ["build", "--example=play-custom"]
-      },
-      "args": [
-        // "--output", "output.wav"
-      ],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug example 'play-interactive'",
-      "cargo": {
-        "args": ["build", "--example=play-interactive", "--features=fundsp"]
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    }
-  ]
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-file'",
+			"cargo": {
+				"args": ["build", "--example=play-file"]
+			},
+			"program": "target/debug/examples/play-file",
+			"args": [
+				// "--output", "output.wav"
+			],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-synth'",
+			"cargo": {
+				"args": ["build", "--example=play-synth", "--features=fundsp"]
+			},
+			"program": "target/debug/examples/play-synth",
+			"args": [
+				// "--output", "output.wav"
+			],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-sequence'",
+			"cargo": {
+				"args": ["build", "--example=play-sequence"]
+			},
+			"program": "target/debug/examples/play-sequence",
+			"args": [
+				// "--output", "output.wav"
+			],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-custom'",
+			"cargo": {
+				"args": ["build", "--example=play-custom"]
+			},
+			"program": "target/debug/examples/play-custom",
+			"args": [
+				// "--output", "output.wav"
+			],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-interactive'",
+			"cargo": {
+				"args": ["build", "--example=play-interactive", "--features=fundsp"]
+			},
+			"program": "target/debug/examples/play-interactive",
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		}
+	]
 }
