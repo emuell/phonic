@@ -1,69 +1,73 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>phonic demo</title>
+        <link rel="stylesheet" href="app.css" />
+    </head>
 
-<head>
-    <meta charset="UTF-8">
-    <title>phonic demo</title>
-    <link rel="stylesheet" href="app.css">
-</head>
+    <body>
+        <h1>Phonic Emscripten Demo</h1>
+        <p>Hit `Start` to initialize the audio backend and start a simple player engine.</p>
 
-<body>
-    <h1>Phonic Emscripten Demo</h1>
-    <p>
-        Hit `Start` to initialize the audio backend and start a simple player engine.
-    <p>
+        <p></p>
 
-    <div class="controls">
-        <button id="playButton" disabled>Start Player</button>
-        <button id="stopButton" disabled>Stop Player</button>
-    </div>
-
-    <div id="status" class="status"></div>
-
-    <p>
-        The example player schedules preloaded sample files in a <a
-            href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop">requestAnimationFrame</a>
-        timer.
-    </p>
-    <p>
-        Piano keys interactively play simple <a href="https://docs.rs/dasp/latest/dasp">DASP synth</a> sounds.
-        You can dynamically add and remove DSP effects to the synth output and change their parameters in real-time.
-    <p>
-
-    <div class="piano-wrapper">
-        <ul class="piano-keys">
-            <li class="key white" data-key=0><span>a</span></li>
-            <li class="key black" data-key=1><span>w</span></li>
-            <li class="key white" data-key=2><span>s</span></li>
-            <li class="key black" data-key=3><span>e</span></li>
-            <li class="key white" data-key=4><span>d</span></li>
-            <li class="key white" data-key=5><span>f</span></li>
-            <li class="key black" data-key=6><span>t</span></li>
-            <li class="key white" data-key=7><span>g</span></li>
-            <li class="key black" data-key=8><span>y</span></li>
-            <li class="key white" data-key=9><span>h</span></li>
-            <li class="key black" data-key=10><span>u</span></li>
-            <li class="key white" data-key=11><span>j</span></li>
-            <li class="key white" data-key=12><span>k</span></li>
-            <li class="key black" data-key=13><span>o</span></li>
-            <li class="key white" data-key=14><span>l</span></li>
-            <li class="key black" data-key=15><span>p</span></li>
-            <li class="key white" data-key=16><span>;</span></li>
-        </ul>
-    </div>
-
-    <div class="effects-section">
-        <div class="add-effect-menu">
+        <div class="controls">
+            <button id="playButton" disabled>Start Player</button>
+            <button id="stopButton" disabled>Stop Player</button>
         </div>
-        <div class="effects-chain" id="effectsChain">
-            <div class="empty-message">No effects added yet. Add an effect using the buttons above.</div>
+
+        <div id="status" class="status"></div>
+
+        <p>
+            The example player schedules preloaded sample files in a
+            <a
+                href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop"
+                >requestAnimationFrame</a
+            >
+            timer.
+        </p>
+        <p>
+            Piano keys interactively play simple
+            <a href="https://github.com/SamiPerttu/fundsp">fundsp synth</a> sounds. You can
+            dynamically add and remove DSP effects to the synth output and change their parameters
+            in real-time.
+        </p>
+
+        <div class="piano-wrapper">
+            <ul class="piano-keys">
+                <li class="key white" data-key="0"><span>a</span></li>
+                <li class="key black" data-key="1"><span>w</span></li>
+                <li class="key white" data-key="2"><span>s</span></li>
+                <li class="key black" data-key="3"><span>e</span></li>
+                <li class="key white" data-key="4"><span>d</span></li>
+                <li class="key white" data-key="5"><span>f</span></li>
+                <li class="key black" data-key="6"><span>t</span></li>
+                <li class="key white" data-key="7"><span>g</span></li>
+                <li class="key black" data-key="8"><span>y</span></li>
+                <li class="key white" data-key="9"><span>h</span></li>
+                <li class="key black" data-key="10"><span>u</span></li>
+                <li class="key white" data-key="11"><span>j</span></li>
+                <li class="key white" data-key="12"><span>k</span></li>
+                <li class="key black" data-key="13"><span>o</span></li>
+                <li class="key white" data-key="14"><span>l</span></li>
+                <li class="key black" data-key="15"><span>p</span></li>
+                <li class="key white" data-key="16"><span>;</span></li>
+            </ul>
         </div>
-    </div>
 
-    <div class="log" id="log"></div>
+        <div class="effects-section">
+            <div class="add-effect-menu"></div>
+            <div class="effects-chain" id="effectsChain">
+                <div class="empty-message">
+                    No effects added yet. Add an effect using the buttons above.
+                </div>
+            </div>
+        </div>
 
-    <script type="text/javascript" src="app.js"></script>
-    <script async type="text/javascript" src="play_emscripten.js"></script>
-</body>
+        <div class="log" id="log"></div>
 
+        <script type="text/javascript" src="app.js"></script>
+        <script async type="text/javascript" src="play_emscripten.js"></script>
+    </body>
 </html>
