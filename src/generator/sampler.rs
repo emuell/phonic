@@ -18,7 +18,8 @@ use crate::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
     },
-    Error, FilePlaybackOptions, Generator, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
+    Error, FilePlaybackOptions, Generator, NotePlaybackId, PlaybackId, PlaybackStatusContext,
+    PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -89,12 +90,19 @@ impl Sampler {
     )
     .with_unit("s");
 
-    /// Create a new sampler with the given sample file, optional AHDSR envelope
-    /// and the given fixed voice count.
+    /// Create a new sampler with the given sample file, playback status channel and update rate,
+    /// optional AHDSR envelope and the given fixed voice count.
+    ///
+    /// Note: when `playback_pos_emit_rate` is None, no position events are sent.
+    /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    /// Stop events are always sent out immediately.
+    ///
+    /// Passing None as `playback_status_send` argument will disable all playback events.
     pub fn from_file<P: AsRef<Path>>(
         path: P,
         envelope_parameters: Option<AhdsrParameters>,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
         voice_count: usize,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -116,6 +124,9 @@ impl Sampler {
 
         // Set voice playback options
         let mut voice_playback_options = FilePlaybackOptions::default();
+        if let Some(duration) = playback_pos_emit_rate {
+            voice_playback_options = voice_playback_options.playback_pos_emit_rate(duration);
+        }
         if envelope_parameters.is_none() {
             // just de-click when there's no envelope
             voice_playback_options.fade_out_duration = Some(Duration::from_millis(50));
@@ -207,8 +218,9 @@ impl Sampler {
                                 note,
                                 volume,
                                 panning,
+                                context,
                             } => {
-                                self.trigger_note_on(note_id, note, volume, panning);
+                                self.trigger_note_on(note_id, note, volume, panning, context);
                             }
                             GeneratorPlaybackEvent::NoteOff { note_id } => {
                                 self.trigger_note_off(note_id, current_sample_frame);
@@ -252,6 +264,7 @@ impl Sampler {
         note: u8,
         volume: Option<f32>,
         panning: Option<f32>,
+        context: Option<PlaybackStatusContext>,
     ) {
         // Allocate a new voice
         let voice_index = self.next_free_voice_index();
@@ -262,6 +275,7 @@ impl Sampler {
             volume.unwrap_or(1.0),
             panning.unwrap_or(0.0),
             &self.envelope_parameters,
+            context,
         );
         // Ensure we're checking in the upcoming `write` if any voice needs processing.
         self.active_voices += 1;
@@ -461,7 +475,10 @@ impl Generator for Sampler {
         self.playback_status_send.clone()
     }
     fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
-        self.playback_status_send = sender;
+        self.playback_status_send = sender.clone();
+        for voice in &mut self.voices {
+            voice.set_playback_status_sender(sender.clone());
+        }
     }
 
     fn parameters(&self) -> Vec<&dyn ClonableParameter> {

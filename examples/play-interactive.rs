@@ -108,6 +108,7 @@ fn main() -> Result<(), Error> {
             fm3_synth::voice_factory,
             8, // 8 voices for polyphony
             None,
+            None,
             player.output_sample_rate(),
         )?,
         Some(tone_mixer_id),
@@ -125,6 +126,7 @@ fn main() -> Result<(), Error> {
                 1.0,                    // sustain
                 Duration::from_secs(3), // release
             )?),
+            None,
             None,
             8, // 8 voices for polyphony
             player.output_channel_count(),

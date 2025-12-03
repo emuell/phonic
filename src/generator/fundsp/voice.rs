@@ -1,8 +1,13 @@
+use std::{
+    sync::{mpsc::SyncSender, Arc},
+    time::{Duration, Instant},
+};
+
 use fundsp::hacker32::*;
 
 use crate::{
     utils::buffer::{add_buffers, max_abs_sample},
-    NotePlaybackId,
+    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -16,6 +21,8 @@ const VOICE_EXHAUSTION_DURATION_SEC: f32 = 2.0;
 
 /// A single voice that wraps a FunDSP node with control parameters and release state tracking.
 pub struct FunDspVoice {
+    /// The name of the generator as passed to playback contexts.
+    synth_name: Arc<String>,
     /// The voice's audio graph
     audio_unit: Box<dyn AudioUnit>,
     /// Shared variable for frequency control
@@ -40,15 +47,28 @@ pub struct FunDspVoice {
     silence_samples_count: usize,
     /// Number of consecutive silent samples required to consider the voice exhausted
     exhaustion_threshold_samples: usize,
+    /// Context passed along in PlaybackStatusEvent's
+    playback_context: Option<PlaybackStatusContext>,
+    playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+    /// Playback position tracking
+    playback_pos: u64,
+    playback_pos_report_instant: Instant,
+    playback_pos_emit_rate: Option<Duration>,
+    /// Output sample rate
+    sample_rate: u32,
 }
 
 impl FunDspVoice {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        synth_name: Arc<String>,
         audio_unit: Box<dyn AudioUnit>,
         frequency: Shared,
         volume: Shared,
         panning: Shared,
         gate: Shared,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
         sample_rate: u32,
     ) -> Self {
         assert!(
@@ -64,7 +84,12 @@ impl FunDspVoice {
         let silence_samples_count = 0;
         let exhaustion_threshold_samples =
             (sample_rate as f32 * VOICE_EXHAUSTION_DURATION_SEC) as usize;
+        let playback_context = None;
+        let playback_pos = 0;
+        let playback_pos_report_instant = Instant::now();
+
         Self {
+            synth_name,
             audio_unit,
             frequency,
             volume,
@@ -77,6 +102,12 @@ impl FunDspVoice {
             release_start_frame,
             silence_samples_count,
             exhaustion_threshold_samples,
+            playback_status_send,
+            playback_context,
+            playback_pos,
+            playback_pos_report_instant,
+            playback_pos_emit_rate,
+            sample_rate,
         }
     }
 
@@ -110,8 +141,20 @@ impl FunDspVoice {
         self.release_start_frame
     }
 
+    /// Set or update our playback status channel.
+    pub fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
+        self.playback_status_send = sender;
+    }
+
     /// Start playback on the voice.
-    pub fn start(&mut self, note_id: NotePlaybackId, note: u8, volume: f32, panning: f32) {
+    pub fn start(
+        &mut self,
+        note_id: NotePlaybackId,
+        note: u8,
+        volume: f32,
+        panning: f32,
+        context: Option<PlaybackStatusContext>,
+    ) {
         self.note_id = Some(note_id);
         let freq = crate::utils::pitch_from_note(note);
         self.frequency.set_value(freq as f32);
@@ -124,6 +167,8 @@ impl FunDspVoice {
         self.silence_samples_count = 0; // Reset silence counter
         self.release_start_frame = None; // Not releasing when a new note starts
         self.audio_unit.reset(); // Reset envelope and oscillator phase
+        self.playback_pos = 0; // Reset position and context
+        self.playback_context = context;
     }
 
     /// Stop voice, starting fadeout.
@@ -138,12 +183,19 @@ impl FunDspVoice {
 
     /// Stop voice after a fadeout or brute force kill it.
     pub fn kill(&mut self) {
+        // Send stopped event for killed voice
+        if self.note_id.is_some() {
+            self.send_stopped_event(self.is_exhausted());
+        }
         self.note_id = None; // Free up the voice
         self.current_note = None;
         self.is_releasing = false;
         self.silence_samples_count = 0;
         self.frequency.set_value(0.0); // Silence the oscillator by setting frequency to 0.0
         self.release_start_frame = None; // Clear release start time
+        self.playback_context = None;
+        self.playback_status_send = None; // Clear sender
+        self.playback_pos = 0; // Reset position
     }
 
     pub fn set_speed(&mut self, speed: f64, glide: Option<f32>, sample_rate: u32) {
@@ -263,6 +315,14 @@ impl FunDspVoice {
                 _ => unreachable!("Expected mono or stereo funDSP voices"),
             }
         }
+
+        // Update playback position
+        let frames_processed = output.len() / self.audio_unit.outputs();
+        self.playback_pos += frames_processed as u64;
+
+        // Send position event if needed
+        self.send_position_event();
+
         // kill the voice when it got exhausted
         if self.is_exhausted() {
             self.kill();
@@ -276,6 +336,53 @@ impl FunDspVoice {
             } else {
                 // Glide finished
                 self.glide_state = None;
+            }
+        }
+    }
+
+    fn should_report_pos(&self) -> bool {
+        if let Some(report_duration) = self.playback_pos_emit_rate {
+            self.playback_pos_report_instant.elapsed() >= report_duration
+        } else {
+            false
+        }
+    }
+
+    fn samples_to_duration(&self, samples: u64) -> std::time::Duration {
+        let frames = samples / self.audio_unit.outputs() as u64;
+        let seconds = frames as f64 / self.sample_rate as f64;
+        std::time::Duration::from_secs_f64(seconds)
+    }
+
+    fn send_position_event(&mut self) {
+        if let Some(sender) = &self.playback_status_send {
+            if self.should_report_pos() {
+                self.playback_pos_report_instant = Instant::now();
+                if let Some(note_id) = self.note_id {
+                    if let Err(err) = sender.try_send(PlaybackStatusEvent::Position {
+                        id: note_id,
+                        context: self.playback_context.clone(),
+                        path: Arc::clone(&self.synth_name),
+                        position: self.samples_to_duration(self.playback_pos),
+                    }) {
+                        log::warn!("Failed to send fundsp voice position event: {err}")
+                    }
+                }
+            }
+        }
+    }
+
+    fn send_stopped_event(&mut self, exhausted: bool) {
+        if let Some(sender) = &self.playback_status_send {
+            if let Some(note_id) = self.note_id {
+                if let Err(err) = sender.send(PlaybackStatusEvent::Stopped {
+                    id: note_id,
+                    context: self.playback_context.clone(),
+                    path: Arc::clone(&self.synth_name),
+                    exhausted,
+                }) {
+                    log::warn!("Failed to send fundsp voice stopped event: {err}");
+                }
             }
         }
     }

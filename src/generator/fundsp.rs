@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     sync::{mpsc::SyncSender, Arc},
+    time::Duration,
 };
 
 use crossbeam_queue::ArrayQueue;
@@ -14,7 +15,7 @@ use crate::{
     parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
-    Error, Generator, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
+    Error, Generator, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -52,6 +53,7 @@ use voice::FunDspVoice;
 ///     },
 ///     8,      // 8 voices
 ///     None,   // no playback status sender
+///     None,   // no playback status pos emitting
 ///     44100,  // voice and source's sample rate
 /// );
 /// ```
@@ -78,12 +80,14 @@ impl FunDspGenerator {
     ///   (frequency, volume, gate, panning) shared variables
     /// * `voice_count` - Maximum number of simultaneous voices.
     /// * `playback_status_send` - Sender for playback status events.
+    /// * `playback_pos_emit_rate` - Emit rate for playback position events. 1 sec when undefined.
     /// * `sample_rate` - Output sample rate.
     pub fn new<S: AsRef<str>, F>(
         synth_name: S,
         voice_factory: F,
         voice_count: usize,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
     where
@@ -125,11 +129,14 @@ impl FunDspGenerator {
 
             // Create voice
             voices.push(FunDspVoice::new(
+                Arc::clone(&synth_name),
                 audio_unit,
                 frequency,
                 volume,
                 panning,
                 gate,
+                playback_status_send.clone(),
+                playback_pos_emit_rate,
                 output_sample_rate,
             ));
         }
@@ -165,6 +172,7 @@ impl FunDspGenerator {
     ///   (frequency, volume, gate, panning) shared variables.
     /// * `voice_count` - Maximum number of simultaneous voices.
     /// * `playback_status_send` - Sender for playback status events.
+    /// * `playback_pos_emit_rate` - Emit rate for playback position events.
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
@@ -172,6 +180,7 @@ impl FunDspGenerator {
         voice_factory: F,
         voice_count: usize,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
     where
@@ -245,11 +254,14 @@ impl FunDspGenerator {
 
             // Create voice
             voices.push(FunDspVoice::new(
+                Arc::clone(&synth_name),
                 audio_unit,
                 frequency,
                 volume,
                 panning,
                 gate,
+                playback_status_send.clone(),
+                playback_pos_emit_rate,
                 output_sample_rate,
             ));
         }
@@ -325,10 +337,17 @@ impl FunDspGenerator {
         volume: Option<f32>,
         panning: Option<f32>,
         current_sample_frame: u64,
+        context: Option<PlaybackStatusContext>,
     ) {
         let voice_index = self.next_free_voice_index(current_sample_frame);
         let voice = &mut self.voices[voice_index];
-        voice.start(note_id, note, volume.unwrap_or(1.0), panning.unwrap_or(0.0));
+        voice.start(
+            note_id,
+            note,
+            volume.unwrap_or(1.0),
+            panning.unwrap_or(0.0),
+            context,
+        );
         // Ensure we're checking in the upcoming `write` if any voice needs processing.
         self.active_voices += 1;
     }
@@ -399,6 +418,7 @@ impl FunDspGenerator {
                                 note,
                                 volume,
                                 panning,
+                                context,
                             } => {
                                 self.trigger_note_on(
                                     note_id,
@@ -406,6 +426,7 @@ impl FunDspGenerator {
                                     volume,
                                     panning,
                                     current_sample_frame,
+                                    context,
                                 );
                             }
                             GeneratorPlaybackEvent::NoteOff { note_id } => {
@@ -523,7 +544,10 @@ impl Generator for FunDspGenerator {
         self.playback_status_send.clone()
     }
     fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
-        self.playback_status_send = sender;
+        self.playback_status_send = sender.clone();
+        for voice in &mut self.voices {
+            voice.set_playback_status_sender(sender.clone());
+        }
     }
 
     fn parameters(&self) -> Vec<&dyn ClonableParameter> {

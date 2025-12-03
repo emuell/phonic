@@ -17,7 +17,7 @@ use crate::{
         amplified::AmplifiedSourceMessage, mixed::MixerMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue,
     },
-    NotePlaybackId,
+    NotePlaybackId, PlaybackStatusContext,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -188,6 +188,21 @@ impl GeneratorPlaybackHandle {
         panning: Option<f32>,
         sample_time: T,
     ) -> Result<NotePlaybackId, Error> {
+        let context = None;
+        self.note_on_with_context(note, volume, panning, context, sample_time)
+    }
+
+    /// Trigger a note on event at the given sample time or immediately and pass along the given
+    /// playback context to the playback status channel.
+    /// Returns the note playback ID that can be used to control this specific note instance.
+    pub fn note_on_with_context<T: Into<Option<u64>>>(
+        &self,
+        note: u8,
+        volume: Option<f32>,
+        panning: Option<f32>,
+        context: Option<PlaybackStatusContext>,
+        sample_time: T,
+    ) -> Result<NotePlaybackId, Error> {
         let sample_time = sample_time.into();
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
@@ -200,6 +215,7 @@ impl GeneratorPlaybackHandle {
                 note,
                 volume,
                 panning,
+                context,
             },
             "note_on",
         )?;

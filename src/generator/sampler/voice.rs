@@ -1,3 +1,5 @@
+use std::sync::mpsc::SyncSender;
+
 use crate::{
     source::{
         amplified::AmplifiedSource, file::preloaded::PreloadedFileSource,
@@ -8,7 +10,7 @@ use crate::{
         buffer::{scale_buffer, InterleavedBufferMut},
         speed_from_note,
     },
-    NotePlaybackId,
+    FileSource, NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -77,6 +79,11 @@ impl SamplerVoice {
         self.release_start_frame
     }
 
+    /// Set or update our file source's playback status channel.
+    pub fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
+        self.file_source().set_playback_status_sender(sender);
+    }
+
     pub fn start(
         &mut self,
         note_id: NotePlaybackId,
@@ -84,19 +91,22 @@ impl SamplerVoice {
         volume: f32,
         panning: f32,
         envelope_parameters: &Option<AhdsrParameters>,
+        context: Option<PlaybackStatusContext>,
     ) {
         // Reset a probably recycled file source
         self.reset();
         // Set initial speed, volume and pan
         self.file_source().set_speed(speed_from_note(note), None);
+        self.file_source().set_playback_status_context(context);
         self.amplified_source().set_volume(volume);
         self.panned_source().set_panning(panning);
         // Start envelope
         if let Some(envelope_parameters) = envelope_parameters {
             self.envelope.note_on(envelope_parameters, 1.0);
         }
-        self.note_id = Some(note_id)
+        self.note_id = Some(note_id);
     }
+
     /// Stop the voice and start fadeouts .
     pub fn stop(
         &mut self,
@@ -118,6 +128,7 @@ impl SamplerVoice {
         // reset sources
         if self.is_active() {
             self.file_source().reset();
+            self.file_source().set_playback_status_context(None);
             self.note_id = None;
         }
         // reset release start time

@@ -1,10 +1,6 @@
 //! Generator trait for sources that can be driven by sequencers.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    mpsc::SyncSender,
-    Arc,
-};
+use std::sync::{mpsc::SyncSender, Arc};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -12,8 +8,8 @@ use four_cc::FourCC;
 
 use crate::{
     parameter::{ClonableParameter, ParameterValueUpdate},
-    source::Source,
-    Error, NotePlaybackId, PlaybackId, PlaybackStatusEvent,
+    source::{unique_source_id, Source},
+    Error, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -27,8 +23,8 @@ pub mod fundsp;
 
 /// Generates a unique source id for a triggered note in a generator.
 pub(crate) fn unique_note_id() -> usize {
-    static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
-    ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+    // Note id's are used as source ids when tracking playback status...
+    unique_source_id()
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -41,6 +37,7 @@ pub enum GeneratorPlaybackEvent {
         note: u8,
         volume: Option<f32>,
         panning: Option<f32>,
+        context: Option<PlaybackStatusContext>,
     },
     /// Trigger a note off event for a specific note playback.
     NoteOff { note_id: NotePlaybackId },
