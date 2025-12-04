@@ -6,6 +6,7 @@ pub(crate) mod dsp;
 pub(crate) mod event;
 pub(crate) mod fader;
 pub(crate) mod resampler;
+pub(crate) mod time;
 
 pub mod ahdsr;
 pub mod buffer;
@@ -14,7 +15,7 @@ pub mod waveform;
 
 // -------------------------------------------------------------------------------------------------
 
-/// dB value, which is treated as zero volume factor  
+/// dB value, which is treated as zero volume factor
 const MINUS_INF_IN_DB: f32 = -200.0f32;
 
 // -------------------------------------------------------------------------------------------------
