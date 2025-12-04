@@ -1,21 +1,24 @@
 use std::{
     sync::{mpsc::SyncSender, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use fundsp::hacker32::*;
 
 use crate::{
-    utils::buffer::{add_buffers, max_abs_sample},
-    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
+    utils::{
+        buffer::{add_buffers, max_abs_sample},
+        time::{SampleTime, SampleTimeClock},
+    },
+    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 // -60dB as audio silence
-const VOICE_SILENCE_THRESHOLD: f32 = 1e-6;
+const SILENCE_THRESHOLD: f32 = 1e-6;
 // 2 seconds of silence to ensure full decay
-const VOICE_EXHAUSTION_DURATION_SEC: f32 = 2.0;
+const EXHAUSTION_DURATION: Duration = Duration::from_secs(2);
 
 // -------------------------------------------------------------------------------------------------
 
@@ -52,8 +55,8 @@ pub struct FunDspVoice {
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     /// Playback position tracking
     playback_pos: u64,
-    playback_pos_report_instant: Instant,
-    playback_pos_emit_rate: Option<Duration>,
+    playback_pos_emit_rate: Option<SampleTime>,
+    playback_pos_sample_time_clock: SampleTimeClock,
     /// Output sample rate
     sample_rate: u32,
 }
@@ -83,10 +86,12 @@ impl FunDspVoice {
         let release_start_frame = None;
         let silence_samples_count = 0;
         let exhaustion_threshold_samples =
-            (sample_rate as f32 * VOICE_EXHAUSTION_DURATION_SEC) as usize;
+            SampleTimeClock::duration_to_sample_time(EXHAUSTION_DURATION, sample_rate) as usize;
         let playback_context = None;
         let playback_pos = 0;
-        let playback_pos_report_instant = Instant::now();
+        let playback_pos_sample_time_clock = SampleTimeClock::new(sample_rate);
+        let playback_pos_emit_rate = playback_pos_emit_rate
+            .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
 
         Self {
             synth_name,
@@ -105,8 +110,8 @@ impl FunDspVoice {
             playback_status_send,
             playback_context,
             playback_pos,
-            playback_pos_report_instant,
             playback_pos_emit_rate,
+            playback_pos_sample_time_clock,
             sample_rate,
         }
     }
@@ -241,7 +246,7 @@ impl FunDspVoice {
         self.panning.set_value(panning);
     }
 
-    pub fn process(&mut self, output: &mut [f32]) {
+    pub fn process(&mut self, output: &mut [f32], time: &SourceTime) {
         // Process in SIMD friendly blocks as long as possible
         const BLOCK_SIZE: usize = 64;
         let frame_count = output.len() / self.audio_unit.outputs();
@@ -265,7 +270,7 @@ impl FunDspVoice {
                     // Check for silence in the entire block using SIMD if voice is releasing
                     if self.is_releasing {
                         let max_abs = max_abs_sample(&output_buffer.channel_f32(0)[..block_len]);
-                        if max_abs < VOICE_SILENCE_THRESHOLD {
+                        if max_abs < SILENCE_THRESHOLD {
                             self.silence_samples_count =
                                 self.silence_samples_count.saturating_add(block_len);
                         } else {
@@ -295,7 +300,7 @@ impl FunDspVoice {
                             max_abs_sample(&output_buffer.channel_f32(1)[..block_len]);
                         let max_abs = max_abs_left.max(max_abs_right);
 
-                        if max_abs < VOICE_SILENCE_THRESHOLD {
+                        if max_abs < SILENCE_THRESHOLD {
                             self.silence_samples_count =
                                 self.silence_samples_count.saturating_add(block_len);
                         } else {
@@ -321,7 +326,7 @@ impl FunDspVoice {
         self.playback_pos += frames_processed as u64;
 
         // Send position event if needed
-        self.send_position_event();
+        self.send_position_event(time);
 
         // kill the voice when it got exhausted
         if self.is_exhausted() {
@@ -340,9 +345,11 @@ impl FunDspVoice {
         }
     }
 
-    fn should_report_pos(&self) -> bool {
-        if let Some(report_duration) = self.playback_pos_emit_rate {
-            self.playback_pos_report_instant.elapsed() >= report_duration
+    fn should_report_pos(&self, time: &SourceTime) -> bool {
+        if let Some(emit_rate) = self.playback_pos_emit_rate {
+            self.playback_pos_sample_time_clock
+                .elapsed(time.pos_in_frames)
+                >= emit_rate
         } else {
             false
         }
@@ -354,10 +361,11 @@ impl FunDspVoice {
         std::time::Duration::from_secs_f64(seconds)
     }
 
-    fn send_position_event(&mut self) {
+    fn send_position_event(&mut self, time: &SourceTime) {
         if let Some(sender) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
+            if self.should_report_pos(time) {
+                self.playback_pos_sample_time_clock
+                    .reset(time.pos_in_frames);
                 if let Some(note_id) = self.note_id {
                     if let Err(err) = sender.try_send(PlaybackStatusEvent::Position {
                         id: note_id,

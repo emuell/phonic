@@ -1,6 +1,9 @@
 //! FunDSP-based synth source.
 
-use std::sync::{mpsc::SyncSender, Arc};
+use std::{
+    sync::{mpsc::SyncSender, Arc},
+    time::Duration,
+};
 
 use crossbeam_queue::ArrayQueue;
 use fundsp::hacker32::*;
@@ -10,16 +13,17 @@ use super::{
     SynthPlaybackMessage, SynthPlaybackOptions, SynthSource,
 };
 use crate::{
-    source::Source, utils::buffer::max_abs_sample, Error, PlaybackStatusContext,
-    PlaybackStatusEvent, Player, SynthPlaybackHandle,
+    source::Source,
+    utils::{buffer::max_abs_sample, time::SampleTimeClock},
+    Error, PlaybackStatusContext, PlaybackStatusEvent, Player, SynthPlaybackHandle,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 // -60dB as audio silence
-const SYNTH_SILENCE_THRESHOLD: f32 = 1e-6;
+const SILENCE_THRESHOLD: f32 = 1e-6;
 // 2 seconds of silence to ensure full decay
-const SYNTH_EXHAUSTION_DURATION_SEC: f32 = 2.0;
+const EXHAUSTION_DURATION: Duration = Duration::from_secs(2);
 
 // -------------------------------------------------------------------------------------------------
 
@@ -43,7 +47,7 @@ impl FunDspSynthSourceGenerator {
         let is_exhausted = false;
         let silence_samples_count = 0;
         let exhaustion_threshold_samples =
-            (sample_rate as f32 * SYNTH_EXHAUSTION_DURATION_SEC) as usize;
+            SampleTimeClock::duration_to_sample_time(EXHAUSTION_DURATION, sample_rate) as usize;
 
         Self {
             audio_unit,
@@ -91,7 +95,7 @@ impl SynthSourceGenerator for FunDspSynthSourceGenerator {
 
                     // Check for silence in the block
                     let max_abs = max_abs_sample(output_buffer.channel_f32(0));
-                    if max_abs < SYNTH_SILENCE_THRESHOLD {
+                    if max_abs < SILENCE_THRESHOLD {
                         self.silence_samples_count =
                             self.silence_samples_count.saturating_add(block_len);
                     } else {
@@ -121,7 +125,7 @@ impl SynthSourceGenerator for FunDspSynthSourceGenerator {
                     let max_abs_right = max_abs_sample(output_buffer.channel_f32(1));
                     let max_abs = max_abs_left.max(max_abs_right);
 
-                    if max_abs < SYNTH_SILENCE_THRESHOLD {
+                    if max_abs < SILENCE_THRESHOLD {
                         self.silence_samples_count =
                             self.silence_samples_count.saturating_add(block_len);
                     } else {

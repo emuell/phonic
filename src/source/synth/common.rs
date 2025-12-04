@@ -1,8 +1,4 @@
-use std::{
-    sync::mpsc::SyncSender,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc::SyncSender, sync::Arc, time::Duration};
 
 use crossbeam_queue::ArrayQueue;
 
@@ -14,7 +10,10 @@ use crate::{
         status::{PlaybackStatusContext, PlaybackStatusEvent},
         unique_source_id, Source, SourceTime,
     },
-    utils::fader::{FaderState, VolumeFader},
+    utils::{
+        fader::{FaderState, VolumeFader},
+        time::{SampleTime, SampleTimeClock},
+    },
     Error,
 };
 
@@ -50,7 +49,8 @@ where
     playback_name: Arc<String>,
     playback_options: SynthPlaybackOptions,
     playback_pos: u64,
-    playback_pos_report_instant: Instant,
+    playback_pos_emit_rate: Option<SampleTime>,
+    playback_pos_sample_time_clock: SampleTimeClock,
     playback_finished: bool,
 }
 
@@ -75,6 +75,12 @@ where
             volume_fader.start_fade_in(duration);
         }
         let playback_message_queue = Arc::new(ArrayQueue::new(128));
+
+        let playback_pos_emit_rate = options
+            .playback_pos_emit_rate
+            .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
+        let playback_pos_sample_time_clock = SampleTimeClock::new(sample_rate);
+
         Ok(Self {
             generator: Box::new(generator),
             sample_rate,
@@ -87,16 +93,17 @@ where
             playback_name: Arc::new(generator_name.to_string()),
             playback_options: options,
             playback_pos: 0,
-            playback_pos_report_instant: Instant::now(),
+            playback_pos_emit_rate,
+            playback_pos_sample_time_clock,
             playback_finished: false,
         })
     }
 
-    fn should_report_pos(&mut self) -> bool {
-        if let Some(report_duration) = self.playback_options.playback_pos_emit_rate {
-            let should_report = self.playback_pos_report_instant.elapsed() >= report_duration;
-            self.playback_pos_report_instant = Instant::now();
-            should_report
+    fn should_report_pos(&self, time: &SourceTime) -> bool {
+        if let Some(emit_rate) = self.playback_pos_emit_rate {
+            self.playback_pos_sample_time_clock
+                .elapsed(time.pos_in_frames)
+                >= emit_rate
         } else {
             false
         }
@@ -144,7 +151,7 @@ impl<Generator> Source for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
-    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
         if let Some(msg) = self.playback_message_queue.pop() {
@@ -185,8 +192,10 @@ where
         self.playback_pos += written as u64;
 
         // send Position Event
-        if self.should_report_pos() {
-            if let Some(event_send) = &self.playback_status_send {
+        if let Some(event_send) = &self.playback_status_send {
+            if self.should_report_pos(time) {
+                self.playback_pos_sample_time_clock
+                    .reset(time.pos_in_frames);
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
                 if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
                     id: self.playback_id,

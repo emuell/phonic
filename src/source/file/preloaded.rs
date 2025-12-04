@@ -2,7 +2,7 @@ use std::{
     ops::Range,
     path::Path,
     sync::{mpsc::SyncSender, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crossbeam_queue::ArrayQueue;
@@ -329,7 +329,6 @@ impl PreloadedFileSource {
         self.playback_pos = 0;
         self.playback_repeat_count = self.playback_repeat;
         self.playback_pos_eof = false;
-        self.file_source.playback_pos_report_instant = Instant::now();
         self.file_source.playback_finished = false;
 
         // Reset resampler state
@@ -478,7 +477,7 @@ impl FileSource for PreloadedFileSource {
 }
 
 impl Source for PreloadedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // consume playback messages
         self.process_messages();
 
@@ -524,6 +523,7 @@ impl Source for PreloadedFileSource {
 
         // send Position change events, if needed
         self.file_source.send_playback_position_status(
+            time,
             self.playback_pos as u64,
             self.file_buffer.channel_count,
             self.file_buffer.sample_rate,

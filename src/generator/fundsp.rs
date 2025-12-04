@@ -500,7 +500,7 @@ impl Source for FunDspGenerator {
         let mut active_voices = 0;
         for voice in &mut self.voices {
             if voice.is_active() {
-                voice.process(output);
+                voice.process(output, time);
                 if voice.is_active() {
                     // count voices that are still active after processed
                     active_voices += 1;

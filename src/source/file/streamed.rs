@@ -285,7 +285,7 @@ impl FileSource for StreamedFileSource {
 }
 
 impl Source for StreamedFileSource {
-    fn write(&mut self, output: &mut [f32], _time: &SourceTime) -> usize {
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // consume playback messages
         self.process_messages();
 
@@ -340,6 +340,7 @@ impl Source for StreamedFileSource {
 
         // send Position change events, if needed
         self.file_source.send_playback_position_status(
+            time,
             self.written_samples(total_written as u64),
             self.signal_spec.channels.count(),
             self.signal_spec.rate,

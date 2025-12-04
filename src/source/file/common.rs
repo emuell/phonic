@@ -1,6 +1,6 @@
 use std::{
     sync::{mpsc::SyncSender, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crossbeam_queue::ArrayQueue;
@@ -20,7 +20,9 @@ use crate::{
         resampler::{
             cubic::CubicResampler, rubato::RubatoResampler, AudioResampler, ResamplingSpecs,
         },
+        time::{SampleTime, SampleTimeClock},
     },
+    SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -39,8 +41,8 @@ pub struct FileSourceImpl {
     pub playback_message_queue: Arc<ArrayQueue<FilePlaybackMessage>>,
     pub playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     pub playback_status_context: Option<PlaybackStatusContext>,
-    pub playback_pos_report_instant: Instant,
-    pub playback_pos_emit_rate: Option<Duration>,
+    pub playback_pos_sample_time_clock: SampleTimeClock,
+    pub playback_pos_emit_rate: Option<SampleTime>,
     pub playback_finished: bool,
     pub samples_to_next_speed_update: usize,
     pub speed_glide_rate: f32,
@@ -95,8 +97,10 @@ impl FileSourceImpl {
         let playback_status_context = None;
 
         // copy and initialize options which are applied while playback
-        let playback_pos_report_instant = Instant::now();
-        let playback_pos_emit_rate = options.playback_pos_emit_rate;
+        let playback_pos_sample_time_clock = SampleTimeClock::new(output_sample_rate);
+        let playback_pos_emit_rate = options
+            .playback_pos_emit_rate
+            .map(|d| SampleTimeClock::duration_to_sample_time(d, output_sample_rate));
         let playback_finished = false;
 
         let fade_out_duration = options.fade_out_duration;
@@ -121,7 +125,7 @@ impl FileSourceImpl {
             playback_message_queue,
             playback_status_send,
             playback_status_context,
-            playback_pos_report_instant,
+            playback_pos_sample_time_clock,
             playback_pos_emit_rate,
             playback_finished,
             samples_to_next_speed_update,
@@ -161,9 +165,11 @@ impl FileSourceImpl {
             .expect("failed to update resampler specs");
     }
 
-    pub fn should_report_pos(&self) -> bool {
-        if let Some(report_duration) = self.playback_pos_emit_rate {
-            self.playback_pos_report_instant.elapsed() >= report_duration
+    pub fn should_report_pos(&self, time: &SourceTime) -> bool {
+        if let Some(emit_rate) = self.playback_pos_emit_rate {
+            self.playback_pos_sample_time_clock
+                .elapsed(time.pos_in_frames)
+                >= emit_rate
         } else {
             false
         }
@@ -171,13 +177,15 @@ impl FileSourceImpl {
 
     pub fn send_playback_position_status(
         &mut self,
+        time: &SourceTime,
         sample_pos: u64,
         channel_count: usize,
         sample_rate: u32,
     ) {
         if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos() {
-                self.playback_pos_report_instant = Instant::now();
+            if self.should_report_pos(time) {
+                self.playback_pos_sample_time_clock
+                    .reset(time.pos_in_frames);
                 let frame_pos = sample_pos / channel_count as u64;
                 let second_pos = frame_pos as f64 / sample_rate as f64;
                 // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
