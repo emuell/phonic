@@ -218,3 +218,11 @@ pub mod effects {
 // public mods
 
 pub mod utils;
+
+// -------------------------------------------------------------------------------------------------
+
+// public re-exports
+
+pub use four_cc;
+#[cfg(feature = "fundsp")]
+pub use fundsp;
