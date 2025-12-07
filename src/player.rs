@@ -399,6 +399,8 @@ impl Player {
     /// events to trigger or stop individual notes.
     ///
     /// Use `mixer_id` to specify which mixer to add the generator to. If None, adds to the main mixer.
+    ///
+    /// Use [`DynGenerator`] as source type if you need to play a `dyn Generator`.
     pub fn play_generator_source<
         G: Generator + 'static,
         M: Into<Option<MixerId>>,

@@ -182,7 +182,7 @@ pub mod generators {
     //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
     pub use super::generator::{
-        sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        r#dyn::DynGenerator, sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
     };
 
     #[cfg(feature = "fundsp")]

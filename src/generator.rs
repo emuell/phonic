@@ -19,6 +19,8 @@ pub mod sampler;
 #[cfg(feature = "fundsp")]
 pub mod fundsp;
 
+pub mod r#dyn;
+
 // -------------------------------------------------------------------------------------------------
 
 /// Generates a unique source id for a triggered note in a generator.
