@@ -105,6 +105,7 @@ fn main() -> Result<(), Error> {
         FunDspGenerator::with_parameters(
             "fm_synth",
             &fm3_synth::parameters(),
+            None,
             fm3_synth::voice_factory,
             8, // 8 voices for polyphony
             None,

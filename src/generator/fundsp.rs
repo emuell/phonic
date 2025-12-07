@@ -75,9 +75,9 @@ impl FunDspGenerator {
     /// Create a new FunDSP-based generator with the given voice count.
     ///
     /// # Arguments
-    /// * `synth_name` - A name for the synth (for logging/debugging).
-    /// * `voice_factory` - Function that creates a voice unit with given.
-    ///   (frequency, volume, gate, panning) shared variables
+    /// * `synth_name` - A name for the synth (for playback status tracking and debugging).
+    /// * `voice_factory` - Function that creates a voice unit with given
+    ///   (frequency, volume, gate, panning) shared variables.
     /// * `voice_count` - Maximum number of simultaneous voices.
     /// * `playback_status_send` - Sender for playback status events.
     /// * `playback_pos_emit_rate` - Emit rate for playback position events. 1 sec when undefined.
@@ -165,18 +165,21 @@ impl FunDspGenerator {
     /// Create a new FunDSP-based generator with the given voice count and shared parameters.
     ///
     /// # Arguments
-    /// * `synth_name` - A name for the synth (for logging/debugging).
+    /// * `synth_name` - A name for the synth (for playback status tracking and debugging).
     /// * `parameters` - A slice of parameters which will be passed to the factory
-    ///   in order automate variables.
+    ///   in order automate vars within the factory.
+    /// * `parameter_state` - Optional parameter values that should be applied initially.
+    ///   When None, the parameters will be initialized with their default values.
     /// * `voice_factory` - Function that creates a voice unit with given
     ///   (frequency, volume, gate, panning) shared variables.
     /// * `voice_count` - Maximum number of simultaneous voices.
     /// * `playback_status_send` - Sender for playback status events.
-    /// * `playback_pos_emit_rate` - Emit rate for playback position events.
+    /// * `playback_pos_emit_rate` - Optional emit rate for playback position events.
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
         parameters: &[FloatParameter],
+        parameter_state: Option<&[(FourCC, f32)]>,
         voice_factory: F,
         voice_count: usize,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
@@ -213,6 +216,19 @@ impl FunDspGenerator {
                     "Duplicate parameter ID '{}' in parameter set",
                     p.id()
                 )));
+            }
+        }
+
+        // Apply initial parameter state, if any
+        if let Some(parameter_state) = parameter_state {
+            for (id, value) in parameter_state {
+                if let Some(shared_parameter) = shared_parameters.get_mut(id) {
+                    shared_parameter.set_value_clamped(*value);
+                } else {
+                    return Err(Error::ParameterError(format!(
+                        "invalid parameter ID '{id}' in initial parameter state set"
+                    )));
+                }
             }
         }
 
