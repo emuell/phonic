@@ -246,7 +246,7 @@ impl Player {
     ///
     /// Example one-shot sound:
     /// ```rust, no_run
-    /// use fundsp::hacker32::*;
+    /// use phonic::fundsp::hacker32::*;
     ///
     /// // Create a 2-second sine wave at 440 Hz
     /// let duration = 2.0;

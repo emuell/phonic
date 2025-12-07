@@ -10,7 +10,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A [`Generator`] impl which wraps a (boxed) dyn Generator to make it a concrete sized type.
+/// A generator impl which wraps a (boxed) `dyn Generator`.
 ///
 /// Can be useful to play a dyn Generator source via
 /// [Player::play_generator_source](crate::Player::play_generator_source).

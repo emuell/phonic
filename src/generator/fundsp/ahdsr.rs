@@ -156,8 +156,7 @@ impl AudioNode for SharedAhdsrNode {
 ///
 /// # Example
 /// ```rust
-/// use fundsp::hacker32::*;
-/// use phonic::generators::shared_ahdsr;
+/// use phonic::{fundsp::hacker32::*, generators::shared_ahdsr};
 ///
 /// let gate = shared(0.0);
 /// let attack = shared(0.01);

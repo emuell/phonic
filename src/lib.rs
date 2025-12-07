@@ -223,6 +223,8 @@ pub mod utils;
 
 // public re-exports
 
+/// Create unique [`Parameter`] ids.
 pub use four_cc;
+/// Create custom Generator impls via [generators::FunDspGenerator].
 #[cfg(feature = "fundsp")]
 pub use fundsp;

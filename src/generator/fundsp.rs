@@ -39,8 +39,7 @@ use voice::FunDspVoice;
 ///
 /// # Example
 /// ```rust
-/// use fundsp::hacker32::*;
-/// use phonic::generators::FunDspGenerator;
+/// use phonic::{fundsp::hacker32::*, generators::FunDspGenerator};
 ///
 /// // Simple fundsp generator without extra parameters
 /// let generator = FunDspGenerator::new(
