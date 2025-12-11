@@ -12,6 +12,7 @@ pub mod amplified;
 pub mod converted;
 pub mod empty;
 pub mod file;
+pub mod guarded;
 pub mod mapped;
 pub mod mixed;
 pub mod panned;

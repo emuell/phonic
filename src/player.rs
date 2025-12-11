@@ -2,7 +2,7 @@ use std::{
     sync::{
         atomic::{self, AtomicBool, AtomicUsize, Ordering},
         mpsc::{sync_channel, SyncSender},
-        Arc,
+        Arc, Mutex,
     },
     thread,
     time::Duration,
@@ -20,14 +20,16 @@ use crate::{
         amplified::AmplifiedSource,
         converted::ConvertedSource,
         file::FileSource,
+        guarded::GuardedSource,
         mixed::{MixedSource, MixerMessage},
         panned::PannedSource,
         playback::PlaybackMessageQueue,
         resampled::ResamplingQuality,
         status::{PlaybackStatusContext, PlaybackStatusEvent},
         synth::SynthSource,
+        Source,
     },
-    Generator, Source,
+    Generator,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -53,6 +55,12 @@ pub use handles::{
     EffectHandle, FilePlaybackHandle, GeneratorPlaybackHandle, SourcePlaybackHandle,
     SynthPlaybackHandle,
 };
+
+/// A callback function to handle panics occurring within the player's main mixer.
+///
+/// Will be called once only. The player is silent afterwards and should be shut down
+/// as soon as possible.
+pub type PanicHandler = crate::source::guarded::PanicHandler;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -112,6 +120,7 @@ pub struct Player {
     collector_running: Arc<AtomicBool>,
     mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
     mixer_effects: Arc<DashMap<EffectId, (MixerId, Option<&'static str>)>>,
+    panic_handler: Arc<Mutex<Option<PanicHandler>>>,
 }
 
 impl Player {
@@ -147,8 +156,14 @@ impl Player {
 
         let mixer_effects = Arc::new(DashMap::new());
 
-        // assign our main mixer as sink source
-        output_device.play(Box::new(main_mixer));
+        // wrap main mixer into a GuardedSource
+        let panic_handler = Arc::new(Mutex::new(None));
+
+        let guarded_main_mixer =
+            GuardedSource::new(main_mixer, "Player Main-Mixer", Arc::clone(&panic_handler));
+
+        // assign the wrapped main mixer as sink source
+        output_device.play(Box::new(guarded_main_mixer));
 
         Self {
             output_device,
@@ -158,6 +173,7 @@ impl Player {
             collector_running,
             mixer_event_queues,
             mixer_effects,
+            panic_handler,
         }
     }
 
@@ -197,6 +213,19 @@ impl Player {
     /// Should be used by custom audio sources only.
     pub fn playback_status_sender(&self) -> SyncSender<PlaybackStatusEvent> {
         self.playback_status_sender.clone()
+    }
+
+    /// Sets or replaces a panic handler for the player's main mixer.
+    ///
+    /// The provided handler will be called once when the main mixer panics during audio processing.
+    /// Should be used for diagnositic and logging purposes only.
+    ///
+    /// Setting `None` will disable panic handling and just log panics instead.
+    ///
+    /// Use `panic::set_hook` to override default panic behavior of external threads in order to
+    /// e.g. shut down the process after a panic in the audio threads.
+    pub fn set_panic_handler(&mut self, handler: Option<PanicHandler>) {
+        *self.panic_handler.lock().unwrap() = handler;
     }
 
     /// Start audio playback.

@@ -122,7 +122,7 @@ pub use output::OutputDevice;
 
 pub use player::{
     EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle, MixerId,
-    NotePlaybackId, PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
+    NotePlaybackId, PanicHandler, PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
