@@ -175,6 +175,7 @@ impl FunDspGenerator {
     /// * `playback_status_send` - Sender for playback status events.
     /// * `playback_pos_emit_rate` - Optional emit rate for playback position events.
     /// * `sample_rate` - Output sample rate.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
         parameters: &[FloatParameter],

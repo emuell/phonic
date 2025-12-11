@@ -165,10 +165,12 @@ impl SamplerVoice {
 
         // Apply envelope to the voice output
         if let Some(envelope_parameters) = envelope_parameters {
-            debug_assert!(self.envelope.stage() != AhdsrStage::Idle);
             let mut output = &mut output[..written];
-            if self.envelope.stage() == AhdsrStage::Sustain {
-                // no need to run the envelope per frame in sustain state
+            if matches!(
+                self.envelope.stage(),
+                AhdsrStage::Sustain | AhdsrStage::Idle
+            ) {
+                // no need to run the envelope per frame in sustain or idle state
                 scale_buffer(output, self.envelope.output());
             } else {
                 for frame in output.frames_mut(channel_count) {
