@@ -6,11 +6,9 @@ use std::{
 use fundsp::hacker32::*;
 
 use crate::{
-    utils::{
-        buffer::{add_buffers, max_abs_sample},
-        time::{SampleTime, SampleTimeClock},
-    },
-    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime,
+    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime, utils::{
+        buffer::{add_buffers, max_abs_sample}, pitch_from_note, time::{SampleTime, SampleTimeClock}
+    }
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -205,31 +203,31 @@ impl FunDspVoice {
 
     pub fn set_speed(&mut self, speed: f64, glide: Option<f32>, sample_rate: u32) {
         if let Some(note) = self.current_note {
-            let base_freq = crate::utils::pitch_from_note(note);
+            let base_freq = pitch_from_note(note);
             let new_freq = base_freq * speed;
-
             let glide_duration_samples = if let Some(semitones_per_sec) = glide {
                 let current_freq = self.frequency.value() as f64;
-
                 // Calculate the distance in semitones
                 let semitone_distance = 12.0 * (new_freq / current_freq).log2();
-
-                // Calculate glide time in seconds: distance / speed
-                let glide_time_sec =
-                    (semitone_distance.abs() / semitones_per_sec as f64).max(0.0) as f32;
-
-                // Convert to samples
-                Some((glide_time_sec * sample_rate as f32) as u32)
+                if semitone_distance.abs() > 0.0 && semitones_per_sec > 0.0 {
+                    // Calculate glide time in seconds: distance / speed
+                    let glide_time_sec =
+                        (semitone_distance.abs() / semitones_per_sec as f64).max(0.0) as f32;
+                    // Convert to samples
+                    let glide_time_samples = (glide_time_sec * sample_rate as f32) as u32;
+                    Some(glide_time_samples)
+                } else {
+                    None
+                }
             } else {
                 None
             };
-
             self.set_frequency(new_freq, glide_duration_samples);
         }
     }
 
     pub fn set_frequency(&mut self, freq: f64, glide_duration_samples: Option<u32>) {
-        if let Some(duration) = glide_duration_samples {
+        if let Some(duration) = glide_duration_samples.filter(|g| *g > 0) {
             let current_freq = self.frequency.value();
             self.glide_state = Some(FunDSPGlideState::new(current_freq, freq as f32, duration));
         } else {
@@ -412,6 +410,7 @@ struct FunDSPGlideState {
 
 impl FunDSPGlideState {
     fn new(start_freq: f32, target_freq: f32, duration_samples: u32) -> Self {
+        debug_assert!(duration_samples > 0, "Invalid duration for a note glide, duration must be > 0");
         let duration_samples = duration_samples as usize;
         let current_sample = 0;
         Self {
