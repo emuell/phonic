@@ -99,7 +99,7 @@ impl Sampler {
     ///
     /// Passing None as `playback_status_send` argument will disable all playback events.
     pub fn from_file<P: AsRef<Path>>(
-        path: P,
+        file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         playback_pos_emit_rate: Option<Duration>,
@@ -107,20 +107,77 @@ impl Sampler {
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        let playback_id = unique_source_id();
-
-        // Pre-allocate playback message queue
-        const PLAYBACK_MESSAGE_QUEUE_SIZE: usize = 10 + 16;
-        let playback_message_queue = Arc::new(ArrayQueue::new(PLAYBACK_MESSAGE_QUEUE_SIZE));
-
-        // Load sample file
-        let file_path = Arc::new(path.as_ref().to_string_lossy().to_string());
-        let sample = PreloadedFileSource::from_file(
-            path,
+        let file_source = PreloadedFileSource::from_file(
+            &file_path,
             playback_status_send.clone(),
             Default::default(),
             output_sample_rate,
         )?;
+
+        Self::from_file_source(
+            file_source,
+            file_path,
+            envelope_parameters,
+            playback_status_send,
+            playback_pos_emit_rate,
+            voice_count,
+            output_channel_count,
+            output_sample_rate,
+        )
+    }
+
+    /// Create a new sampler with the given raw encoded sample file buffer.
+    /// See [Self::from_file] for more info about the parameters.
+    pub fn from_file_buffer<P: AsRef<Path>>(
+        file_buffer: Vec<u8>,
+        file_path: P,
+        envelope_parameters: Option<AhdsrParameters>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
+        voice_count: usize,
+        output_channel_count: usize,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error> {
+        let file_path = file_path.as_ref().to_string_lossy().to_string();
+        let file_source = PreloadedFileSource::from_file_buffer(
+            file_buffer,
+            &file_path,
+            playback_status_send.clone(),
+            Default::default(),
+            output_sample_rate,
+        )?;
+
+        Self::from_file_source(
+            file_source,
+            file_path,
+            envelope_parameters,
+            playback_status_send,
+            playback_pos_emit_rate,
+            voice_count,
+            output_channel_count,
+            output_sample_rate,
+        )
+    }
+
+    fn from_file_source<P: AsRef<Path>>(
+        file_source: PreloadedFileSource,
+        file_path: P,
+        envelope_parameters: Option<AhdsrParameters>,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        playback_pos_emit_rate: Option<Duration>,
+        voice_count: usize,
+        output_channel_count: usize,
+        output_sample_rate: u32,
+    ) -> Result<Self, Error> {
+        // Pre-allocate playback message queue
+        const PLAYBACK_MESSAGE_QUEUE_SIZE: usize = 10 + 16;
+        let playback_message_queue = Arc::new(ArrayQueue::new(PLAYBACK_MESSAGE_QUEUE_SIZE));
+
+        // Create a new unique source id
+        let playback_id = unique_source_id();
+
+        // Memorize file path
+        let file_path = Arc::new(file_path.as_ref().to_string_lossy().to_string());
 
         // Set voice playback options
         let mut voice_playback_options = FilePlaybackOptions::default();
@@ -138,7 +195,7 @@ impl Sampler {
         // Allocate voices
         let mut voices = Vec::with_capacity(voice_count);
         for _ in 0..voice_count {
-            let file_source = sample
+            let file_source = file_source
                 .clone(voice_playback_options, output_sample_rate)
                 .map_err(|err| {
                     Error::ParameterError(format!("Failed to create sampler voice: {err}"))

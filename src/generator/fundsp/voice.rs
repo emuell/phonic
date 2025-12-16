@@ -6,9 +6,12 @@ use std::{
 use fundsp::hacker32::*;
 
 use crate::{
-    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime, utils::{
-        buffer::{add_buffers, max_abs_sample}, pitch_from_note, time::{SampleTime, SampleTimeClock}
-    }
+    utils::{
+        buffer::{add_buffers, max_abs_sample},
+        pitch_from_note,
+        time::{SampleTime, SampleTimeClock},
+    },
+    NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -410,7 +413,10 @@ struct FunDSPGlideState {
 
 impl FunDSPGlideState {
     fn new(start_freq: f32, target_freq: f32, duration_samples: u32) -> Self {
-        debug_assert!(duration_samples > 0, "Invalid duration for a note glide, duration must be > 0");
+        debug_assert!(
+            duration_samples > 0,
+            "Invalid duration for a note glide, duration must be > 0"
+        );
         let duration_samples = duration_samples as usize;
         let current_sample = 0;
         Self {
