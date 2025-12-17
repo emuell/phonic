@@ -18,8 +18,8 @@ use crate::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
     },
-    Error, FilePlaybackOptions, Generator, NotePlaybackId, PlaybackId, PlaybackStatusContext,
-    PlaybackStatusEvent,
+    Error, FilePlaybackOptions, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId,
+    PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -44,6 +44,7 @@ pub struct Sampler {
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     stopping: bool, // True if stop has been called and we are waiting for voices to decay
     stopped: bool,  // True if all voices have decayed after a stop call
+    options: GeneratorPlaybackOptions,
     output_sample_rate: u32,
     output_channel_count: usize,
     temp_buffer: Vec<f32>,
@@ -102,8 +103,8 @@ impl Sampler {
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-        playback_pos_emit_rate: Option<Duration>,
         voice_count: usize,
+        options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -118,9 +119,9 @@ impl Sampler {
             file_source,
             file_path,
             envelope_parameters,
-            playback_status_send,
-            playback_pos_emit_rate,
             voice_count,
+            playback_status_send,
+            options,
             output_channel_count,
             output_sample_rate,
         )
@@ -128,13 +129,14 @@ impl Sampler {
 
     /// Create a new sampler with the given raw encoded sample file buffer.
     /// See [Self::from_file] for more info about the parameters.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_file_buffer<P: AsRef<Path>>(
         file_buffer: Vec<u8>,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-        playback_pos_emit_rate: Option<Duration>,
         voice_count: usize,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -151,21 +153,22 @@ impl Sampler {
             file_source,
             file_path,
             envelope_parameters,
-            playback_status_send,
-            playback_pos_emit_rate,
             voice_count,
+            playback_status_send,
+            options,
             output_channel_count,
             output_sample_rate,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn from_file_source<P: AsRef<Path>>(
         file_source: PreloadedFileSource,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-        playback_pos_emit_rate: Option<Duration>,
         voice_count: usize,
+        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
+        options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -181,7 +184,7 @@ impl Sampler {
 
         // Set voice playback options
         let mut voice_playback_options = FilePlaybackOptions::default();
-        if let Some(duration) = playback_pos_emit_rate {
+        if let Some(duration) = options.playback_pos_emit_rate {
             voice_playback_options = voice_playback_options.playback_pos_emit_rate(duration);
         }
         if envelope_parameters.is_none() {
@@ -250,6 +253,7 @@ impl Sampler {
             active_parameters,
             stopping,
             stopped,
+            options,
             output_sample_rate,
             output_channel_count,
             temp_buffer,
@@ -522,6 +526,10 @@ impl Source for Sampler {
 impl Generator for Sampler {
     fn playback_id(&self) -> PlaybackId {
         self.playback_id
+    }
+
+    fn playback_options(&self) -> &GeneratorPlaybackOptions {
+        &self.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>> {

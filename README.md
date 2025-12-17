@@ -37,6 +37,10 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
   - DSP effects are automatically bypassed to save CPU cycles when they receive no audible input.
 
+- **Performance Monitoring**:
+  - Measure the CPU load of the main mixer and individual audio sources in real-time.
+  - Access average and peak load metrics to identify performance bottlenecks.
+
 ### Documentation
 
 Rust docs for the last published versions are available at <https://docs.rs/phonic>
@@ -149,10 +153,10 @@ fn main() -> Result<(), Error> {
     let reverb = player.add_effect(ReverbEffect::with_parameters(0.6, 0.8), None)?;
 
     // Create a new sub-mixer that is a child of the main mixer.
-    let chorus_mixer_id = player.add_mixer(None)?;
+    let chorus_mixer = player.add_mixer(None)?;
     // Add a chorus effect to this new mixer. Sources routed to this mixer will
     // now apply the chorus effect and reverb (the main mixer effects).
-    let chorus = player.add_effect(ChorusEffect::default(), chorus_mixer_id)?;
+    let chorus = player.add_effect(ChorusEffect::default(), chorus_mixer.id())?;
 
     // Effect parameters can be automated via the returned handles.
     // The `None` arguments are optional sample times to schedule events.

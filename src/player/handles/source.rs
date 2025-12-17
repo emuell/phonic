@@ -1,5 +1,6 @@
 use super::{FilePlaybackHandle, GeneratorPlaybackHandle, SynthPlaybackHandle};
-use crate::Error;
+
+use crate::{error::Error, source::measured::CpuLoad};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -18,6 +19,18 @@ impl SourcePlaybackHandle {
             SourcePlaybackHandle::File(handle) => handle.is_playing(),
             SourcePlaybackHandle::Synth(handle) => handle.is_playing(),
             SourcePlaybackHandle::Generator(handle) => handle.is_playing(),
+        }
+    }
+
+    /// Get the CPU load data for this source.
+    ///
+    /// Returns `None` if CPU measurement was not enabled for this source, or if the
+    /// measurement is not available at this time.
+    pub fn cpu_load(&self) -> Option<CpuLoad> {
+        match self {
+            SourcePlaybackHandle::File(handle) => handle.cpu_load(),
+            SourcePlaybackHandle::Synth(handle) => handle.cpu_load(),
+            SourcePlaybackHandle::Generator(handle) => handle.cpu_load(),
         }
     }
 

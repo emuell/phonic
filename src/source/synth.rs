@@ -51,6 +51,10 @@ pub struct SynthPlaybackOptions {
     /// By default None, which means play on the main mixer. When set to some specific id,
     /// the source will be played on the given mixer instead of the default one.
     pub target_mixer: Option<MixerId>,
+
+    /// By default false. When true, measure the CPU load of the synth source.
+    /// CPU load can then be accessed via the source's playback handle.
+    pub measure_cpu_load: bool,
 }
 
 impl Default for SynthPlaybackOptions {
@@ -63,6 +67,7 @@ impl Default for SynthPlaybackOptions {
             fade_out_duration: Some(Duration::from_millis(50)),
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
             target_mixer: None,
+            measure_cpu_load: false,
         }
     }
 }
@@ -103,6 +108,12 @@ impl SynthPlaybackOptions {
 
     pub fn target_mixer(mut self, mixer_id: MixerId) -> Self {
         self.target_mixer = Some(mixer_id);
+        self
+    }
+
+    /// Set whether to measure the CPU load of this source.
+    pub fn measure_cpu_load(mut self, measure: bool) -> Self {
+        self.measure_cpu_load = measure;
         self
     }
 

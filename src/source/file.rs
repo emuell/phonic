@@ -66,14 +66,18 @@ pub struct FilePlaybackOptions {
     /// or down.
     pub resampling_quality: ResamplingQuality,
 
+    /// By default None, which means play on the main mixer. When set to some specific id,
+    /// the source will be played on the given mixer instead of the default one.
+    pub target_mixer: Option<MixerId>,
+
+    /// By default false. When true, measure the CPU load of the file source.
+    /// CPU load can then be accessed via the source's playback handle.
+    pub measure_cpu_load: bool,
+
     /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
     pub playback_pos_emit_rate: Option<Duration>,
-
-    /// By default None, which means play on the main mixer. When set to some specific id,
-    /// the source will be played on the given mixer instead of the default one.
-    pub target_mixer: Option<MixerId>,
 }
 
 impl Default for FilePlaybackOptions {
@@ -88,8 +92,9 @@ impl Default for FilePlaybackOptions {
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
             resampling_quality: ResamplingQuality::Default,
-            playback_pos_emit_rate: Some(Duration::from_secs(1)),
             target_mixer: None,
+            measure_cpu_load: false,
+            playback_pos_emit_rate: Some(Duration::from_secs(1)),
         }
     }
 }
@@ -158,6 +163,12 @@ impl FilePlaybackOptions {
 
     pub fn target_mixer(mut self, mixer_id: MixerId) -> Self {
         self.target_mixer = Some(mixer_id);
+        self
+    }
+
+    /// Set whether to measure the CPU load of this source.
+    pub fn measure_cpu_load(mut self, measure: bool) -> Self {
+        self.measure_cpu_load = measure;
         self
     }
 

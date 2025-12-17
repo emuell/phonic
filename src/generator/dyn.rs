@@ -4,8 +4,8 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
-    ClonableParameter, Error, Generator, GeneratorPlaybackMessage, ParameterValueUpdate,
-    PlaybackId, PlaybackStatusEvent, Source, SourceTime,
+    ClonableParameter, Error, Generator, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
+    ParameterValueUpdate, PlaybackId, PlaybackStatusEvent, Source, SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -49,6 +49,10 @@ impl Generator for DynGenerator {
 
     fn playback_id(&self) -> PlaybackId {
         self.generator.playback_id()
+    }
+
+    fn playback_options(&self) -> &GeneratorPlaybackOptions {
+        self.generator.playback_options()
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>> {

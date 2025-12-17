@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use phonic::{generators::Sampler, utils::speed_from_note, Error};
+use phonic::{generators::Sampler, utils::speed_from_note, Error, GeneratorPlaybackOptions};
 
 // Use a fundsp generator, if available, else a sampler
 #[cfg(feature = "fundsp")]
@@ -45,12 +45,11 @@ fn main() -> Result<(), Error> {
             "assets/cowbell.wav",
             None,
             None,
-            None,
             2,
+            GeneratorPlaybackOptions::default(),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
-        None,
         None,
     )?;
 
@@ -67,12 +66,11 @@ fn main() -> Result<(), Error> {
                 Duration::from_secs_f32(2.0),
             )?),
             None,
-            None,
             4,
+            GeneratorPlaybackOptions::default(),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
-        None,
         None,
     )?;
     // Create a fundsp bass generator FM synth
@@ -83,10 +81,9 @@ fn main() -> Result<(), Error> {
             bass_synth::voice_factory,
             8,
             None,
-            None,
+            GeneratorPlaybackOptions::default(),
             player.output_sample_rate(),
         )?,
-        None,
         None,
     )?;
 

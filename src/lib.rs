@@ -49,11 +49,11 @@
 //!     let samples_per_sec = player.output_sample_rate() as u64;
 //!
 //!     // Add a new sub-mixer with a chorus and reverb effect to the main mixer.
-//!     let sub_mixer_id = {
-//!         let new_mixer_id = player.add_mixer(None)?;
-//!         player.add_effect(ChorusEffect::default(), new_mixer_id)?;
-//!         player.add_effect(ReverbEffect::default(), new_mixer_id)?;
-//!         new_mixer_id
+//!     let sub_mixer = {
+//!         let new_mixer = player.add_mixer(None)?;
+//!         player.add_effect(ChorusEffect::default(), new_mixer.id())?;
+//!         player.add_effect(ReverbEffect::default(), new_mixer.id())?;
+//!         new_mixer
 //!     };
 //!
 //!     // Add a limiter to the main mixer. All sounds, including the sub mixer's output,
@@ -66,7 +66,7 @@
 //!
 //!     // Play a file and get a handle to control it.
 //!     let file = player.play_file("path/to/your/file.wav",
-//!       FilePlaybackOptions::default().target_mixer(sub_mixer_id)
+//!       FilePlaybackOptions::default().target_mixer(sub_mixer.id())
 //!     )?;
 //!
 //!     // Control playback via the returned handles.
@@ -121,8 +121,9 @@ pub use output::DefaultOutputDevice;
 pub use output::OutputDevice;
 
 pub use player::{
-    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle, MixerId,
-    NotePlaybackId, PanicHandler, PlaybackId, Player, SourcePlaybackHandle, SynthPlaybackHandle,
+    EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle,
+    MixerHandle, MixerId, NotePlaybackId, PanicHandler, PlaybackId, Player, SourcePlaybackHandle,
+    SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
@@ -132,13 +133,16 @@ pub use parameter::{
 
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
+    measured::CpuLoad,
     resampled::ResamplingQuality,
     status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},
     Source, SourceTime,
 };
 
-pub use generator::{Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage};
+pub use generator::{
+    Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
+};
 
 // -------------------------------------------------------------------------------------------------
 

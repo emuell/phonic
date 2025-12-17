@@ -5,16 +5,18 @@ use std::sync::{
 
 use basedrop::{Handle, Owned};
 use crossbeam_queue::ArrayQueue;
-use dashmap::DashMap;
 use four_cc::FourCC;
 
 use crate::{
     error::Error,
     generator::{unique_note_id, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
     parameter::ParameterValueUpdate,
-    player::{MixerId, PlaybackId},
+    player::PlaybackId,
     source::{
-        amplified::AmplifiedSourceMessage, mixed::MixerMessage, panned::PannedSourceMessage,
+        amplified::AmplifiedSourceMessage,
+        measured::{CpuLoad, SharedMeasurementState},
+        mixed::MixerMessage,
+        panned::PannedSourceMessage,
         playback::PlaybackMessageQueue,
     },
     NotePlaybackId, PlaybackStatusContext,
@@ -22,33 +24,35 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A handle to control a playing generator source.
+/// Query and change runtime playback properties of a playing [`Generator`](crate::Generator).
+///
+/// Handles are `Send` and `Sync` so they can be sent across threads.
 #[derive(Clone)]
 pub struct GeneratorPlaybackHandle {
     is_playing: Arc<AtomicBool>,
     playback_id: PlaybackId,
-    mixer_id: MixerId,
     playback_message_queue: PlaybackMessageQueue,
-    mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+    mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
     collector_handle: Handle,
+    measurement_state: Option<SharedMeasurementState>,
 }
 
 impl GeneratorPlaybackHandle {
     pub(crate) fn new(
         is_playing: Arc<AtomicBool>,
         playback_id: PlaybackId,
-        mixer_id: MixerId,
         playback_message_queue: PlaybackMessageQueue,
-        mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+        mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
         collector_handle: Handle,
+        measurement_state: Option<SharedMeasurementState>,
     ) -> Self {
         Self {
             is_playing,
             playback_id,
             playback_message_queue,
-            mixer_id,
-            mixer_event_queues,
+            mixer_event_queue,
             collector_handle,
+            measurement_state,
         }
     }
 
@@ -62,6 +66,16 @@ impl GeneratorPlaybackHandle {
         self.is_playing.load(Ordering::Relaxed)
     }
 
+    /// Get the CPU load data for this source.
+    ///
+    /// Returns `None` if CPU measurement was not enabled for this source, or if the
+    /// measurement is not available at this time.
+    pub fn cpu_load(&self) -> Option<CpuLoad> {
+        self.measurement_state
+            .as_ref()
+            .and_then(|state| state.try_lock().map(|state| state.cpu_load()).ok())
+    }
+
     /// Stop this source at the given sample time or immediately.
     pub fn stop<T: Into<Option<u64>>>(&self, stop_time: T) -> Result<(), Error> {
         let stop_time = stop_time.into();
@@ -73,7 +87,7 @@ impl GeneratorPlaybackHandle {
             // Schedule stop with mixer. Force push stop commands to avoid hanging notes...
             let playback_id = self.playback_id;
             if self
-                .mixer_event_queue()?
+                .mixer_event_queue
                 .force_push(MixerMessage::StopSource {
                     playback_id,
                     sample_time,
@@ -115,7 +129,7 @@ impl GeneratorPlaybackHandle {
             // Schedule with mixer
             let playback_id = self.playback_id;
             if self
-                .mixer_event_queue()?
+                .mixer_event_queue
                 .push(MixerMessage::SetSourceVolume {
                     playback_id,
                     volume,
@@ -155,7 +169,7 @@ impl GeneratorPlaybackHandle {
             // Schedule with mixer
             let playback_id = self.playback_id;
             if self
-                .mixer_event_queue()?
+                .mixer_event_queue
                 .push(MixerMessage::SetSourcePanning {
                     playback_id,
                     panning,
@@ -379,7 +393,7 @@ impl GeneratorPlaybackHandle {
             // Schedule with mixer
             let playback_id = self.playback_id;
             if self
-                .mixer_event_queue()?
+                .mixer_event_queue
                 .push(MixerMessage::TriggerGeneratorEvent {
                     playback_id,
                     event,
@@ -403,15 +417,6 @@ impl GeneratorPlaybackHandle {
             }
         }
         Ok(())
-    }
-
-    fn mixer_event_queue(&self) -> Result<Arc<ArrayQueue<MixerMessage>>, Error> {
-        Ok(Arc::clone(
-            self.mixer_event_queues
-                .get(&self.mixer_id)
-                .ok_or(Error::MixerNotFoundError(self.mixer_id))?
-                .value(),
-        ))
     }
 
     fn mixer_event_queue_error(event_name: &str) -> Error {

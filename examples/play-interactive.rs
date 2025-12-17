@@ -15,7 +15,7 @@ use phonic::{
     effects::{self, FilterEffectType},
     generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
-    Error, FilePlaybackOptions, GeneratorPlaybackHandle, MixerId, NotePlaybackId, Player,
+    Error, FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, NotePlaybackId,
     ResamplingQuality,
 };
 
@@ -51,11 +51,11 @@ fn main() -> Result<(), Error> {
     // Create a player instance with the output device as configured via program arguments
     let mut player = arguments::new_player(&args, None)?;
 
-    let loop_mixer_id;
+    let loop_mixer;
     let loop_filter_effect;
     {
         // create a new mixer
-        loop_mixer_id = player.add_mixer(None)?;
+        loop_mixer = player.add_mixer(None)?;
 
         // add a filter effect
         const DEFAULT_FILTER_TYPE: effects::FilterEffectType = effects::FilterEffectType::Lowpass;
@@ -68,20 +68,19 @@ fn main() -> Result<(), Error> {
                 DEFAULT_FILTER_CUTOFF,
                 DEFAULT_FILTER_Q,
             ),
-            loop_mixer_id,
+            loop_mixer.id(),
         )?;
     }
 
     // tone mixer
-    let tone_mixer_id;
+    let tone_mixer;
     {
         // create a new mixer
-        tone_mixer_id = player.add_mixer(None)?;
-
+        tone_mixer = player.add_mixer(None)?;
         // add a reverb effect
         player.add_effect(
             effects::ReverbEffect::with_parameters(0.6, 0.8),
-            tone_mixer_id,
+            tone_mixer.id(),
         )?;
     }
 
@@ -97,7 +96,7 @@ fn main() -> Result<(), Error> {
             .volume_db(-3.0)
             .speed(0.9)
             .resampling_quality(ResamplingQuality::HighQuality)
-            .target_mixer(loop_mixer_id),
+            .target_mixer(loop_mixer.id()),
     )?;
 
     // Create FunDSP synth generator with FM synthesis
@@ -109,10 +108,9 @@ fn main() -> Result<(), Error> {
             fm3_synth::voice_factory,
             8, // 8 voices for polyphony
             None,
-            None,
+            GeneratorPlaybackOptions::default().target_mixer(tone_mixer.id()),
             player.output_sample_rate(),
         )?,
-        Some(tone_mixer_id),
         None,
     )?;
 
@@ -128,17 +126,13 @@ fn main() -> Result<(), Error> {
                 Duration::from_secs(3), // release
             )?),
             None,
-            None,
             8, // 8 voices for polyphony
+            GeneratorPlaybackOptions::default().target_mixer(tone_mixer.id()),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
-        Some(tone_mixer_id),
         None,
     )?;
-
-    // wrap configured player into a mutex
-    let player = Arc::new(Mutex::new(player));
 
     // create condvar to block the main thread
     let wait_mutex_cond = Arc::new((Mutex::new(()), Condvar::new()));
@@ -180,7 +174,6 @@ fn main() -> Result<(), Error> {
     // key down handler
     let _key_down_guard = event_handler.on_key_down({
         let wait_mutex_cond = Arc::clone(&wait_mutex_cond);
-        let player = Arc::clone(&player);
         let playing_notes = Arc::clone(&playing_notes);
         let synth_generator = synth_generator.clone();
         let sampler_generator = sampler_generator.clone();
@@ -278,16 +271,13 @@ fn main() -> Result<(), Error> {
                         let octave = *current_octave.lock().unwrap();
                         let final_note = (relative_note + 12 * octave) as u8;
 
-                        let mut player = player.lock().unwrap();
                         let mut playing_notes = playing_notes.lock().unwrap();
 
                         let note_id = handle_note_on(
-                            &mut player,
                             &synth_generator,
                             &sampler_generator,
                             final_note,
                             playmode,
-                            tone_mixer_id,
                         );
                         playing_notes.insert(*key, (playmode, note_id));
                     }
@@ -357,12 +347,10 @@ enum PlayMode {
 }
 
 fn handle_note_on(
-    _player: &mut Player,
     synth_generator: &GeneratorPlaybackHandle,
     sampler_generator: &GeneratorPlaybackHandle,
     note: u8,
     playmode: PlayMode,
-    _mixer_id: MixerId,
 ) -> NotePlaybackId {
     if playmode == PlayMode::Synth {
         synth_generator

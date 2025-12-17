@@ -199,12 +199,13 @@ fn main() -> Result<(), Error> {
     player.stop();
 
     // Create a sub-mixer for the synth, child of the main mixer.
-    let bass_mixer_id = player.add_mixer(None)?;
-    let tanh_distortion = player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer_id)?;
+    let bass_mixer = player.add_mixer(None)?;
+    let tanh_distortion =
+        player.add_effect(TanhDistortion::with_parameters(0.9), bass_mixer.id())?;
 
     // Create a sub-mixer for the pad, with a high-pass filter.
-    let pad_mixer_id = player.add_mixer(None)?;
-    player.add_effect(ReverbEffect::with_parameters(0.4, 0.6), pad_mixer_id)?;
+    let pad_mixer = player.add_mixer(None)?;
+    player.add_effect(ReverbEffect::with_parameters(0.4, 0.6), pad_mixer.id())?;
 
     // Add a limiter with default parameters to the main mixer
     player.add_effect(CompressorEffect::new_limiter(), None)?;
@@ -263,7 +264,7 @@ fn main() -> Result<(), Error> {
                     .speed(speed_from_note(pad_note))
                     .volume_db(0.0)
                     .fade_out(Duration::from_millis(500))
-                    .target_mixer(pad_mixer_id),
+                    .target_mixer(pad_mixer.id()),
                 samples_per_sec,
             )?,
             Some(pad_start_time),
@@ -282,7 +283,7 @@ fn main() -> Result<(), Error> {
                 SineSynth::new(*note, note_duration_samples, samples_per_sec),
                 SynthPlaybackOptions::default()
                     .volume_db(-5.0)
-                    .target_mixer(bass_mixer_id),
+                    .target_mixer(bass_mixer.id()),
                 None,
                 samples_per_sec,
             )?;
@@ -314,6 +315,12 @@ fn main() -> Result<(), Error> {
         && player.output_sample_frame_position() < output_start_time + duration_samples
     {
         std::thread::sleep(Duration::from_millis(500));
+
+        /* // print CPU stats
+        println!("CPU usage: {}", player.cpu_load());
+        println!("  Bass: {}", bass_mixer.cpu_load());
+        println!("  Pad: {}", pad_mixer.cpu_load());
+        */
     }
 
     println!("Playback finished.");

@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     sync::{mpsc::SyncSender, Arc},
-    time::Duration,
 };
 
 use crossbeam_queue::ArrayQueue;
@@ -15,7 +14,8 @@ use crate::{
     parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
-    Error, Generator, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
+    Error, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId, PlaybackStatusContext,
+    PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -39,7 +39,8 @@ use voice::FunDspVoice;
 ///
 /// # Example
 /// ```rust
-/// use phonic::{fundsp::hacker32::*, generators::FunDspGenerator};
+/// use phonic::{GeneratorPlaybackOptions, generators::FunDspGenerator};
+/// use phonic::fundsp::hacker32::*;
 ///
 /// // Simple fundsp generator without extra parameters
 /// let generator = FunDspGenerator::new(
@@ -52,7 +53,7 @@ use voice::FunDspVoice;
 ///     },
 ///     8,      // 8 voices
 ///     None,   // no playback status sender
-///     None,   // no playback status pos emitting
+///     GeneratorPlaybackOptions::default(), // default playback options
 ///     44100,  // voice and source's sample rate
 /// );
 /// ```
@@ -66,6 +67,7 @@ pub struct FunDspGenerator {
     shared_parameters: HashMap<FourCC, FunDspFloatParameterValue>,
     stopping: bool, // True if stop has been called and we are waiting for voices to decay
     stopped: bool,  // True if all voices have decayed after a stop call
+    options: GeneratorPlaybackOptions,
     output_sample_rate: u32,
     output_channel_count: usize,
 }
@@ -86,7 +88,7 @@ impl FunDspGenerator {
         voice_factory: F,
         voice_count: usize,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-        playback_pos_emit_rate: Option<Duration>,
+        options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
     where
@@ -135,7 +137,7 @@ impl FunDspGenerator {
                 panning,
                 gate,
                 playback_status_send.clone(),
-                playback_pos_emit_rate,
+                options.playback_pos_emit_rate,
                 output_sample_rate,
             ));
         }
@@ -156,6 +158,7 @@ impl FunDspGenerator {
             shared_parameters,
             stopping,
             stopped,
+            options,
             output_sample_rate,
             output_channel_count,
         })
@@ -183,7 +186,7 @@ impl FunDspGenerator {
         voice_factory: F,
         voice_count: usize,
         playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-        playback_pos_emit_rate: Option<Duration>,
+        options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
     where
@@ -277,7 +280,7 @@ impl FunDspGenerator {
                 panning,
                 gate,
                 playback_status_send.clone(),
-                playback_pos_emit_rate,
+                options.playback_pos_emit_rate,
                 output_sample_rate,
             ));
         }
@@ -296,6 +299,7 @@ impl FunDspGenerator {
             shared_parameters,
             stopping,
             stopped,
+            options,
             output_sample_rate,
             output_channel_count,
         })
@@ -550,6 +554,10 @@ impl Source for FunDspGenerator {
 impl Generator for FunDspGenerator {
     fn playback_id(&self) -> PlaybackId {
         self.playback_id
+    }
+
+    fn playback_options(&self) -> &GeneratorPlaybackOptions {
+        &self.options
     }
 
     fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>> {

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crossbeam_queue::ArrayQueue;
-use dashmap::DashMap;
 use four_cc::FourCC;
 
 use crate::{
@@ -23,7 +22,7 @@ pub struct EffectHandle {
     effect_id: EffectId,
     mixer_id: MixerId,
     effect_name: &'static str,
-    mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+    mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
     collector_handle: Handle,
 }
 
@@ -32,14 +31,14 @@ impl EffectHandle {
         effect_id: EffectId,
         mixer_id: MixerId,
         effect_name: &'static str,
-        mixer_event_queues: Arc<DashMap<MixerId, Arc<ArrayQueue<MixerMessage>>>>,
+        mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
         collector_handle: Handle,
     ) -> Self {
         Self {
             effect_id,
             mixer_id,
             effect_name,
-            mixer_event_queues,
+            mixer_event_queue,
             collector_handle,
         }
     }
@@ -76,7 +75,7 @@ impl EffectHandle {
         );
 
         if self
-            .mixer_event_queue()?
+            .mixer_event_queue
             .push(MixerMessage::ProcessEffectParameterUpdate {
                 effect_id: self.effect_id,
                 parameter_id,
@@ -107,7 +106,7 @@ impl EffectHandle {
         );
 
         if self
-            .mixer_event_queue()?
+            .mixer_event_queue
             .push(MixerMessage::ProcessEffectParameterUpdate {
                 effect_id: self.effect_id,
                 parameter_id,
@@ -145,7 +144,7 @@ impl EffectHandle {
         let sample_time = sample_time.into().unwrap_or(0);
 
         if self
-            .mixer_event_queue()?
+            .mixer_event_queue
             .push(MixerMessage::ProcessEffectMessage {
                 effect_id: self.effect_id,
                 message,
@@ -157,15 +156,6 @@ impl EffectHandle {
         } else {
             Ok(())
         }
-    }
-
-    fn mixer_event_queue(&self) -> Result<Arc<ArrayQueue<MixerMessage>>, Error> {
-        Ok(Arc::clone(
-            self.mixer_event_queues
-                .get(&self.mixer_id)
-                .ok_or(Error::MixerNotFoundError(self.mixer_id))?
-                .value(),
-        ))
     }
 
     fn mixer_event_queue_error(event_name: &str) -> Error {

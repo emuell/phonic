@@ -1,6 +1,7 @@
 //! Generator trait for sources that can be driven by sequencers.
 
 use std::sync::{mpsc::SyncSender, Arc};
+use std::time::Duration;
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -9,7 +10,8 @@ use four_cc::FourCC;
 use crate::{
     parameter::{ClonableParameter, ParameterValueUpdate},
     source::{unique_source_id, Source},
-    Error, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
+    utils::db_to_linear,
+    Error, MixerId, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -27,6 +29,91 @@ pub mod r#dyn;
 pub(crate) fn unique_note_id() -> usize {
     // Note id's are used as source ids when tracking playback status...
     unique_source_id()
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Options for playing back a generator source.
+#[derive(Debug, Clone, Copy)]
+pub struct GeneratorPlaybackOptions {
+    /// By default 1.0f32. Customize to lower or raise the volume of the generator output.
+    pub volume: f32,
+
+    /// By default 0.0f32. Set in range -1.0..=1.0 to adjust generator's output panning position.
+    pub panning: f32,
+
+    /// By default None, which means play on the main mixer. When set to some specific id,
+    /// the source will be played on the given mixer instead of the default one.
+    pub target_mixer: Option<MixerId>,
+
+    /// By default false. When true, measure the CPU load of the generator source.
+    /// CPU load can then be accessed via the generator's playback handle.
+    pub measure_cpu_load: bool,
+
+    /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
+    /// in the player. By default one second to avoid unnecessary overhead.
+    /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    pub playback_pos_emit_rate: Option<Duration>,
+}
+
+impl Default for GeneratorPlaybackOptions {
+    fn default() -> Self {
+        Self {
+            volume: 1.0,
+            panning: 0.0,
+            target_mixer: None,
+            measure_cpu_load: false,
+            playback_pos_emit_rate: Some(Duration::from_secs(1)),
+        }
+    }
+}
+
+impl GeneratorPlaybackOptions {
+    pub fn volume(mut self, volume: f32) -> Self {
+        self.volume = volume;
+        self
+    }
+    pub fn volume_db(mut self, volume_db: f32) -> Self {
+        self.volume = db_to_linear(volume_db);
+        self
+    }
+
+    pub fn panning(mut self, panning: f32) -> Self {
+        self.panning = panning;
+        self
+    }
+
+    pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
+        self.playback_pos_emit_rate = Some(duration);
+        self
+    }
+
+    pub fn target_mixer(mut self, mixer_id: MixerId) -> Self {
+        self.target_mixer = Some(mixer_id);
+        self
+    }
+
+    pub fn measure_cpu_load(mut self, measure: bool) -> Self {
+        self.measure_cpu_load = measure;
+        self
+    }
+
+    /// Validate all parameters. Returns Error::ParameterError on errors.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.volume < 0.0 || self.volume.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'volume' value is '{}'",
+                self.volume
+            )));
+        }
+        if !(-1.0..=1.0).contains(&self.panning) || self.panning.is_nan() {
+            return Err(Error::ParameterError(format!(
+                "playback options 'panning' value is '{}'",
+                self.panning
+            )));
+        }
+        Ok(())
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -96,6 +183,9 @@ pub enum GeneratorPlaybackMessage {
 pub trait Generator: Source {
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> PlaybackId;
+
+    /// The generator's playback options
+    fn playback_options(&self) -> &GeneratorPlaybackOptions;
 
     /// Get the playback message queue for this generator.
     fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>>;

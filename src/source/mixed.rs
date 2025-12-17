@@ -10,8 +10,8 @@ use crate::{
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
-        playback::PlaybackMessageQueue, Source, SourceTime,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, measured::MeasuredSource,
+        panned::PannedSourceMessage, playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
         buffer::{add_buffers, clear_buffer},
@@ -148,7 +148,7 @@ pub(crate) enum MixerMessage {
     // Mixers
     AddMixer {
         mixer_id: MixerId,
-        mixer: Box<MixedSource>,
+        mixer: Box<MeasuredSource<MixedSource>>,
     },
     RemoveMixer {
         mixer_id: MixerId,
@@ -466,7 +466,7 @@ impl MixedSource {
     // Returns true if any source produced audible output.
     fn process_sources(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
         let mut produced_output = false;
-        let output_frame_count = output.len() / self.channel_count();
+        let output_frame_count = output.len() / self.channel_count;
         'all_sources: for playing_source in self.playing_sources.iter_mut() {
             let mut total_written = 0;
 
