@@ -181,6 +181,9 @@ pub enum GeneratorPlaybackMessage {
 /// Generator parameters work similarly to [`Effect`](crate::Effect) parameters: they provide
 /// automation capabilities and can be queried via [`parameters()`](Self::parameters).
 pub trait Generator: Source {
+    /// Name of the generator for display debugging purposes.
+    fn generator_name(&self) -> String;
+
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> PlaybackId;
 

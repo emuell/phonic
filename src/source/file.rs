@@ -214,6 +214,9 @@ pub enum FilePlaybackMessage {
 
 /// A source which decodes and plays back an audio file.
 pub trait FileSource: Source {
+    /// Name or path of the file for display or debugging purposes.
+    fn file_name(&self) -> String;
+
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s.
     fn playback_id(&self) -> PlaybackId;
 

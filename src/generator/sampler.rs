@@ -524,6 +524,10 @@ impl Source for Sampler {
 }
 
 impl Generator for Sampler {
+    fn generator_name(&self) -> String {
+        self.file_path.to_string()
+    }
+
     fn playback_id(&self) -> PlaybackId {
         self.playback_id
     }

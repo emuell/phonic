@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    fmt,
     sync::{
         atomic::{self, AtomicBool, AtomicUsize, Ordering},
         mpsc::{sync_channel, SyncSender},
@@ -81,6 +83,8 @@ pub enum EffectMovement {
 struct PlayingSource {
     is_playing: Arc<AtomicBool>,
     playback_message_queue: PlaybackMessageQueue,
+    mixer_id: MixerId,
+    source_name: String,
 }
 
 impl Drop for PlayingSource {
@@ -106,7 +110,6 @@ struct PlayerMixerInfo {
 #[derive(Debug, Copy, Clone)]
 struct PlayerEffectInfo {
     mixer_id: MixerId,
-    #[allow(unused)]
     effect_name: &'static str,
 }
 
@@ -269,7 +272,7 @@ impl Player {
     /// Sets or replaces a panic handler for the player's main mixer.
     ///
     /// The provided handler will be called once when the main mixer panics during audio processing.
-    /// Should be used for diagnostic and logging purposes only.
+    /// Should be used for diagnositic and logging purposes only.
     ///
     /// Setting `None` will disable panic handling and just log panics instead.
     ///
@@ -311,11 +314,10 @@ impl Player {
         context: Option<PlaybackStatusContext>,
     ) -> Result<FilePlaybackHandle, Error> {
         // validate and get options
-        file_source.playback_options().validate()?;
-        let mixer_id = file_source
-            .playback_options()
-            .target_mixer
-            .unwrap_or(Self::MAIN_MIXER_ID);
+        let playback_options = *file_source.playback_options();
+        playback_options.validate()?;
+        // validate and get target mixer
+        let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
         // make sure the source has a valid playback status channel
         let mut file_source = file_source;
@@ -326,10 +328,8 @@ impl Player {
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
-        let playback_volume = file_source.playback_options().volume;
-        let playback_panning = file_source.playback_options().panning;
         let playback_message_queue = file_source.playback_message_queue();
-        let measure_cpu_load = file_source.playback_options().measure_cpu_load;
+        let source_name = format!("File: '{}'", file_source.file_name());
         // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             file_source,
@@ -338,13 +338,15 @@ impl Player {
             ResamplingQuality::Default,
         );
         // apply volume options
-        let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
+        let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
         let volume_message_queue = amplified_source.message_queue();
         // apply panning options
-        let panned_source = PannedSource::new(amplified_source, playback_panning);
+        let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = measure_cpu_load.then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = playback_options
+            .measure_cpu_load
+            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources
@@ -359,6 +361,8 @@ impl Player {
             PlayingSource {
                 is_playing: Arc::clone(&is_playing),
                 playback_message_queue: playback_message_queue.clone(),
+                mixer_id,
+                source_name,
             },
         );
         // send the source to the mixer
@@ -407,11 +411,10 @@ impl Player {
         context: Option<PlaybackStatusContext>,
     ) -> Result<SynthPlaybackHandle, Error> {
         // validate and get options
-        synth_source.playback_options().validate()?;
-        let mixer_id = synth_source
-            .playback_options()
-            .target_mixer
-            .unwrap_or(Self::MAIN_MIXER_ID);
+        let playback_options = *synth_source.playback_options();
+        playback_options.validate()?;
+        // validate and get target mixer
+        let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
         // make sure the source has a valid playback status channel
         let mut synth_source = synth_source;
@@ -421,10 +424,8 @@ impl Player {
         synth_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = synth_source.playback_id();
-        let playback_volume = synth_source.playback_options().volume;
-        let playback_panning = synth_source.playback_options().panning;
         let playback_message_queue = synth_source.playback_message_queue();
-        let measure_cpu_load = synth_source.playback_options().measure_cpu_load;
+        let source_name = format!("Synth: '{}'", synth_source.synth_name());
         // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             synth_source,
@@ -433,13 +434,15 @@ impl Player {
             ResamplingQuality::Default, // usually unused
         );
         // apply volume options
-        let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
+        let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
         let volume_message_queue = amplified_source.message_queue();
         // apply panning options
-        let panned_source = PannedSource::new(amplified_source, playback_panning);
+        let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = measure_cpu_load.then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = playback_options
+            .measure_cpu_load
+            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources
@@ -454,6 +457,8 @@ impl Player {
             PlayingSource {
                 is_playing: Arc::clone(&is_playing),
                 playback_message_queue: playback_message_queue.clone(),
+                mixer_id,
+                source_name,
             },
         );
         // send the source to the mixer
@@ -498,11 +503,10 @@ impl Player {
         start_time: T,
     ) -> Result<GeneratorPlaybackHandle, Error> {
         // validate and get options
-        generator.playback_options().validate()?;
-        let mixer_id = generator
-            .playback_options()
-            .target_mixer
-            .unwrap_or(Self::MAIN_MIXER_ID);
+        let playback_options = *generator.playback_options();
+        playback_options.validate()?;
+        // validate and get target mixer
+        let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
         // make sure the source has a valid playback status channel
         let mut generator = generator;
@@ -511,10 +515,8 @@ impl Player {
         }
         // get source in playback id and message channel
         let playback_id = generator.playback_id();
-        let playback_volume = generator.playback_options().volume;
-        let playback_panning = generator.playback_options().panning;
         let playback_message_queue = generator.playback_message_queue();
-        let measure_cpu_load = generator.playback_options().measure_cpu_load;
+        let source_name = format!("Generator '{}'", generator.generator_name());
         // convert generator to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             generator,
@@ -523,13 +525,15 @@ impl Player {
             ResamplingQuality::Default,
         );
         // apply volume options
-        let amplified_source = AmplifiedSource::new(converted_source, playback_volume);
+        let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
         let volume_message_queue = amplified_source.message_queue();
         // apply panning options
-        let panned_source = PannedSource::new(amplified_source, playback_panning);
+        let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = measure_cpu_load.then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = playback_options
+            .measure_cpu_load
+            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources
@@ -544,6 +548,8 @@ impl Player {
             PlayingSource {
                 playback_message_queue: playback_message_queue.clone(),
                 is_playing: Arc::clone(&is_playing),
+                mixer_id,
+                source_name,
             },
         );
         // send the source to the mixer
@@ -957,5 +963,97 @@ impl Drop for Player {
             .store(false, atomic::Ordering::Relaxed);
         // stop playback thread and release mixer source
         self.output_device.close();
+    }
+}
+
+impl fmt::Display for Player {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.display_mixer(f, Self::MAIN_MIXER_ID, 0)
+    }
+}
+
+impl Player {
+    fn display_mixer(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        mixer_id: MixerId,
+        indent_level: usize,
+    ) -> fmt::Result {
+        let indent = "  ".repeat(indent_level);
+        let child_indent = "  ".repeat(indent_level + 1);
+
+        // Mixer name
+        if mixer_id == Self::MAIN_MIXER_ID {
+            writeln!(f, "{}- Main Mixer (ID: {})", indent, mixer_id)?;
+        } else {
+            writeln!(f, "{}- Sub-Mixer (ID: {})", indent, mixer_id)?;
+        }
+
+        // Sub-mixers
+        let mut sub_mixers = self.sub_mixers_of(mixer_id);
+        sub_mixers.sort();
+
+        for sub_mixer_id in sub_mixers {
+            self.display_mixer(f, sub_mixer_id, indent_level + 1)?;
+        }
+
+        // Sources
+        let sources_on_mixer: Vec<_> = self
+            .playing_sources
+            .iter()
+            .filter(|entry| entry.value().mixer_id == mixer_id)
+            .collect();
+
+        if !sources_on_mixer.is_empty() {
+            writeln!(f, "{}> Sources:", child_indent)?;
+            let item_indent = "  ".repeat(indent_level + 2);
+
+            let mut grouped_sources: HashMap<String, Vec<PlaybackId>> = HashMap::new();
+            for source_entry in sources_on_mixer {
+                let source_id = *source_entry.key();
+                let source_info = source_entry.value();
+                grouped_sources
+                    .entry(source_info.source_name.clone())
+                    .or_default()
+                    .push(source_id);
+            }
+
+            let mut sorted_grouped_sources: Vec<_> = grouped_sources.into_iter().collect();
+            sorted_grouped_sources.sort_by(|(name_a, _), (name_b, _)| name_a.cmp(name_b));
+
+            for (source_name, mut ids) in sorted_grouped_sources {
+                ids.sort();
+                let ids_str = ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writeln!(f, "{}- {} (ID: {})", item_indent, source_name, ids_str)?;
+            }
+        }
+
+        // Effects
+        let mut effects_on_mixer: Vec<_> = self
+            .effects
+            .iter()
+            .filter(|entry| entry.value().mixer_id == mixer_id)
+            .collect();
+        effects_on_mixer.sort_by_key(|e| *e.key());
+
+        if !effects_on_mixer.is_empty() {
+            writeln!(f, "{}^ Effects:", child_indent)?;
+            let item_indent = "  ".repeat(indent_level + 2);
+            for effect_entry in effects_on_mixer {
+                let effect_id = effect_entry.key();
+                let effect_info = effect_entry.value();
+                writeln!(
+                    f,
+                    "{}- {} (ID: {})",
+                    item_indent, effect_info.effect_name, effect_id
+                )?;
+            }
+        }
+
+        Ok(())
     }
 }

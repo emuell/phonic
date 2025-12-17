@@ -153,6 +153,9 @@ fn main() -> Result<(), Error> {
         }
     });
 
+    // Print DSP graph
+    println!("\nPlayer Graph:\n{}", player);
+
     // Start playing.
     player.start();
 

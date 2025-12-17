@@ -120,6 +120,10 @@ impl<Generator> SynthSource for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
+    fn synth_name(&self) -> String {
+        self.playback_name.to_string()
+    }
+
     fn playback_id(&self) -> PlaybackId {
         self.playback_id
     }

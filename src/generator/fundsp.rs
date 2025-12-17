@@ -552,6 +552,10 @@ impl Source for FunDspGenerator {
 }
 
 impl Generator for FunDspGenerator {
+    fn generator_name(&self) -> String {
+        self.synth_name.to_string()
+    }
+
     fn playback_id(&self) -> PlaybackId {
         self.playback_id
     }

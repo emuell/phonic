@@ -147,6 +147,9 @@ pub enum SynthPlaybackMessage {
 
 /// A [`Source`] which creates samples from a synthesized signal.
 pub trait SynthSource: Source {
+    /// Name of the synth for debugging or display purposes.
+    fn synth_name(&self) -> String;
+
     /// A unique ID, which can be used to identify sources in `PlaybackStatusEvent`s
     fn playback_id(&self) -> PlaybackId;
 

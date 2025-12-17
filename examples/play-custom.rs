@@ -298,15 +298,11 @@ fn main() -> Result<(), Error> {
         }
     }
 
+    // Print player graph
+    println!("\nPlayer Graph:\n{}", player);
+
     // start playback
     player.start();
-
-    // Print DSP graph
-    println!("Playing a {BARS_TO_PLAY} bar bass line loop over a drum loop and pad sequence...");
-    println!("DSP Graph:");
-    println!("  - Drum Loop -> Main Mixer");
-    println!("  - Pad -> Pad Mixer (HP Filter) -> Main Mixer");
-    println!("  - SineSynth -> Synth Mixer (TanhDistortion -> Reverb) -> Main Mixer");
 
     // Wait for playback to finish
     let total_beats = (BASS_LINE.len() * BARS_TO_PLAY) as u64 + 1; // one extra beat as tail;

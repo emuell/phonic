@@ -167,6 +167,9 @@ fn main() -> Result<(), Error> {
     println!("  To quit press 'Esc'.");
     println!();
 
+    // Print DSP graph
+    println!("Player Graph:\n{}", player);
+
     // run key event handlers to play, stop and modify sounds interactively
     let event_handler = DeviceEventsHandler::new(Duration::from_millis(10))
         .expect("Could not initialize event loop");

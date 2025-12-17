@@ -243,6 +243,10 @@ impl StreamedFileSource {
 }
 
 impl FileSource for StreamedFileSource {
+    fn file_name(&self) -> String {
+        self.file_source.file_path.to_string()
+    }
+
     fn playback_id(&self) -> PlaybackId {
         self.file_source.file_id
     }

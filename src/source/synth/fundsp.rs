@@ -186,6 +186,10 @@ impl FunDspSynthSource {
 }
 
 impl SynthSource for FunDspSynthSource {
+    fn synth_name(&self) -> String {
+        self.0.synth_name()
+    }
+
     fn playback_id(&self) -> crate::PlaybackId {
         self.0.playback_id()
     }

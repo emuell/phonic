@@ -158,6 +158,9 @@ fn main() -> Result<(), Error> {
     // Stop sampler at the end of the metronome sequence
     bass.stop((BEATS_PER_BAR * BARS_TO_PLAY + 1) as u64 * samples_per_beat)?;
 
+    // Print player graph
+    println!("\nPlayer Graph:\n{}", player);
+
     // Start playback
     player.start();
 

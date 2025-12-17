@@ -43,6 +43,10 @@ impl Source for DynGenerator {
 }
 
 impl Generator for DynGenerator {
+    fn generator_name(&self) -> String {
+        self.generator.generator_name()
+    }
+
     fn parameters(&self) -> Vec<&dyn ClonableParameter> {
         self.generator.parameters()
     }
