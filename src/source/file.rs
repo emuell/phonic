@@ -268,7 +268,6 @@ impl Player {
         if options.stream {
             let streamed_source = StreamedFileSource::from_file(
                 path,
-                Some(self.playback_status_sender()),
                 options,
                 self.output_sample_rate(),
             )?;
@@ -276,7 +275,6 @@ impl Player {
         } else {
             let preloaded_source = PreloadedFileSource::from_file(
                 path,
-                Some(self.playback_status_sender()),
                 options,
                 self.output_sample_rate(),
             )?;
@@ -310,7 +308,6 @@ impl Player {
         let preloaded_source = PreloadedFileSource::from_file_buffer(
             file_buffer,
             file_path,
-            Some(self.playback_status_sender()),
             options,
             self.output_sample_rate(),
         )?;

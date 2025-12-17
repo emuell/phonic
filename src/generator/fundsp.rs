@@ -42,7 +42,7 @@ use voice::FunDspVoice;
 /// use phonic::{GeneratorPlaybackOptions, generators::FunDspGenerator};
 /// use phonic::fundsp::hacker32::*;
 ///
-/// // Simple fundsp generator without extra parameters
+/// // Simple fundsp generator without additional parameters
 /// let generator = FunDspGenerator::new(
 ///     "example_synth",
 ///     |gate: Shared, freq: Shared, vol: Shared, pan: Shared| {
@@ -52,7 +52,6 @@ use voice::FunDspVoice;
 ///         Box::new((envelope * sound * var(&vol) | var(&pan)) >> panner())
 ///     },
 ///     8,      // 8 voices
-///     None,   // no playback status sender
 ///     GeneratorPlaybackOptions::default(), // default playback options
 ///     44100,  // voice and source's sample rate
 /// );
@@ -80,14 +79,12 @@ impl FunDspGenerator {
     /// * `voice_factory` - Function that creates a voice unit with given
     ///   (frequency, volume, gate, panning) shared variables.
     /// * `voice_count` - Maximum number of simultaneous voices.
-    /// * `playback_status_send` - Sender for playback status events.
-    /// * `playback_pos_emit_rate` - Emit rate for playback position events. 1 sec when undefined.
+    /// * `options` - Genereric generator playback options.
     /// * `sample_rate` - Output sample rate.
     pub fn new<S: AsRef<str>, F>(
         synth_name: S,
         voice_factory: F,
         voice_count: usize,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
@@ -95,7 +92,9 @@ impl FunDspGenerator {
         F: Fn(Shared, Shared, Shared, Shared) -> Box<dyn AudioUnit>,
     {
         let synth_name = Arc::new(synth_name.as_ref().to_owned());
+
         let playback_id = unique_source_id();
+        let playback_status_send = None;
 
         // Create playback message queue with space for trigger events only
         let playback_message_queue_size: usize = 16;
@@ -136,7 +135,6 @@ impl FunDspGenerator {
                 volume,
                 panning,
                 gate,
-                playback_status_send.clone(),
                 options.playback_pos_emit_rate,
                 output_sample_rate,
             ));
@@ -175,17 +173,14 @@ impl FunDspGenerator {
     /// * `voice_factory` - Function that creates a voice unit with given
     ///   (frequency, volume, gate, panning) shared variables.
     /// * `voice_count` - Maximum number of simultaneous voices.
-    /// * `playback_status_send` - Sender for playback status events.
-    /// * `playback_pos_emit_rate` - Optional emit rate for playback position events.
+    /// * `options` - Genereric generator playback options.
     /// * `sample_rate` - Output sample rate.
-    #[allow(clippy::too_many_arguments)]
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
         parameters: &[FloatParameter],
         parameter_state: Option<&[(FourCC, f32)]>,
         voice_factory: F,
         voice_count: usize,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
@@ -199,7 +194,9 @@ impl FunDspGenerator {
         ) -> Box<dyn AudioUnit>,
     {
         let synth_name = Arc::new(synth_name.as_ref().to_owned());
+
         let playback_id = unique_source_id();
+        let playback_status_send = None;
 
         // Create playback message queue to hold automation for all params at once + a bit more
         let playback_message_queue_size: usize = parameters.len() * 2 + 16;
@@ -279,7 +276,6 @@ impl FunDspGenerator {
                 volume,
                 panning,
                 gate,
-                playback_status_send.clone(),
                 options.playback_pos_emit_rate,
                 output_sample_rate,
             ));

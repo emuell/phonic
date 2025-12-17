@@ -117,7 +117,6 @@ pub struct PreloadedFileSource {
 impl PreloadedFileSource {
     pub fn from_file<P: AsRef<Path>>(
         path: P,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -126,7 +125,6 @@ impl PreloadedFileSource {
         Self::from_audio_decoder(
             AudioDecoder::from_file(path)?,
             &file_path,
-            playback_status_send,
             options,
             output_sample_rate,
         )
@@ -136,14 +134,12 @@ impl PreloadedFileSource {
     pub fn from_file_buffer(
         file_buffer: Vec<u8>,
         file_path: &str,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         Self::from_audio_decoder(
             AudioDecoder::from_buffer(file_buffer)?,
             file_path,
-            playback_status_send,
             options,
             output_sample_rate,
         )
@@ -152,7 +148,6 @@ impl PreloadedFileSource {
     fn from_audio_decoder(
         mut audio_decoder: AudioDecoder,
         file_path: &str,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -209,7 +204,6 @@ impl PreloadedFileSource {
         Self::from_shared_buffer(
             file_buffer,
             file_path,
-            playback_status_send,
             options,
             output_sample_rate,
         )
@@ -219,7 +213,6 @@ impl PreloadedFileSource {
     pub fn from_shared_buffer(
         file_buffer: Arc<PreloadedFileBuffer>,
         file_path: &str,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -233,7 +226,6 @@ impl PreloadedFileSource {
             file_buffer.sample_rate,
             file_buffer.channel_count,
             output_sample_rate,
-            playback_status_send,
         )?;
 
         let playback_repeat = options
@@ -264,11 +256,9 @@ impl PreloadedFileSource {
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         let file_buffer = Arc::clone(&self.file_buffer);
-        let playback_status_send = self.file_source.playback_status_send.clone();
         Self::from_shared_buffer(
             file_buffer,
             &self.file_source.file_path,
-            playback_status_send,
             options,
             output_sample_rate,
         )
@@ -582,7 +572,6 @@ mod tests {
         let mut preloaded = PreloadedFileSource::from_shared_buffer(
             Arc::clone(&file_buffer),
             "buffer",
-            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::Default),
             target_sample_rate,
         )
@@ -603,7 +592,6 @@ mod tests {
         let mut preloaded = PreloadedFileSource::from_shared_buffer(
             Arc::clone(&file_buffer),
             "buffer",
-            None,
             FilePlaybackOptions::default().resampling_quality(ResamplingQuality::HighQuality),
             target_sample_rate,
         )

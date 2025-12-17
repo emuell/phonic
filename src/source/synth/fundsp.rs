@@ -171,7 +171,6 @@ impl FunDspSynthSource {
         generator_name: &str,
         audio_unit: Box<dyn AudioUnit>,
         options: SynthPlaybackOptions,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         sample_rate: u32,
     ) -> Result<Self, Error> {
         let generator = FunDspSynthSourceGenerator::new(audio_unit, sample_rate);
@@ -179,7 +178,6 @@ impl FunDspSynthSource {
             generator_name,
             generator,
             options,
-            playback_status_send,
             sample_rate,
         )?))
     }
@@ -283,7 +281,6 @@ impl Player {
             generator_name,
             audio_unit,
             options,
-            Some(self.playback_status_sender()),
             self.output_sample_rate(),
         )?;
         // and play it

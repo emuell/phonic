@@ -71,7 +71,6 @@ impl FunDspVoice {
         volume: Shared,
         panning: Shared,
         gate: Shared,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         playback_pos_emit_rate: Option<Duration>,
         sample_rate: u32,
     ) -> Self {
@@ -88,6 +87,7 @@ impl FunDspVoice {
         let silence_samples_count = 0;
         let exhaustion_threshold_samples =
             SampleTimeClock::duration_to_sample_time(EXHAUSTION_DURATION, sample_rate) as usize;
+        let playback_status_send = None;
         let playback_context = None;
         let playback_pos = 0;
         let playback_pos_sample_time_clock = SampleTimeClock::new(sample_rate);

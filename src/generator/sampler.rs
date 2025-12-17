@@ -29,10 +29,10 @@ use voice::SamplerVoice;
 
 // -------------------------------------------------------------------------------------------------
 
-/// A basic sampler that plays a single audio file from RAM with an optional AHDSR envelope on
+/// Basic sampler which plays a single audio file with an optional AHDSR envelope on
 /// a limited set of voices.
 ///
-/// All sampler parameters can be automated.
+/// AHDSR sampler parameters can be automated.
 pub struct Sampler {
     playback_id: PlaybackId,
     playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
@@ -91,18 +91,21 @@ impl Sampler {
     )
     .with_unit("s");
 
-    /// Create a new sampler with the given sample file, playback status channel and update rate,
-    /// optional AHDSR envelope and the given fixed voice count.
+    /// Create a new sampler with the given sample file
     ///
-    /// Note: when `playback_pos_emit_rate` is None, no position events are sent.
-    /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
-    /// Stop events are always sent out immediately.
-    ///
-    /// Passing None as `playback_status_send` argument will disable all playback events.
+    /// # Arguments
+    /// * `file_path` - Full path to the sample file that should be played back.
+    /// * `envelope_parameters` - Optional parameters for the volume AHDSR envelope.
+    ///   When None, no envelope will be applied.
+    /// * `voice_count` - Maximum number of simultaneous voices.
+    /// * `options` - Generic generator playback options.
+    /// * `output_sample_rate` - Output sample rate of the source -
+    ///   usually the player's audio backend's sample rate.
+    /// * `output_channel_count` - Output channel count -
+    ///   usually the player's audio backend's channel count.
     pub fn from_file<P: AsRef<Path>>(
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
@@ -110,8 +113,7 @@ impl Sampler {
     ) -> Result<Self, Error> {
         let file_source = PreloadedFileSource::from_file(
             &file_path,
-            playback_status_send.clone(),
-            Default::default(),
+            FilePlaybackOptions::default(),
             output_sample_rate,
         )?;
 
@@ -120,7 +122,6 @@ impl Sampler {
             file_path,
             envelope_parameters,
             voice_count,
-            playback_status_send,
             options,
             output_channel_count,
             output_sample_rate,
@@ -129,13 +130,11 @@ impl Sampler {
 
     /// Create a new sampler with the given raw encoded sample file buffer.
     /// See [Self::from_file] for more info about the parameters.
-    #[allow(clippy::too_many_arguments)]
     pub fn from_file_buffer<P: AsRef<Path>>(
         file_buffer: Vec<u8>,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
         voice_count: usize,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -144,8 +143,7 @@ impl Sampler {
         let file_source = PreloadedFileSource::from_file_buffer(
             file_buffer,
             &file_path,
-            playback_status_send.clone(),
-            Default::default(),
+            FilePlaybackOptions::default(),
             output_sample_rate,
         )?;
 
@@ -154,33 +152,31 @@ impl Sampler {
             file_path,
             envelope_parameters,
             voice_count,
-            playback_status_send,
             options,
             output_channel_count,
             output_sample_rate,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn from_file_source<P: AsRef<Path>>(
         file_source: PreloadedFileSource,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
         voice_count: usize,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
+        // Memorize file path
+        let file_path = Arc::new(file_path.as_ref().to_string_lossy().to_string());
+
         // Pre-allocate playback message queue
         const PLAYBACK_MESSAGE_QUEUE_SIZE: usize = 10 + 16;
         let playback_message_queue = Arc::new(ArrayQueue::new(PLAYBACK_MESSAGE_QUEUE_SIZE));
 
         // Create a new unique source id
         let playback_id = unique_source_id();
-
-        // Memorize file path
-        let file_path = Arc::new(file_path.as_ref().to_string_lossy().to_string());
+        let playback_status_send = None;
 
         // Set voice playback options
         let mut voice_playback_options = FilePlaybackOptions::default();

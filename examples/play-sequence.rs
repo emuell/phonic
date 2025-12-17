@@ -44,7 +44,6 @@ fn main() -> Result<(), Error> {
         Sampler::from_file(
             "assets/cowbell.wav",
             None,
-            None,
             2,
             GeneratorPlaybackOptions::default(),
             player.output_channel_count(),
@@ -80,7 +79,6 @@ fn main() -> Result<(), Error> {
             "super_saw",
             bass_synth::voice_factory,
             8,
-            None,
             GeneratorPlaybackOptions::default(),
             player.output_sample_rate(),
         )?,

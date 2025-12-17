@@ -59,7 +59,6 @@ pub struct StreamedFileSource {
 impl StreamedFileSource {
     pub fn from_file<P: AsRef<Path>>(
         path: P,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
@@ -127,7 +126,6 @@ impl StreamedFileSource {
             signal_spec.rate,
             signal_spec.channels.count(),
             output_sample_rate,
-            playback_status_send,
         )?;
 
         Ok(Self {

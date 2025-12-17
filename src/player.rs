@@ -319,12 +319,9 @@ impl Player {
         // validate and get target mixer
         let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
-        // make sure the source has a valid playback status channel
+        // redirect source's playback status channel to us and set context
         let mut file_source = file_source;
-        if file_source.playback_status_sender().is_none() {
-            file_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
-        }
-        // set playback context
+        file_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
         file_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = file_source.playback_id();
@@ -416,11 +413,9 @@ impl Player {
         // validate and get target mixer
         let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
-        // make sure the source has a valid playback status channel
+        // redirect source's playback status channel to us and set context
         let mut synth_source = synth_source;
-        if synth_source.playback_status_sender().is_none() {
-            synth_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
-        }
+        synth_source.set_playback_status_sender(Some(self.playback_status_sender.clone()));
         synth_source.set_playback_status_context(context);
         // memorize source in playing sources map
         let playback_id = synth_source.playback_id();
@@ -508,11 +503,9 @@ impl Player {
         // validate and get target mixer
         let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
-        // make sure the source has a valid playback status channel
+        // redirect source's playback status channel to us
         let mut generator = generator;
-        if generator.playback_status_sender().is_none() {
-            generator.set_playback_status_sender(Some(self.playback_status_sender.clone()));
-        }
+        generator.set_playback_status_sender(Some(self.playback_status_sender.clone()));
         // get source in playback id and message channel
         let playback_id = generator.playback_id();
         let playback_message_queue = generator.playback_message_queue();

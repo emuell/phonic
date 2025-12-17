@@ -12,8 +12,8 @@ use phonic::{
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
     DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
-    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerId, NotePlaybackId, Parameter,
-    ParameterType, Player,
+    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId,
+    Parameter, ParameterType, Player,
 };
 
 #[path = "../../common/synths/organ.rs"]
@@ -90,7 +90,7 @@ struct App {
     synth_handle: GeneratorPlaybackHandle,
     playing_synth_notes: HashMap<u8, NotePlaybackId>,
     samples: Vec<PreloadedFileSource>,
-    synth_mixer_id: MixerId,
+    synth_mixer: MixerHandle,
     active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
 }
 
@@ -108,7 +108,7 @@ impl App {
         player.set_output_volume(db_to_linear(-3.0));
 
         // create a new mixer for the synth
-        let synth_mixer_id = player.add_mixer(None)?;
+        let synth_mixer = player.add_mixer(None)?;
 
         // maintain added effects
         let active_effects = HashMap::new();
@@ -118,7 +118,6 @@ impl App {
         for sample in ["./assets/cowbell.wav", "./assets/bass.wav"] {
             match PreloadedFileSource::from_file(
                 sample,
-                None,
                 FilePlaybackOptions::default(),
                 sample_rate,
             ) {
@@ -143,8 +142,7 @@ impl App {
                 "organ_synth",
                 organ_synth::voice_factory,
                 8,
-                None,
-                GeneratorPlaybackOptions::default().target_mixer(synth_mixer_id),
+                GeneratorPlaybackOptions::default().target_mixer(synth_mixer.id()),
                 sample_rate,
             )?,
             None,
@@ -159,7 +157,7 @@ impl App {
             synth_handle,
             playing_synth_notes,
             samples,
-            synth_mixer_id,
+            synth_mixer,
             active_effects,
         })
     }
@@ -241,7 +239,7 @@ impl App {
             .collect::<Vec<_>>();
         let info_json = serde_json::to_string(&EffectInfo::from(&effect as &dyn Effect))
             .unwrap_or_else(|_| "{}".to_string());
-        let effect_handle = self.player.add_effect(effect, self.synth_mixer_id)?;
+        let effect_handle = self.player.add_effect(effect, self.synth_mixer.id())?;
         let effect_id = effect_handle.id();
 
         self.active_effects

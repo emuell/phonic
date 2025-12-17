@@ -63,7 +63,6 @@ where
         generator_name: &str,
         generator: Generator,
         options: SynthPlaybackOptions,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
         sample_rate: u32,
     ) -> Result<Self, Error> {
         // validate options
@@ -75,6 +74,7 @@ where
             volume_fader.start_fade_in(duration);
         }
         let playback_message_queue = Arc::new(ArrayQueue::new(128));
+        let playback_status_send = None;
 
         let playback_pos_emit_rate = options
             .playback_pos_emit_rate

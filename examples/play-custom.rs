@@ -227,13 +227,11 @@ fn main() -> Result<(), Error> {
     // Preload sample files
     let drumloop = PreloadedFileSource::from_file(
         "assets/YuaiLoop.wav",
-        None,
         FilePlaybackOptions::default(),
         samples_per_sec,
     )?;
     let pad = PreloadedFileSource::from_file(
         "assets/pad-ambient.wav",
-        None,
         FilePlaybackOptions::default(),
         samples_per_sec,
     )?;
@@ -284,7 +282,6 @@ fn main() -> Result<(), Error> {
                 SynthPlaybackOptions::default()
                     .volume_db(-5.0)
                     .target_mixer(bass_mixer.id()),
-                None,
                 samples_per_sec,
             )?;
             player.play_synth_source(bass, sample_time)?;

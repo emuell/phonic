@@ -60,10 +60,10 @@ impl FileSourceImpl {
         input_sample_rate: u32,
         input_channel_count: usize,
         output_sample_rate: u32,
-        playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     ) -> Result<Self, Error> {
         // create event queue for the player
         let playback_message_queue = Arc::new(ArrayQueue::new(128));
+        let playback_status_send = None;
 
         // create new volume fader
         let mut volume_fader = VolumeFader::new(input_channel_count, output_sample_rate);
