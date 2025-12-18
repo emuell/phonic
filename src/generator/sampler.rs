@@ -97,7 +97,6 @@ impl Sampler {
     /// * `file_path` - Full path to the sample file that should be played back.
     /// * `envelope_parameters` - Optional parameters for the volume AHDSR envelope.
     ///   When None, no envelope will be applied.
-    /// * `voice_count` - Maximum number of simultaneous voices.
     /// * `options` - Generic generator playback options.
     /// * `output_sample_rate` - Output sample rate of the source -
     ///   usually the player's audio backend's sample rate.
@@ -106,7 +105,6 @@ impl Sampler {
     pub fn from_file<P: AsRef<Path>>(
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -121,7 +119,6 @@ impl Sampler {
             file_source,
             file_path,
             envelope_parameters,
-            voice_count,
             options,
             output_channel_count,
             output_sample_rate,
@@ -134,7 +131,6 @@ impl Sampler {
         file_buffer: Vec<u8>,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -151,7 +147,6 @@ impl Sampler {
             file_source,
             file_path,
             envelope_parameters,
-            voice_count,
             options,
             output_channel_count,
             output_sample_rate,
@@ -162,7 +157,6 @@ impl Sampler {
         file_source: PreloadedFileSource,
         file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
-        voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -192,8 +186,8 @@ impl Sampler {
         }
 
         // Allocate voices
-        let mut voices = Vec::with_capacity(voice_count);
-        for _ in 0..voice_count {
+        let mut voices = Vec::with_capacity(options.voices);
+        for _ in 0..options.voices {
             let file_source = file_source
                 .clone(voice_playback_options, output_sample_rate)
                 .map_err(|err| {

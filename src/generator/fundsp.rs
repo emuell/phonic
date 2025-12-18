@@ -51,7 +51,6 @@ use voice::FunDspVoice;
 ///         let sound = var(&freq) >> saw();
 ///         Box::new((envelope * sound * var(&vol) | var(&pan)) >> panner())
 ///     },
-///     8,      // 8 voices
 ///     GeneratorPlaybackOptions::default(), // default playback options
 ///     44100,  // voice and source's sample rate
 /// );
@@ -78,13 +77,11 @@ impl FunDspGenerator {
     /// * `synth_name` - A name for the synth (for playback status tracking and debugging).
     /// * `voice_factory` - Function that creates a voice unit with given
     ///   (frequency, volume, gate, panning) shared variables.
-    /// * `voice_count` - Maximum number of simultaneous voices.
-    /// * `options` - Genereric generator playback options.
+    /// * `options` - Generic generator playback options.
     /// * `sample_rate` - Output sample rate.
     pub fn new<S: AsRef<str>, F>(
         synth_name: S,
         voice_factory: F,
-        voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
@@ -101,9 +98,9 @@ impl FunDspGenerator {
         let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
 
         // Pre-allocate all voices
-        let mut voices = Vec::with_capacity(voice_count);
+        let mut voices = Vec::with_capacity(options.voices);
         let mut output_channel_count = 0;
-        for _ in 0..voice_count {
+        for _ in 0..options.voices {
             // Create common shared variables for this voice
             let gate = shared(0.0);
             let frequency = shared(440.0);
@@ -172,15 +169,13 @@ impl FunDspGenerator {
     ///   When None, the parameters will be initialized with their default values.
     /// * `voice_factory` - Function that creates a voice unit with given
     ///   (frequency, volume, gate, panning) shared variables.
-    /// * `voice_count` - Maximum number of simultaneous voices.
-    /// * `options` - Genereric generator playback options.
+    /// * `options` - Generic generator playback options.
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
         parameters: &[FloatParameter],
         parameter_state: Option<&[(FourCC, f32)]>,
         voice_factory: F,
-        voice_count: usize,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
@@ -233,9 +228,9 @@ impl FunDspGenerator {
         }
 
         // Allocate all voices
-        let mut voices = Vec::with_capacity(voice_count);
+        let mut voices = Vec::with_capacity(options.voices);
         let mut output_channel_count = 0;
-        for _ in 0..voice_count {
+        for _ in 0..options.voices {
             // Create common shared variables for this voice
             let gate = shared(0.0);
             let frequency = shared(440.0);

@@ -106,8 +106,9 @@ fn main() -> Result<(), Error> {
             &fm3_synth::parameters(),
             None,
             fm3_synth::voice_factory,
-            8, // 8 voices for polyphony
-            GeneratorPlaybackOptions::default().target_mixer(tone_mixer.id()),
+            GeneratorPlaybackOptions::default()
+                .voices(8)
+                .target_mixer(tone_mixer.id()),
             player.output_sample_rate(),
         )?,
         None,
@@ -124,8 +125,9 @@ fn main() -> Result<(), Error> {
                 1.0,                    // sustain
                 Duration::from_secs(3), // release
             )?),
-            8, // 8 voices for polyphony
-            GeneratorPlaybackOptions::default().target_mixer(tone_mixer.id()),
+            GeneratorPlaybackOptions::default()
+                .voices(8)
+                .target_mixer(tone_mixer.id()),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,

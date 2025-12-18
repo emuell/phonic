@@ -42,6 +42,9 @@ pub struct GeneratorPlaybackOptions {
     /// By default 0.0f32. Set in range -1.0..=1.0 to adjust generator's output panning position.
     pub panning: f32,
 
+    /// By default 8. Maximum number of simultaneous voices in the generator.
+    pub voices: usize,
+
     /// By default None, which means play on the main mixer. When set to some specific id,
     /// the source will be played on the given mixer instead of the default one.
     pub target_mixer: Option<MixerId>,
@@ -61,6 +64,7 @@ impl Default for GeneratorPlaybackOptions {
         Self {
             volume: 1.0,
             panning: 0.0,
+            voices: 8,
             target_mixer: None,
             measure_cpu_load: false,
             playback_pos_emit_rate: Some(Duration::from_secs(1)),
@@ -83,8 +87,8 @@ impl GeneratorPlaybackOptions {
         self
     }
 
-    pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
-        self.playback_pos_emit_rate = Some(duration);
+    pub fn voices(mut self, voices: usize) -> Self {
+        self.voices = voices;
         self
     }
 
@@ -95,6 +99,11 @@ impl GeneratorPlaybackOptions {
 
     pub fn measure_cpu_load(mut self, measure: bool) -> Self {
         self.measure_cpu_load = measure;
+        self
+    }
+
+    pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
+        self.playback_pos_emit_rate = Some(duration);
         self
     }
 
@@ -110,6 +119,12 @@ impl GeneratorPlaybackOptions {
             return Err(Error::ParameterError(format!(
                 "playback options 'panning' value is '{}'",
                 self.panning
+            )));
+        }
+        if self.voices == 0 {
+            return Err(Error::ParameterError(format!(
+                "playback options voice count is '{}'",
+                self.voices
             )));
         }
         Ok(())

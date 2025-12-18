@@ -12,8 +12,8 @@ use phonic::{
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
     DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
-    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId,
-    Parameter, ParameterType, Player,
+    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
+    ParameterType, Player,
 };
 
 #[path = "../../common/synths/organ.rs"]
@@ -141,8 +141,9 @@ impl App {
             FunDspGenerator::new(
                 "organ_synth",
                 organ_synth::voice_factory,
-                8,
-                GeneratorPlaybackOptions::default().target_mixer(synth_mixer.id()),
+                GeneratorPlaybackOptions::default()
+                    .voices(8)
+                    .target_mixer(synth_mixer.id()),
                 sample_rate,
             )?,
             None,

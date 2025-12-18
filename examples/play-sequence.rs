@@ -44,8 +44,7 @@ fn main() -> Result<(), Error> {
         Sampler::from_file(
             "assets/cowbell.wav",
             None,
-            2,
-            GeneratorPlaybackOptions::default(),
+            GeneratorPlaybackOptions::default().voices(2),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
@@ -78,8 +77,7 @@ fn main() -> Result<(), Error> {
         FunDspGenerator::new(
             "super_saw",
             bass_synth::voice_factory,
-            8,
-            GeneratorPlaybackOptions::default(),
+            GeneratorPlaybackOptions::default().voices(8),
             player.output_sample_rate(),
         )?,
         None,
