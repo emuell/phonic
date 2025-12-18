@@ -46,6 +46,7 @@ pub struct SynthPlaybackOptions {
     /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    /// Set to None to disable reporting.
     pub playback_pos_emit_rate: Option<Duration>,
 
     /// By default None, which means play on the main mixer. When set to some specific id,
@@ -103,6 +104,10 @@ impl SynthPlaybackOptions {
 
     pub fn playback_pos_emit_rate(mut self, duration: std::time::Duration) -> Self {
         self.playback_pos_emit_rate = Some(duration);
+        self
+    }
+    pub fn playback_pos_emit_disabled(mut self) -> Self {
+        self.playback_pos_emit_rate = None;
         self
     }
 
