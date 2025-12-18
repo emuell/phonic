@@ -401,6 +401,20 @@ pub extern "C" fn stop() {
     APP.replace(None);
 }
 
+/// Get the player's main mixer CPU load. Exported as `_get_cpu_load` function in the WASM.
+///
+/// Returns the average CPU load as a float.
+#[no_mangle]
+pub extern "C" fn get_cpu_load() -> ffi::c_float {
+    APP.with_borrow(|app| {
+        if let Some(app) = app.as_ref() {
+            app.player.cpu_load().average
+        } else {
+            0.0
+        }
+    })
+}
+
 /// Play a single synth note when the app is running. Exported as `_synth_note_on`
 /// function in the WASM.
 #[no_mangle]

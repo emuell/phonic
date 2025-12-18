@@ -16,6 +16,12 @@ p {
 
 .controls {
     padding: 0px;
+    display: flex;
+    align-items: center;
+}
+
+.cpu-display {
+    margin-left: auto;
 }
 
 button {

@@ -22,6 +22,7 @@ fn main() {
             "_free_cstring",
             "_start",
             "_stop",
+            "_get_cpu_load",
             "_synth_note_on",
             "_synth_note_off",
             "_get_available_effects",

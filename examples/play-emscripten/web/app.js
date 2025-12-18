@@ -6,6 +6,9 @@ const backend = {
   stop() {
     ccall("stop", null, [], []);
   },
+  getCpuLoad() {
+    return ccall("get_cpu_load", "number", [], []);
+  },
   synthNoteOn(key) {
     ccall("synth_note_on", null, ["number"], [key]);
   },
@@ -59,6 +62,35 @@ const backend = {
   },
 };
 
+// CPU display
+let cpuDisplayUpdater = null;
+
+function updateCpuDisplay() {
+  const cpuDisplayElement = document.getElementById("cpu-display");
+  if (cpuDisplayElement) {
+    const load = backend.getCpuLoad() * 100;
+    cpuDisplayElement.textContent = `CPU Load: ${load.toFixed(2)}%`;
+  }
+  cpuDisplayUpdater = requestAnimationFrame(updateCpuDisplay);
+}
+
+function startCpuDisplay() {
+  if (!cpuDisplayUpdater) {
+    updateCpuDisplay();
+  }
+}
+
+function stopCpuDisplay() {
+  if (cpuDisplayUpdater) {
+    cancelAnimationFrame(cpuDisplayUpdater);
+    cpuDisplayUpdater = null;
+    const cpuDisplayElement = document.getElementById("cpu-display");
+    if (cpuDisplayElement) {
+      cpuDisplayElement.textContent = "";
+    }
+  }
+}
+
 // Show window errors
 window.addEventListener("unhandledrejection", (event) => {
   setStatus(event.reason, true);
@@ -89,6 +121,7 @@ document.getElementById("playButton").addEventListener("click", () => {
   document.getElementById("stopButton").disabled = false;
   effectManager.enableButtons();
   setStatus("Player started");
+  startCpuDisplay();
 });
 
 document.getElementById("stopButton").addEventListener("click", () => {
@@ -98,6 +131,7 @@ document.getElementById("stopButton").addEventListener("click", () => {
   effectManager.disableButtons();
   effectManager.removeAllEffects();
   setStatus("Player stopped");
+  stopCpuDisplay();
 });
 
 // Piano keyboard functionality

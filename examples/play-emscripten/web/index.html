@@ -15,23 +15,18 @@
         <div class="controls">
             <button id="playButton" disabled>Start Player</button>
             <button id="stopButton" disabled>Stop Player</button>
+            <div id="cpu-display" class="cpu-display"></div>
         </div>
 
         <div id="status" class="status"></div>
 
         <p>
             The example player schedules preloaded sample files in a
-            <a
-                href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop"
-                >requestAnimationFrame</a
-            >
-            timer.
-        </p>
-        <p>
-            Piano keys interactively play simple
-            <a href="https://github.com/SamiPerttu/fundsp">fundsp synth</a> sounds. You can
-            dynamically add and remove DSP effects to the synth output and change their parameters
-            in real-time.
+            <a href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop">
+                requestAnimationFrame</a> timer as metronome. <br/>
+            <br/>
+            Piano keys interactively play a simple
+            <a href="https://github.com/SamiPerttu/fundsp">fundsp synth</a> generator.
         </p>
 
         <div class="piano-wrapper">
@@ -55,6 +50,10 @@
                 <li class="key white" data-key="16"><span>;</span></li>
             </ul>
         </div>
+
+        <p>
+            DSP effects are applied to the synth output's mixer only.
+        </p>
 
         <div class="effects-section">
             <div class="add-effect-menu"></div>
