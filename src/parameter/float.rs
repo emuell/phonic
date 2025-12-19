@@ -6,7 +6,7 @@ use std::{
 
 use four_cc::FourCC;
 
-use super::{Parameter, ParameterScaling, ParameterType, ParameterValueUpdate};
+use super::{Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -95,6 +95,20 @@ impl FloatParameter {
         self
     }
 
+    /// Create a raw, debug validated ParameterValueUpdate for this parameter.
+    #[must_use]
+    pub fn value_update(&self, value: f32) -> (FourCC, ParameterValueUpdate) {
+        debug_assert!(
+            self.range.contains(&value),
+            "Float value for parameter '{}' must be in range {}..={}, but is {}",
+            self.id,
+            self.range.start(),
+            self.range.end(),
+            value
+        );
+        (self.id, ParameterValueUpdate::Raw(Arc::new(value)))
+    }
+
     /// The parameter's identifier.
     pub const fn id(&self) -> FourCC {
         self.id
@@ -163,7 +177,14 @@ impl Parameter for FloatParameter {
     }
 
     fn parameter_type(&self) -> ParameterType {
-        ParameterType::Float
+        ParameterType::Float {
+            step: 0.0,
+            polarity: if *self.range().start() == -*self.range().end() {
+                ParameterPolarity::Bipolar
+            } else {
+                ParameterPolarity::Unipolar
+            },
+        }
     }
 
     fn default_value(&self) -> f32 {

@@ -94,9 +94,43 @@ impl EnumParameter {
         self
     }
 
+    /// Create a raw, debug validated ParameterValueUpdate from an enum value for this parameter.
+    #[must_use]
+    pub fn value_update<E: PartialEq + ToString + Send + Sync + 'static>(
+        &self,
+        value: E,
+    ) -> (FourCC, ParameterValueUpdate) {
+        debug_assert!(
+            self.values.iter().any(|v| v == &value.to_string()),
+            "Enum value for parameter '{}' is not one of '{:?}', but is {}",
+            self.id,
+            self.values,
+            value.to_string()
+        );
+        (self.id, ParameterValueUpdate::Raw(Arc::new(value)))
+    }
+
+    /// Create a raw, debug validated ParameterValueUpdate from an index for this parameter.
+    #[must_use]
+    pub fn value_update_index(&self, index: usize) -> (FourCC, ParameterValueUpdate) {
+        debug_assert!(
+            index < self.values.len(),
+            "Enum value for parameter '{}' must be < {}, but is {}",
+            self.id,
+            self.values.len(),
+            index
+        );
+        (self.id, ParameterValueUpdate::Raw(Arc::new(index)))
+    }
+
     /// The parameter's identifier.
     pub const fn id(&self) -> FourCC {
         self.id
+    }
+
+    /// The parameter's choices.
+    pub const fn values(&self) -> &'static [&'static str] {
+        self.values
     }
 
     /// The parameter's default value.

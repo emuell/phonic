@@ -326,60 +326,45 @@ impl GeneratorPlaybackHandle {
         )
     }
 
-    /// Set a generator parameter value at a specific sample time or immediately.
+    /// Set a parameter's value via the given raw or normalized value update definition
+    /// at a specific sample time or immediately.
     ///
-    /// The `value` must be of the correct type for the parameter: `f32`, `i32`, `bool`,
-    /// or the specific enum type used by the parameter.
-    pub fn set_parameter<V, T>(
+    /// Note: Value update (id, value) tuples can be created safely via `value_update` functions
+    /// in [FloatParameter](crate::parameters::FloatParameter), [IntegerParameter](crate::parameters::IntegerParameter),
+    /// [EnumParameter](crate::parameters::EnumParameter) and [BooleanParameter](crate::parameters::BooleanParameter).
+    pub fn set_parameter<T: Into<Option<u64>>>(
         &self,
-        parameter_id: FourCC,
-        value: V,
+        (parameter_id, update): (FourCC, ParameterValueUpdate),
         sample_time: T,
-    ) -> Result<(), Error>
-    where
-        V: std::any::Any + Send + Sync + 'static,
-        T: Into<Option<u64>>,
-    {
+    ) -> Result<(), Error> {
         let sample_time = sample_time.into();
-        if !self.is_playing() {
-            return Err(Error::SourceNotPlaying);
-        }
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Raw(Box::new(value)),
-        );
         self.send_generator_event(
             sample_time,
             GeneratorPlaybackEvent::SetParameter {
                 id: parameter_id,
-                value,
+                value: Owned::new(&self.collector_handle, update),
             },
             "set_parameter",
         )
     }
 
-    /// Set a normalized (0.0..=1.0) parameter value either immediately or at a future sample time.
+    /// Set a normalized parameter value at a specific sample time or immediately.
+    ///
+    /// The `value` must be in the range `0.0..=1.0`.
     pub fn set_parameter_normalized<T: Into<Option<u64>>>(
         &self,
         parameter_id: FourCC,
         value: f32,
         sample_time: T,
     ) -> Result<(), Error> {
-        let sample_time = sample_time.into();
-        if !self.is_playing() {
-            return Err(Error::SourceNotPlaying);
+        if !(0.0..=1.0).contains(&value) {
+            return Err(Error::ParameterError(format!(
+                "Invalid parameter update: value should be normalized, but is: '{value}'"
+            )));
         }
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Normalized(value),
-        );
-        self.send_generator_event(
+        self.set_parameter(
+            (parameter_id, ParameterValueUpdate::Normalized(value)),
             sample_time,
-            GeneratorPlaybackEvent::SetParameter {
-                id: parameter_id,
-                value,
-            },
-            "set_parameter_normalized",
         )
     }
 

@@ -7,11 +7,11 @@ use std::{
 
 use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
-use fundsp::hacker32::*;
+use fundsp::{audiounit::AudioUnit, shared::Shared};
 
 use crate::{
     generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
-    parameter::{ClonableParameter, FloatParameter, ParameterValueUpdate},
+    parameter::{ClonableParameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
     Error, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId, PlaybackStatusContext,
@@ -21,12 +21,12 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 mod ahdsr;
-mod parameters;
+mod parameter;
 mod voice;
 
 pub use ahdsr::{shared_ahdsr, SharedAhdsrNode};
 
-use parameters::FunDspFloatParameterValue;
+use parameter::SharedParameterValue;
 use voice::FunDspVoice;
 
 // -------------------------------------------------------------------------------------------------
@@ -62,7 +62,7 @@ pub struct FunDspGenerator {
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     voices: Vec<FunDspVoice>,
     active_voices: usize,
-    shared_parameters: HashMap<FourCC, FunDspFloatParameterValue>,
+    shared_parameters: HashMap<FourCC, SharedParameterValue>,
     stopping: bool, // True if stop has been called and we are waiting for voices to decay
     stopped: bool,  // True if all voices have decayed after a stop call
     options: GeneratorPlaybackOptions,
@@ -102,10 +102,10 @@ impl FunDspGenerator {
         let mut output_channel_count = 0;
         for _ in 0..options.voices {
             // Create common shared variables for this voice
-            let gate = shared(0.0);
-            let frequency = shared(440.0);
-            let volume = shared(1.0);
-            let panning = shared(0.0); // Default to center
+            let gate = Shared::new(0.0);
+            let frequency = Shared::new(440.0);
+            let volume = Shared::new(1.0);
+            let panning = Shared::new(0.0);
 
             // Create the voice node using the factory
             let mut audio_unit = voice_factory(
@@ -173,8 +173,8 @@ impl FunDspGenerator {
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
-        parameters: &[FloatParameter],
-        parameter_state: Option<&[(FourCC, f32)]>,
+        parameters: &[&dyn ClonableParameter],
+        parameter_state: Option<&[(FourCC, ParameterValueUpdate)]>,
         voice_factory: F,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
@@ -201,10 +201,7 @@ impl FunDspGenerator {
         let mut shared_parameters = HashMap::with_capacity(parameters.len());
         for p in parameters {
             if shared_parameters
-                .insert(
-                    p.id(),
-                    FunDspFloatParameterValue::from_description(p.clone()),
-                )
+                .insert(p.id(), SharedParameterValue::from_description(*p))
                 .is_some()
             {
                 return Err(Error::ParameterError(format!(
@@ -218,7 +215,7 @@ impl FunDspGenerator {
         if let Some(parameter_state) = parameter_state {
             for (id, value) in parameter_state {
                 if let Some(shared_parameter) = shared_parameters.get_mut(id) {
-                    shared_parameter.set_value_clamped(*value);
+                    shared_parameter.apply_update(value);
                 } else {
                     return Err(Error::ParameterError(format!(
                         "invalid parameter ID '{id}' in initial parameter state set"
@@ -232,10 +229,10 @@ impl FunDspGenerator {
         let mut output_channel_count = 0;
         for _ in 0..options.voices {
             // Create common shared variables for this voice
-            let gate = shared(0.0);
-            let frequency = shared(440.0);
-            let volume = shared(1.0);
-            let panning = shared(0.0); // Default to center
+            let gate = Shared::new(0.0);
+            let frequency = Shared::new(440.0);
+            let volume = Shared::new(1.0);
+            let panning = Shared::new(0.0);
 
             // Create the voice node using the factory
             let mut audio_unit = voice_factory(
@@ -572,7 +569,7 @@ impl Generator for FunDspGenerator {
     fn parameters(&self) -> Vec<&dyn ClonableParameter> {
         self.shared_parameters
             .values()
-            .map(|p| p.description() as &dyn ClonableParameter)
+            .map(|p| p.description())
             .collect()
     }
 

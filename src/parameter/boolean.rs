@@ -60,6 +60,12 @@ impl BooleanParameter {
         self
     }
 
+    /// Create a raw, ParameterValueUpdate for this parameter.
+    #[must_use]
+    pub fn value_update(&self, value: bool) -> (FourCC, ParameterValueUpdate) {
+        (self.id, ParameterValueUpdate::Raw(Arc::new(value)))
+    }
+
     /// The parameter's identifier.
     pub const fn id(&self) -> FourCC {
         self.id

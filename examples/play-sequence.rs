@@ -63,21 +63,42 @@ fn main() -> Result<(), Error> {
                 1.0,
                 Duration::from_secs_f32(2.0),
             )?),
-            None,
-            4,
             GeneratorPlaybackOptions::default(),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
         None,
     )?;
+
     // Create a fundsp bass generator FM synth
     #[cfg(feature = "fundsp")]
     let bass = player.play_generator_source(
-        FunDspGenerator::new(
-            "super_saw",
+        FunDspGenerator::with_parameters(
+            "bass",
+            bass_synth::parameters(),
+            Some(&[
+                // tweak default parameter setup for this example
+                bass_synth::O1_WAVE.value_update_index(3),
+                bass_synth::O1_COARSE.value_update(-12),
+                bass_synth::O1_FINE.value_update(2.0),
+                bass_synth::O2_WAVE.value_update_index(3),
+                bass_synth::O2_COARSE.value_update(0),
+                bass_synth::O2_FINE.value_update(-3.0),
+                bass_synth::O2_PW.value_update(10.0),
+                bass_synth::SUB_WAVE.value_update_index(0),
+                bass_synth::SUB_OCTAVE.value_update(-2),
+                bass_synth::SUB_LEVEL.value_update(1.0),
+                bass_synth::LFO2_SPEED.value_update(3.20),
+                bass_synth::FILTER_LFO2_DEPTH.value_update(-63.0),
+                bass_synth::FILTER_FREQ.value_update(18000.0),
+                bass_synth::FILTER_DRIVE.value_update(0.2),
+                bass_synth::FILTER_RES.value_update(0.1),
+                bass_synth::AENV_ATTACK.value_update(0.001),
+                bass_synth::AENV_SUSTAIN.value_update(1.0),
+                bass_synth::AENV_RELEASE.value_update(2.0),
+            ]),
             bass_synth::voice_factory,
-            GeneratorPlaybackOptions::default().voices(8),
+            GeneratorPlaybackOptions::default().voices(1),
             player.output_sample_rate(),
         )?,
         None,
@@ -108,15 +129,14 @@ fn main() -> Result<(), Error> {
 
     // Schedule bass line with glides (midi_note, duration_in_beats, glide, volume, pan)
     let bass_line = [
-        (48, 4.0, None, None, Some(0.0)),
-        (44, 1.0, Some(999.0), Some(0.75), Some(0.8)),
-        (46, 1.0, Some(999.0), Some(0.5), Some(-0.8)),
-        (53, 2.0, Some(12.0), None, Some(0.0)),
-        (44, 4.0, Some(96.0), Some(1.0), None),
+        (48 + 12, 3.0, None, None, Some(0.0)),
+        (36 + 12, 0.5, Some(999.0), None, Some(0.0)),
+        (48 + 12, 0.5, Some(999.0), None, Some(0.0)),
+        (44 + 12, 1.0, Some(60.0), Some(0.75), Some(0.8)),
+        (46 + 12, 1.0, Some(60.0), Some(0.5), Some(-0.8)),
+        (53 + 12, 2.0, Some(12.0), None, Some(0.0)),
+        (44 + 12, 4.0, Some(60.0), Some(1.0), None),
     ];
-
-    // pitch bass sample file by an octave
-    let bass_pitch: u8 = if cfg!(feature = "fundsp") { 0 } else { 12 };
 
     // Start bass with the first metronome beat
     current_time = output_start_time;
@@ -126,12 +146,7 @@ fn main() -> Result<(), Error> {
         match bass_note_id {
             // Glide existing note
             Some(bass_note_id) if glide.is_some() => {
-                bass.set_note_speed(
-                    bass_note_id,
-                    speed_from_note(*note + bass_pitch),
-                    *glide,
-                    current_time,
-                )?;
+                bass.set_note_speed(bass_note_id, speed_from_note(*note), *glide, current_time)?;
                 if let Some(volume) = volume {
                     bass.set_note_volume(bass_note_id, *volume, current_time)?;
                 }
@@ -141,12 +156,7 @@ fn main() -> Result<(), Error> {
             }
             // Play new note
             _ => {
-                bass_note_id = Some(bass.note_on(
-                    *note + bass_pitch, //
-                    *volume,
-                    *panning,
-                    current_time,
-                )?);
+                bass_note_id = Some(bass.note_on(*note, *volume, *panning, current_time)?);
             }
         }
         current_time += (*beats * samples_per_beat as f64) as u64;

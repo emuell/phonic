@@ -288,8 +288,7 @@ fn main() -> Result<(), Error> {
 
             // Set a new random Tanh dist gain with every note
             tanh_distortion.set_parameter(
-                TanhDistortion::GAIN.id(),
-                rand::random_range(0.8..1.0),
+                TanhDistortion::GAIN.value_update(rand::random_range(0.8..1.0)),
                 sample_time,
             )?;
         }

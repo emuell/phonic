@@ -18,8 +18,8 @@ use crate::{
 
 // -60dB as audio silence
 const SILENCE_THRESHOLD: f32 = 1e-6;
-// 2 seconds of silence to ensure full decay
-const EXHAUSTION_DURATION: Duration = Duration::from_secs(2);
+// 200 ms of silence before killing a released voice
+const EXHAUSTION_DURATION: Duration = Duration::from_millis(200);
 
 // -------------------------------------------------------------------------------------------------
 

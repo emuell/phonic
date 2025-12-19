@@ -160,7 +160,8 @@ fn main() -> Result<(), Error> {
 
     // Effect parameters can be automated via the returned handles.
     // The `None` arguments are optional sample times to schedule events.
-    reverb.set_parameter(ReverbEffect::ROOM_SIZE.id(), 0.9f32, None)?;
+    reverb.set_parameter(ReverbEffect::ROOM_SIZE.value_update(0.9f32), None)?;
+    // Or if no parameter description is available, send the change as normalized value. 
     chorus.set_parameter_normalized(ChorusEffect::RATE.id(), 0.5, None)?;
 
     // Play a file through the main mixer (which has reverb only).

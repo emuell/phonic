@@ -58,22 +58,19 @@ impl EffectHandle {
         self.effect_name
     }
 
-    /// Set a raw parameter value on an effect at a specific sample time or immediately.
+    /// Set a parameter's value via the given raw or normalized value update definition
+    /// at a specific sample time or immediately.
     ///
-    /// The `value` must be of the correct type for the parameter: `f32`, `i32`, `bool`,
-    /// or the specific enum type used by the parameter.
-    pub fn set_parameter<V: std::any::Any + Send + Sync, T: Into<Option<u64>>>(
+    /// Note: Value update (id, value) tuples can be created safely via `value_update` functions
+    /// in [FloatParameter](crate::parameters::FloatParameter), [IntegerParameter](crate::parameters::IntegerParameter),
+    /// [EnumParameter](crate::parameters::EnumParameter) and [BooleanParameter](crate::parameters::BooleanParameter).
+    pub fn set_parameter<T: Into<Option<u64>>>(
         &self,
-        parameter_id: FourCC,
-        value: V,
+        (parameter_id, update): (FourCC, ParameterValueUpdate),
         sample_time: T,
     ) -> Result<(), Error> {
         let sample_time = sample_time.into().unwrap_or(0);
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Raw(Box::new(value)),
-        );
-
+        let value = Owned::new(&self.collector_handle, update);
         if self
             .mixer_event_queue
             .push(MixerMessage::ProcessEffectParameterUpdate {
@@ -99,26 +96,15 @@ impl EffectHandle {
         value: f32,
         sample_time: T,
     ) -> Result<(), Error> {
-        let sample_time = sample_time.into().unwrap_or(0);
-        let value = Owned::new(
-            &self.collector_handle,
-            ParameterValueUpdate::Normalized(value),
-        );
-
-        if self
-            .mixer_event_queue
-            .push(MixerMessage::ProcessEffectParameterUpdate {
-                effect_id: self.effect_id,
-                parameter_id,
-                value,
-                sample_time,
-            })
-            .is_err()
-        {
-            Err(Self::mixer_event_queue_error("set_parameter_normalized"))
-        } else {
-            Ok(())
+        if !(0.0..=1.0).contains(&value) {
+            return Err(Error::ParameterError(format!(
+                "Invalid parameter update: value should be normalized, but is: '{value}'"
+            )));
         }
+        self.set_parameter(
+            (parameter_id, ParameterValueUpdate::Normalized(value)),
+            sample_time,
+        )
     }
 
     /// Send a custom message to the effect at a specific sample time or immediately.

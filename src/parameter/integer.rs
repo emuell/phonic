@@ -6,7 +6,7 @@ use std::{
 
 use four_cc::FourCC;
 
-use super::{Parameter, ParameterType, ParameterValueUpdate};
+use super::{Parameter, ParameterPolarity, ParameterType, ParameterValueUpdate};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -86,6 +86,20 @@ impl IntegerParameter {
         self
     }
 
+    /// Create a raw, debug validated ParameterValueUpdate for this parameter.
+    #[must_use]
+    pub fn value_update(&self, value: i32) -> (FourCC, ParameterValueUpdate) {
+        debug_assert!(
+            self.range.contains(&value),
+            "Integer value for parameter '{}' must be in range {}..={}, but is {}",
+            self.id,
+            self.range.start(),
+            self.range.end(),
+            value
+        );
+        (self.id, ParameterValueUpdate::Raw(Arc::new(value)))
+    }
+
     /// The parameter's identifier.
     pub const fn id(&self) -> FourCC {
         self.id
@@ -150,7 +164,14 @@ impl Parameter for IntegerParameter {
     }
 
     fn parameter_type(&self) -> ParameterType {
-        ParameterType::Integer
+        ParameterType::Integer {
+            step: 1.0 / (self.range().end() - *self.range().start()).abs() as f32,
+            polarity: if *self.range().start() == -*self.range().end() {
+                ParameterPolarity::Bipolar
+            } else {
+                ParameterPolarity::Unipolar
+            },
+        }
     }
 
     fn default_value(&self) -> f32 {

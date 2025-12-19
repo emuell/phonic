@@ -107,7 +107,7 @@ fn main() -> Result<(), Error> {
             None,
             fm3_synth::voice_factory,
             GeneratorPlaybackOptions::default()
-                .voices(8)
+                .voices(4)
                 .target_mixer(tone_mixer.id()),
             player.output_sample_rate(),
         )?,
@@ -209,7 +209,7 @@ fn main() -> Result<(), Error> {
                     };
                     println!("Filter type: {filter_type}");
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::TYPE.id(), filter_type, None)
+                        .set_parameter(effects::FilterEffect::TYPE.value_update(filter_type), None)
                         .unwrap_or_default();
                 }
                 Keycode::Key1 => {
@@ -241,7 +241,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff * 1.1_f32).min(20000.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF.id(), *cutoff, None)
+                        .set_parameter(effects::FilterEffect::CUTOFF.value_update(*cutoff), None)
                         .unwrap_or_default();
                 }
                 Keycode::Left if alt_key => {
@@ -249,7 +249,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff / 1.1_f32).max(20.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF.id(), *cutoff, None)
+                        .set_parameter(effects::FilterEffect::CUTOFF.value_update(*cutoff), None)
                         .unwrap_or_default();
                 }
                 Keycode::Left => {

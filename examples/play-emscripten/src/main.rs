@@ -11,9 +11,9 @@ use phonic::{
     generators::FunDspGenerator,
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
-    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
-    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
-    ParameterType, Player,
+    ClonableParameter, DefaultOutputDevice, Effect, EffectHandle, EffectId, Error,
+    FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle,
+    NotePlaybackId, ParameterType, Player,
 };
 
 #[path = "../../common/synths/organ.rs"]
@@ -26,8 +26,8 @@ mod organ_synth;
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum ParamTypeInfo {
-    Float,
-    Integer,
+    Float { step: f32 },
+    Integer { step: f32 },
     Enum { values: Vec<String> },
     Boolean,
 }
@@ -56,8 +56,8 @@ impl From<&dyn Effect> for EffectInfo {
                 let id: u32 = p.id().into();
                 let name = p.name().to_string();
                 let param_type = match p.parameter_type() {
-                    ParameterType::Float => ParamTypeInfo::Float,
-                    ParameterType::Integer => ParamTypeInfo::Integer,
+                    ParameterType::Float { step, polarity: _ } => ParamTypeInfo::Float { step },
+                    ParameterType::Integer { step, polarity: _ } => ParamTypeInfo::Integer { step },
                     ParameterType::Enum { values } => ParamTypeInfo::Enum { values },
                     ParameterType::Boolean => ParamTypeInfo::Boolean,
                 };
@@ -91,7 +91,7 @@ struct App {
     playing_synth_notes: HashMap<u8, NotePlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer: MixerHandle,
-    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
+    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn ClonableParameter>>)>,
 }
 
 impl App {
@@ -143,6 +143,7 @@ impl App {
                 organ_synth::voice_factory,
                 GeneratorPlaybackOptions::default()
                     .voices(8)
+                    .volume_db(3.0)
                     .target_mixer(synth_mixer.id()),
                 sample_rate,
             )?,

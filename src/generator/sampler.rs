@@ -40,7 +40,7 @@ pub struct Sampler {
     voices: Vec<SamplerVoice>,
     active_voices: usize,
     envelope_parameters: Option<AhdsrParameters>,
-    active_parameters: Vec<Box<dyn ClonableParameter + Send + Sync>>,
+    active_parameters: Vec<Box<dyn ClonableParameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     stopping: bool, // True if stop has been called and we are waiting for voices to decay
     stopped: bool,  // True if all voices have decayed after a stop call
@@ -210,7 +210,7 @@ impl Sampler {
         let active_voices = 0;
 
         // Collect active parameters
-        let mut active_parameters = Vec::<Box<dyn ClonableParameter + Send + Sync>>::new();
+        let mut active_parameters = Vec::<Box<dyn ClonableParameter>>::new();
         if envelope_parameters.is_some() {
             active_parameters.extend(
                 [
@@ -221,7 +221,7 @@ impl Sampler {
                     Self::AMP_RELEASE,
                 ]
                 .map(Box::from)
-                .map(|p| p as Box<dyn ClonableParameter + Send + Sync>),
+                .map(|p| p as Box<dyn ClonableParameter>),
             );
         }
 
