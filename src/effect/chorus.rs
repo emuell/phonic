@@ -18,7 +18,7 @@ use crate::{
         },
         smoothing::LinearSmoothedValue,
     },
-    ClonableParameter, Error, ParameterScaling,
+    Error, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -288,7 +288,7 @@ impl Effect for ChorusEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.rate.description(),
             self.depth.description(),

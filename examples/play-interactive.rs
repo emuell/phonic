@@ -103,7 +103,7 @@ fn main() -> Result<(), Error> {
     let synth_generator = player.play_generator_source(
         FunDspGenerator::with_parameters(
             "fm_synth",
-            &fm3_synth::parameters(),
+            fm3_synth::parameters(),
             None,
             fm3_synth::voice_factory,
             GeneratorPlaybackOptions::default()

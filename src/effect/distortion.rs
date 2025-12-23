@@ -11,7 +11,7 @@ use crate::{
         buffer::InterleavedBufferMut,
         smoothing::{ExponentialSmoothedValue, LinearSmoothedValue},
     },
-    ClonableParameter, Error,
+    Error, Parameter,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -180,7 +180,7 @@ impl Effect for DistortionEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.distortion_type.description(),
             self.drive.description(),

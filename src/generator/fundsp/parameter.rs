@@ -1,8 +1,8 @@
-use std::ops::RangeInclusive;
+use std::{any::Any, ops::RangeInclusive};
 
 use crate::{
     parameter::{BooleanParameter, EnumParameter, FloatParameter, IntegerParameter},
-    ClonableParameter, ParameterScaling, ParameterValueUpdate,
+    Parameter, ParameterScaling, ParameterValueUpdate,
 };
 
 use fundsp::hacker32::Shared;
@@ -15,7 +15,7 @@ use fundsp::hacker32::Shared;
 /// to automate parameters in the voices.
 pub struct SharedParameterValue {
     /// The parameter's description and constraints.
-    description: Box<dyn ClonableParameter>,
+    description: Box<dyn Parameter>,
     /// The parameter's range represented as floating point range.
     range: RangeInclusive<f32>,
     /// The parameter's scaling.
@@ -27,14 +27,14 @@ pub struct SharedParameterValue {
 impl SharedParameterValue {
     /// Create a new parameter value with the given parameter description, initialized to the
     /// parameter's default value.
-    pub fn from_description(description: &dyn ClonableParameter) -> Self {
-        let description_any = description.as_any();
+    pub fn from_description(description: &dyn Parameter) -> Self {
+        let description_any = description as &dyn Any;
 
         let range;
         let scaling;
         if let Some(float_param) = description_any.downcast_ref::<FloatParameter>() {
             range = float_param.range().clone();
-            scaling = float_param.scaling().clone();
+            scaling = *float_param.scaling();
         } else if let Some(integer_param) = description_any.downcast_ref::<IntegerParameter>() {
             range = RangeInclusive::new(
                 *integer_param.range().start() as f32,
@@ -44,7 +44,7 @@ impl SharedParameterValue {
         } else if let Some(enum_param) = description_any.downcast_ref::<EnumParameter>() {
             range = RangeInclusive::new(0.0, enum_param.values().len() as f32);
             scaling = ParameterScaling::Linear;
-        } else if let Some(_) = description_any.downcast_ref::<BooleanParameter>() {
+        } else if description_any.downcast_ref::<BooleanParameter>().is_some() {
             range = RangeInclusive::new(0.0, 1.0);
             scaling = ParameterScaling::Linear;
         } else {
@@ -67,7 +67,7 @@ impl SharedParameterValue {
     }
 
     /// Access the parameter value's description.
-    pub fn description(&self) -> &dyn ClonableParameter {
+    pub fn description(&self) -> &dyn Parameter {
         self.description.as_ref()
     }
 

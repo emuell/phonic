@@ -271,18 +271,12 @@ impl Player {
     ) -> Result<FilePlaybackHandle, Error> {
         // create a streamed or preloaded source, depending on the options and play it
         if options.stream {
-            let streamed_source = StreamedFileSource::from_file(
-                path,
-                options,
-                self.output_sample_rate(),
-            )?;
+            let streamed_source =
+                StreamedFileSource::from_file(path, options, self.output_sample_rate())?;
             self.play_file_source_with_context(streamed_source, options.start_time, context)
         } else {
-            let preloaded_source = PreloadedFileSource::from_file(
-                path,
-                options,
-                self.output_sample_rate(),
-            )?;
+            let preloaded_source =
+                PreloadedFileSource::from_file(path, options, self.output_sample_rate())?;
             self.play_file_source_with_context(preloaded_source, options.start_time, context)
         }
     }

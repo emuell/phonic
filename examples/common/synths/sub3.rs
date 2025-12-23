@@ -1,4 +1,5 @@
-//! Novation Bass Station inspired synth. To be wrapped into a [`FunDspGenerator`].
+//! Substractive synth with 3 main and one sub oscillator, insprired by Novation's Bass Station.
+//! To be wrapped into a [`FunDspGenerator`]
 //!
 //! - 4 oscillators (OSC 1, OSC 2, Sub OSC + Noise).
 //! - Ring Modulation (OSC 1*2).
@@ -16,15 +17,19 @@ use phonic::{
     },
     generators::shared_ahdsr,
     parameters::{EnumParameter, FloatParameter, IntegerParameter},
-    ClonableParameter, Error, GeneratorPlaybackHandle, ParameterScaling,
+    Error, GeneratorPlaybackHandle, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
 
 // OSCILLATOR 1 PARAMETERS
 
-pub const O1_RANGE: IntegerParameter =
-    IntegerParameter::new(FourCC(*b"o1Rg"), "Osc1 Range", 0..=3, 1).with_unit("16', 8', 4', 2'"); // 0=16, 1=8, 2=4, 3=2
+pub const O1_RANGE: EnumParameter = EnumParameter::new(
+    FourCC(*b"o1Rg"),
+    "Osc1 Range",
+    &["16'", "8'", "4'", "2'"],
+    1,
+);
 
 pub const O1_WAVE: EnumParameter = EnumParameter::new(
     FourCC(*b"o1Wv"),
@@ -53,8 +58,12 @@ pub const O1_LEVEL: FloatParameter =
 
 // OSCILLATOR 2
 
-pub const O2_RANGE: IntegerParameter =
-    IntegerParameter::new(FourCC(*b"o2Rg"), "Osc2 Range", 0..=3, 1);
+pub const O2_RANGE: EnumParameter = EnumParameter::new(
+    FourCC(*b"o2Rg"),
+    "Osc2 Range",
+    &["16'", "8'", "4'", "2'"],
+    1,
+);
 
 pub const O2_WAVE: EnumParameter = EnumParameter::new(
     FourCC(*b"o2Wv"),
@@ -109,19 +118,19 @@ pub const RING_LEVEL: FloatParameter =
 pub const FILTER_FREQ: FloatParameter =
     FloatParameter::new(FourCC(*b"flFr"), "Filter Freq", 20.0..=20000.0, 20000.0)
         .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(3.0));
 
 pub const FILTER_RES: FloatParameter =
     FloatParameter::new(FourCC(*b"flRs"), "Filter Res", 0.0..=1.0, 0.0);
 
 pub const FILTER_DRIVE: FloatParameter =
-    FloatParameter::new(FourCC(*b"flDr"), "Filter Drive", 0.0..=100.0, 0.0);
+    FloatParameter::new(FourCC(*b"flDr"), "Filter Drive", 0.0..=1.0, 0.0);
 
 pub const FILTER_TRACK: FloatParameter = FloatParameter::new(
     FourCC(*b"flTr"),
     "Filter Tracking",
-    0.0..=7.0,
-    0.0, // 0=Full, 7=None
+    0.0..=1.0,
+    0.0, // 0=Full, 1=None
 );
 
 pub const FILTER_LFO2_DEPTH: FloatParameter =
@@ -145,33 +154,45 @@ pub const LFO2_SPEED: FloatParameter =
 // MODULATION ENVELOPE
 
 pub const MENV_ATTACK: FloatParameter =
-    FloatParameter::new(FourCC(*b"meAt"), "ModEnv Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"meAt"), "ModEnv Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const MENV_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"meHo"), "ModEnv Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const MENV_DECAY: FloatParameter =
-    FloatParameter::new(FourCC(*b"meDc"), "ModEnv Decay", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"meDc"), "ModEnv Decay", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const MENV_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"meSu"), "ModEnv Sustain", 0.0..=1.0, 0.5);
 pub const MENV_RELEASE: FloatParameter =
-    FloatParameter::new(FourCC(*b"meRl"), "ModEnv Release", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"meRl"), "ModEnv Release", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 // AMP ENVELOPE
 
 pub const AENV_ATTACK: FloatParameter =
-    FloatParameter::new(FourCC(*b"aeAt"), "AmpEnv Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"aeAt"), "AmpEnv Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const AENV_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"aeHo"), "AmpEnv Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const AENV_DECAY: FloatParameter =
-    FloatParameter::new(FourCC(*b"aeDc"), "AmpEnv Decay", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"aeDc"), "AmpEnv Decay", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const AENV_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"aeSu"), "AmpEnv Sustain", 0.0..=1.0, 1.0);
 pub const AENV_RELEASE: FloatParameter =
-    FloatParameter::new(FourCC(*b"aeRl"), "AmpEnv Release", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"aeRl"), "AmpEnv Release", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 // -------------------------------------------------------------------------------------------------
 
-pub fn parameters() -> &'static [&'static dyn ClonableParameter] {
-    const ALL_PARAMS: [&'static dyn ClonableParameter; 39] = [
+pub fn parameters() -> &'static [&'static dyn Parameter] {
+    const ALL_PARAMS: [&'static dyn Parameter; 39] = [
         &O1_RANGE,
         &O1_WAVE,
         &O1_COARSE,
@@ -326,20 +347,13 @@ pub fn voice_factory(
     // Base Freq
     let fl_base = var(&parameter(FILTER_FREQ.id()));
 
-    // Tracking: 0=Full(1.0), 7=None(0.0).
-    // Tracking applies to the note frequency relative to a reference (e.g. C4 approx 261.6Hz).
-    // Or simply, if Tracking=1.0, cutoff shifts with note.
-    // We can approximate this by: Cutoff = Base * (Freq / 261.6) ^ Tracking.
-    // Or simpler: Cutoff = Base * (Freq / Reference) * Tracking_Factor + Base * (1 - Tracking_Factor).
-    // Let's use the exponential shift approach.
-    // Tracking Amount 0..7 -> 1.0 .. 0.0
-    let fl_track_amt = (7.0 - var(&parameter(FILTER_TRACK.id()))) * (1.0 / 7.0);
+    // Tracking Amount 0..1
+    let fl_track_amt = var(&parameter(FILTER_TRACK.id()));
     // Reference frequency (Middle C)
     let ref_freq = 261.626;
     // Ratio of current note freq to reference
     let note_ratio = var(&freq) * (1.0 / ref_freq);
-    // Apply tracking amount to the ratio (in log domain, or just power)
-    // ratio ^ tracking
+    // Apply tracking amount to the ratio (in log domain, or just power)  ratio ^ tracking
     let track_mult = (fl_track_amt * (note_ratio >> shape_fn(|x| x.ln()))) >> shape_fn(|x| x.exp());
 
     // LFO 2 Mod
@@ -356,16 +370,15 @@ pub fn voice_factory(
 
     let fl_cutoff = (fl_base * track_mult * fl_mod_mult) >> clip_to(20.0, 20000.0);
 
-    // Drive
-    // 0..100.
+    // Drive 0..1
     let fl_drive = var(&parameter(FILTER_DRIVE.id()));
 
     // Filter Node Inputs: Sig, Freq, Res
     let fl_res = var(&parameter(FILTER_RES.id()));
 
     // Apply Drive (Soft Clip / Tanh)
-    // Gain = 1.0 + Drive * 0.1
-    let drive_gain = 1.0 + fl_drive * 0.1;
+    // Gain = 1.0 + Drive
+    let drive_gain = 1.0 + fl_drive;
     let driven_sig = (mixed * drive_gain) >> shape_fn(|x| x.tanh());
 
     let filtered = (driven_sig | fl_cutoff | fl_res) >> moog();

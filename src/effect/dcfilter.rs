@@ -3,7 +3,7 @@ use strum::VariantNames;
 
 use crate::{
     effect::{Effect, EffectTime},
-    parameter::{ClonableParameter, EnumParameter, EnumParameterValue, ParameterValueUpdate},
+    parameter::{EnumParameter, EnumParameterValue, Parameter, ParameterValueUpdate},
     utils::{
         buffer::InterleavedBufferMut,
         dsp::filters::dc::{DcFilter, DcFilterMode},
@@ -65,7 +65,7 @@ impl Effect for DcFilterEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.mode.description()]
     }
 

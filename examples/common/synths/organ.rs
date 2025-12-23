@@ -1,4 +1,4 @@
-//! Fundsp mono organ alike synth with 4 slightly detuned sine waves.
+//! Simple Fundsp organ synth with 4 slightly detuned sine waves.
 //! Does not provide any external extra parameters. To be wrapped into a [`FunDspGenerator`].
 
 use fundsp::hacker32::*;

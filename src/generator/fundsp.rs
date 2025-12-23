@@ -11,7 +11,7 @@ use fundsp::{audiounit::AudioUnit, shared::Shared};
 
 use crate::{
     generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
-    parameter::{ClonableParameter, ParameterValueUpdate},
+    parameter::{Parameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
     utils::buffer::clear_buffer,
     Error, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId, PlaybackStatusContext,
@@ -173,7 +173,7 @@ impl FunDspGenerator {
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
-        parameters: &[&dyn ClonableParameter],
+        parameters: &[&dyn Parameter],
         parameter_state: Option<&[(FourCC, ParameterValueUpdate)]>,
         voice_factory: F,
         options: GeneratorPlaybackOptions,
@@ -566,7 +566,7 @@ impl Generator for FunDspGenerator {
         }
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         self.shared_parameters
             .values()
             .map(|p| p.description())

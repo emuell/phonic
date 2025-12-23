@@ -1,4 +1,5 @@
-//! Fundsp FM synth with controllable parameters. To be wrapped into a [`FunDspGenerator`].
+//! FM synth with 3 oscillators, insprired by Fors algorithm free Pivot FM synth.
+//! To be wrapped into a [`FunDspGenerator`].
 //!
 //! - 3 Operators (A, B, C) where A is the carrier.
 //! - FM Algorithm: C->B->A and C->A (controlled by Blend).
@@ -7,8 +8,11 @@
 //! - Multi-mode Filter (LP, HP, BP) on the output.
 
 use phonic::{
-    four_cc::FourCC, fundsp::hacker32::*, generators::shared_ahdsr, parameters::FloatParameter,
-    ClonableParameter, Error, GeneratorPlaybackHandle, ParameterScaling,
+    four_cc::FourCC,
+    fundsp::hacker32::*,
+    generators::shared_ahdsr,
+    parameters::{EnumParameter, FloatParameter},
+    Error, GeneratorPlaybackHandle, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -17,15 +21,17 @@ use phonic::{
 pub const FREQ_A: FloatParameter =
     FloatParameter::new(FourCC(*b"frqA"), "A Frequency", 20.0..=20000.0, 440.0)
         .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(3.0));
+
 pub const FREQ_B: FloatParameter =
     FloatParameter::new(FourCC(*b"frqB"), "B Frequency", 20.0..=20000.0, 880.0)
         .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(3.0));
+
 pub const FREQ_C: FloatParameter =
     FloatParameter::new(FourCC(*b"frqC"), "C Frequency", 20.0..=20000.0, 10000.0)
         .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(3.0));
 
 // Blend parameters
 pub const BLEND: FloatParameter =
@@ -41,7 +47,9 @@ pub const DEPTH_C_TO_B: FloatParameter =
 
 // LFO Parameters
 pub const LFO_FREQ: FloatParameter =
-    FloatParameter::new(FourCC(*b"lfoF"), "LFO Freq", 0.1..=20.0, 5.0).with_unit("Hz");
+    FloatParameter::new(FourCC(*b"lfoF"), "LFO Freq", 0.1..=20.0, 5.0)
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 pub const MOD_LFO_PITCH: FloatParameter =
     FloatParameter::new(FourCC(*b"mlPt"), "LFO→Pitch", 0.0..=1.0, 0.0);
@@ -51,15 +59,21 @@ pub const MOD_LFO_CUTOFF: FloatParameter =
 
 // Aux Envelope Parameters
 pub const AUX_ATTACK: FloatParameter =
-    FloatParameter::new(FourCC(*b"axAt"), "Aux Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"axAt"), "Aux Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const AUX_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"axHo"), "Aux Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const AUX_DECAY: FloatParameter =
-    FloatParameter::new(FourCC(*b"axDc"), "Aux Decay", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"axDc"), "Aux Decay", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const AUX_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"axSu"), "Aux Sustain", 0.0..=1.0, 0.7);
 pub const AUX_RELEASE: FloatParameter =
-    FloatParameter::new(FourCC(*b"axRl"), "Aux Release", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"axRl"), "Aux Release", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 pub const MOD_ENV_CUTOFF: FloatParameter =
     FloatParameter::new(FourCC(*b"meCt"), "Env→Cutoff", -1.0..=1.0, 0.0);
@@ -71,60 +85,78 @@ pub const MOD_ENV_DEPTH_BA: FloatParameter =
 pub const FILTER_CUTOFF: FloatParameter =
     FloatParameter::new(FourCC(*b"fCut"), "Filter Cutoff", 20.0..=20000.0, 20000.0)
         .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(3.0));
 
 pub const FILTER_RES: FloatParameter =
     FloatParameter::new(FourCC(*b"fRes"), "Filter Res", 0.1..=10.0, 0.707);
 
-pub const FILTER_TYPE: FloatParameter = FloatParameter::new(
+pub const FILTER_TYPE: EnumParameter = EnumParameter::new(
     FourCC(*b"fTyp"),
     "Filter Type",
-    0.0..=2.0, // 0=LP, 1=HP, 2=BP
-    0.0,
+    &["Lowpass", "Highpass", "Bandpass"],
+    0,
 );
 
 // Operator A envelope parameters
 pub const ATTACK_A: FloatParameter =
-    FloatParameter::new(FourCC(*b"atA_"), "A Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"atA_"), "A Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const HOLD_A: FloatParameter =
     FloatParameter::new(FourCC(*b"hoA_"), "A Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const DECAY_A: FloatParameter =
-    FloatParameter::new(FourCC(*b"dcA_"), "A Decay", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"dcA_"), "A Decay", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const SUSTAIN_A: FloatParameter =
     FloatParameter::new(FourCC(*b"suA_"), "A Sustain", 0.0..=1.0, 0.7);
 pub const RELEASE_A: FloatParameter =
-    FloatParameter::new(FourCC(*b"rlA_"), "A Release", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"rlA_"), "A Release", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 // Operator B envelope parameters
 pub const ATTACK_B: FloatParameter =
-    FloatParameter::new(FourCC(*b"atB_"), "B Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"atB_"), "B Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 pub const HOLD_B: FloatParameter =
     FloatParameter::new(FourCC(*b"hoB_"), "B Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const DECAY_B: FloatParameter =
-    FloatParameter::new(FourCC(*b"dcB_"), "B Decay", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"dcB_"), "B Decay", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const SUSTAIN_B: FloatParameter =
     FloatParameter::new(FourCC(*b"suB_"), "B Sustain", 0.0..=1.0, 0.7);
 pub const RELEASE_B: FloatParameter =
-    FloatParameter::new(FourCC(*b"rlB_"), "B Release", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"rlB_"), "B Release", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 // Operator C envelope parameters
 pub const ATTACK_C: FloatParameter =
-    FloatParameter::new(FourCC(*b"atC_"), "C Attack", 0.001..=5.0, 0.01).with_unit("s");
+    FloatParameter::new(FourCC(*b"atC_"), "C Attack", 0.001..=5.0, 0.01)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const HOLD_C: FloatParameter =
     FloatParameter::new(FourCC(*b"hoC_"), "C Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const DECAY_C: FloatParameter =
-    FloatParameter::new(FourCC(*b"dcC_"), "C Decay", 0.001..=5.0, 0.1).with_unit("s");
+    FloatParameter::new(FourCC(*b"dcC_"), "C Decay", 0.001..=5.0, 0.1)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 pub const SUSTAIN_C: FloatParameter =
     FloatParameter::new(FourCC(*b"suC_"), "C Sustain", 0.0..=1.0, 0.7);
 pub const RELEASE_C: FloatParameter =
-    FloatParameter::new(FourCC(*b"rlC_"), "C Release", 0.001..=5.0, 0.5).with_unit("s");
+    FloatParameter::new(FourCC(*b"rlC_"), "C Release", 0.001..=5.0, 0.5)
+        .with_unit("s")
+        .with_scaling(ParameterScaling::Exponential(2.0));
 
 // -------------------------------------------------------------------------------------------------
 
 /// Exposes all automateable parameters.
-pub fn parameters() -> &'static [&'static dyn ClonableParameter] {
-    const ALL_PARAMETERS: [&dyn ClonableParameter; 35] = [
+pub fn parameters() -> &'static [&'static dyn Parameter] {
+    const ALL_PARAMETERS: [&dyn Parameter; 35] = [
         &FREQ_A,
         &FREQ_B,
         &FREQ_C,
@@ -181,8 +213,8 @@ pub fn randomize(generator: &GeneratorPlaybackHandle) -> Result<(), Error> {
 pub fn voice_factory(
     gate: Shared,
     freq: Shared,
-    vol: Shared,
-    _pan: Shared,
+    volume: Shared,
+    panning: Shared,
     parameter: &mut dyn FnMut(FourCC) -> Shared,
 ) -> Box<dyn AudioUnit> {
     // --- Modulators ---
@@ -282,13 +314,13 @@ pub fn voice_factory(
     let cutoff_mod = cutoff_base
         + (lfo.clone() * var(&parameter(MOD_LFO_CUTOFF.id())) * 1000.0)
         + (aux_env.clone() * var(&parameter(MOD_ENV_CUTOFF.id())) * 5000.0);
-
     let cutoff = cutoff_mod >> clip_to(20.0, 20000.0);
-
     let filtered_op_a = (op_a | cutoff | q | filter_type) >> An(MultiFilter::new());
 
-    // Final output with volume and panning
-    Box::new(filtered_op_a * var(&vol) * 0.3)
+    // Apply Volume and Panning
+    let final_mix = ((filtered_op_a * var(&volume) * 0.3) | var(&panning)) >> panner();
+
+    Box::new(final_mix)
 }
 
 // -------------------------------------------------------------------------------------------------

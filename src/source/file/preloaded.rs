@@ -201,12 +201,7 @@ impl PreloadedFileSource {
             loop_range,
         )?);
 
-        Self::from_shared_buffer(
-            file_buffer,
-            file_path,
-            options,
-            output_sample_rate,
-        )
+        Self::from_shared_buffer(file_buffer, file_path, options, output_sample_rate)
     }
 
     /// Create a new preloaded file source from the given shared, **decoded** file buffer.

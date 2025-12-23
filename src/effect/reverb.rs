@@ -10,7 +10,7 @@ use crate::{
         dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
         smoothing::{ExponentialSmoothedValue, LinearSmoothedValue},
     },
-    ClonableParameter, Error,
+    Error, Parameter,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -371,7 +371,7 @@ impl Effect for ReverbEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.room_size.description(), self.wet.description()]
     }
 

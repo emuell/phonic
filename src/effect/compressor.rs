@@ -10,7 +10,7 @@ use crate::{
         db_to_linear,
         dsp::{delay::LookupDelayLine, envelope::EnvelopeFollower},
     },
-    ClonableParameter, Error,
+    Error, Parameter,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -197,7 +197,7 @@ impl Effect for CompressorEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.threshold.description(),
             self.ratio.description(),

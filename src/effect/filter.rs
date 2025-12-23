@@ -12,7 +12,7 @@ use crate::{
         dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
         smoothing::LinearSmoothedValue,
     },
-    ClonableParameter, Error, ParameterScaling,
+    Error, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ impl Effect for FilterEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.filter_type.description(),
             self.cutoff.description(),

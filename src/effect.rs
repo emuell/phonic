@@ -2,7 +2,7 @@ use std::any::Any;
 
 use four_cc::FourCC;
 
-use crate::{parameter::ParameterValueUpdate, ClonableParameter, Error, SourceTime};
+use crate::{parameter::ParameterValueUpdate, Error, Parameter, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -85,8 +85,8 @@ pub trait Effect: Send + Sync + 'static {
     /// This can be used by UIs or automation systems to query available parameters of a specific
     /// effect. This method may only be called on non-real-time threads: Usually it will be called
     /// after creating a new effect instance, before adding it to the player's effect chains, in
-    /// order to gather parameter info for generic effect UIs.  
-    fn parameters(&self) -> Vec<&dyn ClonableParameter>;
+    /// order to gather parameter info for generic effect UIs.
+    fn parameters(&self) -> Vec<&dyn Parameter>;
 
     /// Initializes the effect with the audio output's properties.
     ///

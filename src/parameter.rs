@@ -21,11 +21,11 @@ pub enum ParameterPolarity {
 ///
 /// Parameter UIs and/or automation, access parameter values as *normalized* float values only:
 /// - To show values as human readable strings, use the [`value_to_string`](Parameter::value_to_string)
-/// and [`string_to_value`](Parameter::string_to_value) functions.
+///   and [`string_to_value`](Parameter::string_to_value) functions.
 /// - Use the `values` property for enum parameters to visualize selected and available choices.
-/// Enum values have a `step` of `1.0 / values.len()`.
+///   Enum values have a `step` of `1.0 / values.len()`.
 /// - The `step` property of float and integer parameters can be used in UIs to quantize normalized
-/// value changes in sliders.
+///   value changes in sliders.
 /// - The `polarity` property may be used to change visual appearence of sliders.
 ///
 #[derive(Debug, Clone, PartialEq)]
@@ -58,7 +58,9 @@ pub enum ParameterType {
 ///
 /// Note that parameter descriptions don't hold the actual parameter values, just the default values.
 /// The effect or generator processor owns the actual value.
-pub trait Parameter: Debug + Send + Sync {
+///
+/// Parameters can be cloned into `Box<dyn Parameter>` via  `dyn_clone::clone_box(parameter)`
+pub trait Parameter: Debug + Send + Sync + Any {
     /// The unique id of the parameter.
     fn id(&self) -> FourCC;
 
@@ -76,27 +78,9 @@ pub trait Parameter: Debug + Send + Sync {
     /// Convert the given string value to a **normalized** floating point value.
     /// Returns `None` when conversion failed, else a valid normalized value.
     fn string_to_value(&self, string: String) -> Option<f32>;
-}
 
-/// Allows creating `dyn `[`Parameter`] clones.
-pub trait ClonableParameter: Parameter {
-    /// Create a dyn Parameter clone, wrapped into a box.
-    fn dyn_clone(&self) -> Box<dyn ClonableParameter>;
-    /// Cast parameter to any.
-    fn as_any(&self) -> &dyn Any;
-}
-
-impl<P: Parameter> ClonableParameter for P
-where
-    P: Clone + 'static,
-{
-    fn dyn_clone(&self) -> Box<dyn ClonableParameter> {
-        Box::new(Self::clone(self))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
+    /// Create a boxed dyn Parameter clone of this parameter.
+    fn dyn_clone(&self) -> Box<dyn Parameter>;
 }
 
 // -------------------------------------------------------------------------------------------------

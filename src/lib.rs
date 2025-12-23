@@ -131,8 +131,7 @@ pub use player::{
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
 pub use parameter::{
-    ClonableParameter, Parameter, ParameterPolarity, ParameterScaling, ParameterType,
-    ParameterValueUpdate,
+    Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate,
 };
 
 pub use source::{

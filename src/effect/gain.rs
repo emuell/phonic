@@ -7,7 +7,7 @@ use crate::{
         buffer::{scale_buffer, InterleavedBufferMut},
         db_to_linear, linear_to_db,
     },
-    ClonableParameter, Error, ParameterScaling,
+    Error, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -81,7 +81,7 @@ impl Effect for GainEffect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.gain.description()]
     }
 

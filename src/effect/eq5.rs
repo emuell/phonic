@@ -7,7 +7,7 @@ use crate::{
         dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
         smoothing::LinearSmoothedValue,
     },
-    ClonableParameter, Error, ParameterScaling,
+    Error, Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -235,7 +235,7 @@ impl Effect for Eq5Effect {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.gains[0].description(),
             self.frequencies[0].description(),

@@ -8,7 +8,7 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
-    parameter::{ClonableParameter, ParameterValueUpdate},
+    parameter::{Parameter, ParameterValueUpdate},
     source::{unique_source_id, Source},
     utils::db_to_linear,
     Error, MixerId, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
@@ -221,7 +221,7 @@ pub trait Generator: Source {
     /// Optional parameter descriptors for the generator.
     ///
     /// When returning parameters here, implement `process_parameter_update` too.
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![]
     }
 

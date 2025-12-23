@@ -8,7 +8,7 @@ use phonic::{
     parameters::{FloatParameter, SmoothedParameterValue},
     sources::{PreloadedFileSource, SynthSourceGenerator, SynthSourceImpl},
     utils::{buffer::InterleavedBufferMut, pitch_from_note, speed_from_note},
-    ClonableParameter, Effect, EffectTime, Error, FilePlaybackOptions, ParameterValueUpdate,
+    Effect, EffectTime, Error, FilePlaybackOptions, Parameter, ParameterValueUpdate,
     SynthPlaybackOptions,
 };
 
@@ -63,7 +63,7 @@ impl Effect for TanhDistortion {
         Self::EFFECT_NAME
     }
 
-    fn parameters(&self) -> Vec<&dyn ClonableParameter> {
+    fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.gain.description()]
     }
 

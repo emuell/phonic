@@ -11,9 +11,9 @@ use phonic::{
     generators::FunDspGenerator,
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
-    ClonableParameter, DefaultOutputDevice, Effect, EffectHandle, EffectId, Error,
-    FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle,
-    NotePlaybackId, ParameterType, Player,
+    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
+    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
+    ParameterType, Player,
 };
 
 #[path = "../../common/synths/organ.rs"]
@@ -91,7 +91,7 @@ struct App {
     playing_synth_notes: HashMap<u8, NotePlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer: MixerHandle,
-    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn ClonableParameter>>)>,
+    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
 }
 
 impl App {

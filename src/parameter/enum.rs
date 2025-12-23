@@ -207,6 +207,10 @@ impl Parameter for EnumParameter {
         let value = self.string_to_value(&string)?;
         Some(self.normalize_value(&value))
     }
+
+    fn dyn_clone(&self) -> Box<dyn Parameter> {
+        Box::new(self.clone())
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

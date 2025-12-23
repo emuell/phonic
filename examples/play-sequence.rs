@@ -24,8 +24,8 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod arguments;
 
 #[cfg(feature = "fundsp")]
-#[path = "./common/synths/bass.rs"]
-mod bass_synth;
+#[path = "./common/synths/sub3.rs"]
+mod sub3;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -75,29 +75,29 @@ fn main() -> Result<(), Error> {
     let bass = player.play_generator_source(
         FunDspGenerator::with_parameters(
             "bass",
-            bass_synth::parameters(),
+            sub3::parameters(),
             Some(&[
                 // tweak default parameter setup for this example
-                bass_synth::O1_WAVE.value_update_index(3),
-                bass_synth::O1_COARSE.value_update(-12),
-                bass_synth::O1_FINE.value_update(2.0),
-                bass_synth::O2_WAVE.value_update_index(3),
-                bass_synth::O2_COARSE.value_update(0),
-                bass_synth::O2_FINE.value_update(-3.0),
-                bass_synth::O2_PW.value_update(10.0),
-                bass_synth::SUB_WAVE.value_update_index(0),
-                bass_synth::SUB_OCTAVE.value_update(-2),
-                bass_synth::SUB_LEVEL.value_update(1.0),
-                bass_synth::LFO2_SPEED.value_update(3.20),
-                bass_synth::FILTER_LFO2_DEPTH.value_update(-63.0),
-                bass_synth::FILTER_FREQ.value_update(18000.0),
-                bass_synth::FILTER_DRIVE.value_update(0.2),
-                bass_synth::FILTER_RES.value_update(0.1),
-                bass_synth::AENV_ATTACK.value_update(0.001),
-                bass_synth::AENV_SUSTAIN.value_update(1.0),
-                bass_synth::AENV_RELEASE.value_update(2.0),
+                sub3::O1_WAVE.value_update_index(3),
+                sub3::O1_COARSE.value_update(-12),
+                sub3::O1_FINE.value_update(2.0),
+                sub3::O2_WAVE.value_update_index(3),
+                sub3::O2_COARSE.value_update(0),
+                sub3::O2_FINE.value_update(-3.0),
+                sub3::O2_PW.value_update(10.0),
+                sub3::SUB_WAVE.value_update_index(0),
+                sub3::SUB_OCTAVE.value_update(-2),
+                sub3::SUB_LEVEL.value_update(1.0),
+                sub3::LFO2_SPEED.value_update(3.20),
+                sub3::FILTER_LFO2_DEPTH.value_update(-63.0),
+                sub3::FILTER_FREQ.value_update(18000.0),
+                sub3::FILTER_DRIVE.value_update(0.2),
+                sub3::FILTER_RES.value_update(0.1),
+                sub3::AENV_ATTACK.value_update(0.001),
+                sub3::AENV_SUSTAIN.value_update(1.0),
+                sub3::AENV_RELEASE.value_update(2.0),
             ]),
-            bass_synth::voice_factory,
+            sub3::voice_factory,
             GeneratorPlaybackOptions::default().voices(1),
             player.output_sample_rate(),
         )?,
