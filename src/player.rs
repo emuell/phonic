@@ -490,8 +490,8 @@ impl Player {
     /// Returns a handle that can be used to control the generator, e.g. to stop it or to send
     /// events to trigger or stop individual notes.
     ///
-    /// Use [`DynGenerator`](crate::generators::DynGenerator) as source type if you need to play a
-    /// `dyn Generator`.
+    /// Use [`DynGenerator`](crate::generators::DynGenerator) as generator impl if you
+    /// only got a `dyn Generator` and not the generator impl itself.
     pub fn play_generator_source<G: Generator + 'static, T: Into<Option<u64>>>(
         &mut self,
         generator: G,
@@ -680,6 +680,9 @@ impl Player {
 
     /// Add an effect to the given mixer's output.
     /// Use `None` as mixer_id to add the effect to the main mixer.
+    ///
+    /// Use [`DynEffect`](crate::effects::DynEffect) as effect impl if you
+    /// only got a `dyn Effect` and not the effect impl itself.
     pub fn add_effect<E: Effect, M: Into<Option<MixerId>>>(
         &mut self,
         effect: E,

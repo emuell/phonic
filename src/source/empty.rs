@@ -3,6 +3,7 @@ use super::{Source, SourceTime};
 // -------------------------------------------------------------------------------------------------
 
 /// A source which does not produce any samples.
+#[allow(unused)]
 pub struct EmptySource;
 
 impl Source for EmptySource {

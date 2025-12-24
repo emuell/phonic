@@ -12,7 +12,7 @@ use crate::{
 
 /// A generator impl which wraps a (boxed) `dyn Generator`.
 ///
-/// Can be useful to play a dyn Generator source via
+/// Allows playing dyn generator sources via
 /// [Player::play_generator_source](crate::Player::play_generator_source).
 pub struct DynGenerator {
     generator: Box<dyn Generator>,

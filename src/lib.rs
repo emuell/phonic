@@ -216,6 +216,7 @@ pub mod effects {
         eq5::Eq5Effect,
         filter::{FilterEffect, FilterEffectType},
         gain::GainEffect,
+        r#dyn::DynEffect,
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }

@@ -10,6 +10,7 @@ pub mod chorus;
 pub mod compressor;
 pub mod dcfilter;
 pub mod distortion;
+pub mod r#dyn;
 pub mod eq5;
 pub mod filter;
 pub mod gain;
