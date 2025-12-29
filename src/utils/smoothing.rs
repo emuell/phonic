@@ -136,7 +136,7 @@ pub struct ExponentialSmoothedValue {
 }
 
 impl ExponentialSmoothedValue {
-    pub const DEFAULT_INERTIA: f32 = 0.02;
+    pub const DEFAULT_INERTIA: f32 = 1.0 / 256.0;
 
     const UNINITIALIZED_SAMPLE_RATE: u32 = 66666;
     const UNINITIALIZED_SAMPLE_RATE_COMP: f32 = 44100.0 / Self::UNINITIALIZED_SAMPLE_RATE as f32;
@@ -199,8 +199,7 @@ impl SmoothedValue for ExponentialSmoothedValue {
         );
         const EPSILON: f32 = f32::EPSILON * 100.0;
         let inertia_add = (self.target - self.current) * self.inertia * self.sample_rate_comp;
-        let next = self.current + inertia_add;
-        (self.current - next).abs() > EPSILON
+        inertia_add.abs() > EPSILON
     }
 
     fn ramp(&mut self) {
