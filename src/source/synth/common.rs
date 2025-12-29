@@ -99,13 +99,33 @@ where
         })
     }
 
-    fn should_report_pos(&self, time: &SourceTime) -> bool {
+    fn should_report_pos(&self, time: &SourceTime, is_start_event: bool) -> bool {
         if let Some(emit_rate) = self.playback_pos_emit_rate {
-            self.playback_pos_sample_time_clock
-                .elapsed(time.pos_in_frames)
-                >= emit_rate
+            is_start_event
+                || self
+                    .playback_pos_sample_time_clock
+                    .elapsed(time.pos_in_frames)
+                    >= emit_rate
         } else {
             false
+        }
+    }
+
+    fn send_position_event(&mut self, time: &SourceTime, is_start_event: bool) {
+        if let Some(event_send) = &self.playback_status_send {
+            if self.should_report_pos(time, is_start_event) {
+                self.playback_pos_sample_time_clock
+                    .reset(time.pos_in_frames);
+                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
+                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
+                    id: self.playback_id,
+                    context: self.playback_status_context.clone(),
+                    path: self.playback_name.clone(),
+                    position: self.samples_to_duration(self.playback_pos),
+                }) {
+                    log::warn!("Failed to send file playback event: {err}")
+                }
+            }
         }
     }
 
@@ -174,6 +194,12 @@ where
             }
         }
 
+        // send Start Event
+        if self.playback_pos == 0 {
+            let is_start_event = true;
+            self.send_position_event(time, is_start_event);
+        }
+
         // return empty handed when playback finished
         if self.playback_finished {
             return 0;
@@ -196,21 +222,8 @@ where
         self.playback_pos += written as u64;
 
         // send Position Event
-        if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos(time) {
-                self.playback_pos_sample_time_clock
-                    .reset(time.pos_in_frames);
-                // NB: try_send: we want to ignore full channels on playback pos events and don't want to block
-                if let Err(err) = event_send.try_send(PlaybackStatusEvent::Position {
-                    id: self.playback_id,
-                    context: self.playback_status_context.clone(),
-                    path: self.playback_name.clone(),
-                    position: self.samples_to_duration(self.playback_pos),
-                }) {
-                    log::warn!("Failed to send file playback event: {err}")
-                }
-            }
-        }
+        let is_start_event = false;
+        self.send_position_event(time, is_start_event);
 
         // check if the signal is exhausted and send Stopped event
         let is_exhausted = self.generator.is_exhausted() || written == 0;

@@ -43,6 +43,7 @@ pub struct FileSourceImpl {
     pub playback_status_context: Option<PlaybackStatusContext>,
     pub playback_pos_sample_time_clock: SampleTimeClock,
     pub playback_pos_emit_rate: Option<SampleTime>,
+    pub playback_started: bool,
     pub playback_finished: bool,
     pub samples_to_next_speed_update: usize,
     pub speed_glide_rate: f32,
@@ -101,6 +102,7 @@ impl FileSourceImpl {
         let playback_pos_emit_rate = options
             .playback_pos_emit_rate
             .map(|d| SampleTimeClock::duration_to_sample_time(d, output_sample_rate));
+        let playback_started = false;
         let playback_finished = false;
 
         let fade_out_duration = options.fade_out_duration;
@@ -127,6 +129,7 @@ impl FileSourceImpl {
             playback_status_context,
             playback_pos_sample_time_clock,
             playback_pos_emit_rate,
+            playback_started,
             playback_finished,
             samples_to_next_speed_update,
             speed_glide_rate,
@@ -165,11 +168,13 @@ impl FileSourceImpl {
             .expect("failed to update resampler specs");
     }
 
-    pub fn should_report_pos(&self, time: &SourceTime) -> bool {
+    pub fn should_report_pos(&self, time: &SourceTime, is_start_event: bool) -> bool {
         if let Some(emit_rate) = self.playback_pos_emit_rate {
-            self.playback_pos_sample_time_clock
-                .elapsed(time.pos_in_frames)
-                >= emit_rate
+            is_start_event
+                || self
+                    .playback_pos_sample_time_clock
+                    .elapsed(time.pos_in_frames)
+                    >= emit_rate
         } else {
             false
         }
@@ -178,12 +183,13 @@ impl FileSourceImpl {
     pub fn send_playback_position_status(
         &mut self,
         time: &SourceTime,
+        is_start_event: bool,
         sample_pos: u64,
         channel_count: usize,
         sample_rate: u32,
     ) {
         if let Some(event_send) = &self.playback_status_send {
-            if self.should_report_pos(time) {
+            if self.should_report_pos(time, is_start_event) {
                 self.playback_pos_sample_time_clock
                     .reset(time.pos_in_frames);
                 let frame_pos = sample_pos / channel_count as u64;

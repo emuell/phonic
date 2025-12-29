@@ -314,6 +314,7 @@ impl PreloadedFileSource {
         self.playback_pos = 0;
         self.playback_repeat_count = self.playback_repeat;
         self.playback_pos_eof = false;
+        self.file_source.playback_started = false;
         self.file_source.playback_finished = false;
 
         // Reset resampler state
@@ -475,6 +476,19 @@ impl Source for PreloadedFileSource {
             return 0;
         }
 
+        // send Position start event, if needed
+        if !self.file_source.playback_started {
+            self.file_source.playback_started = false;
+            let is_start_event = true;
+            self.file_source.send_playback_position_status(
+                time,
+                is_start_event,
+                self.playback_pos as u64,
+                self.file_buffer.channel_count,
+                self.file_buffer.sample_rate,
+            );
+        }
+
         let mut total_written = 0_usize;
         if self.file_source.current_speed != self.file_source.target_speed {
             // update pitch slide in blocks of SPEED_UPDATE_CHUNK_SIZE
@@ -511,8 +525,10 @@ impl Source for PreloadedFileSource {
             .process(&mut output[..total_written]);
 
         // send Position change events, if needed
+        let is_start_event = false;
         self.file_source.send_playback_position_status(
             time,
+            is_start_event,
             self.playback_pos as u64,
             self.file_buffer.channel_count,
             self.file_buffer.sample_rate,

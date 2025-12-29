@@ -199,9 +199,8 @@ impl FunDspVoice {
         self.silence_samples_count = 0;
         self.frequency.set_value(0.0); // Silence the oscillator by setting frequency to 0.0
         self.release_start_frame = None; // Clear release start time
-        self.playback_context = None;
-        self.playback_status_send = None; // Clear sender
-        self.playback_pos = 0; // Reset position
+        self.playback_context = None; // Reset position and context
+        self.playback_pos = 0;
     }
 
     pub fn set_speed(&mut self, speed: f64, glide: Option<f32>, sample_rate: u32) {
@@ -248,6 +247,12 @@ impl FunDspVoice {
     }
 
     pub fn process(&mut self, output: &mut [f32], time: &SourceTime) {
+        // Send playback start events
+        if self.playback_pos == 0 {
+            let is_start_event = true;
+            self.send_position_event(time, is_start_event);
+        }
+
         // Process in SIMD friendly blocks as long as possible
         const BLOCK_SIZE: usize = 64;
         let frame_count = output.len() / self.audio_unit.outputs();
@@ -327,7 +332,8 @@ impl FunDspVoice {
         self.playback_pos += frames_processed as u64;
 
         // Send position event if needed
-        self.send_position_event(time);
+        let is_start_event = false;
+        self.send_position_event(time, is_start_event);
 
         // kill the voice when it got exhausted
         if self.is_exhausted() {
@@ -346,11 +352,13 @@ impl FunDspVoice {
         }
     }
 
-    fn should_report_pos(&self, time: &SourceTime) -> bool {
+    fn should_report_pos(&self, time: &SourceTime, is_start_event: bool) -> bool {
         if let Some(emit_rate) = self.playback_pos_emit_rate {
-            self.playback_pos_sample_time_clock
-                .elapsed(time.pos_in_frames)
-                >= emit_rate
+            is_start_event
+                || self
+                    .playback_pos_sample_time_clock
+                    .elapsed(time.pos_in_frames)
+                    >= emit_rate
         } else {
             false
         }
@@ -362,9 +370,9 @@ impl FunDspVoice {
         std::time::Duration::from_secs_f64(seconds)
     }
 
-    fn send_position_event(&mut self, time: &SourceTime) {
+    fn send_position_event(&mut self, time: &SourceTime, is_start_event: bool) {
         if let Some(sender) = &self.playback_status_send {
-            if self.should_report_pos(time) {
+            if self.should_report_pos(time, is_start_event) {
                 self.playback_pos_sample_time_clock
                     .reset(time.pos_in_frames);
                 if let Some(note_id) = self.note_id {

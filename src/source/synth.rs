@@ -46,6 +46,7 @@ pub struct SynthPlaybackOptions {
     /// Wallclock time rate of playback pos events, emitted via PlaybackStatusEvent
     /// in the player. By default one second to avoid unnecessary overhead.
     /// Set to e.g. Duration::from_secf32(1.0/30.0) to trigger events 30 times per second.
+    /// Set to Some(Duration::MAX) to only report start stop.
     /// Set to None to disable reporting.
     pub playback_pos_emit_rate: Option<Duration>,
 

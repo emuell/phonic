@@ -27,13 +27,21 @@ impl SampleTimeClock {
     /// Convert a duration to sample frames with the given sample rate.
     pub fn duration_to_sample_time(duration: Duration, sample_rate: u32) -> SampleTime {
         debug_assert!(sample_rate > 0, "Invalid sample rate");
-        (duration.as_secs_f64() * sample_rate as f64) as SampleTime
+        if duration == Duration::MAX {
+            SampleTime::MAX
+        } else {
+            (duration.as_secs_f64() * sample_rate as f64) as SampleTime
+        }
     }
 
     /// Convert sample frames to a duration with the given sample rate.
     pub fn sample_time_to_duration(sample_time: SampleTime, sample_rate: u32) -> Duration {
         debug_assert!(sample_rate > 0, "Invalid sample rate");
-        Duration::from_secs_f64(sample_time as f64 / sample_rate as f64)
+        if sample_time == SampleTime::MAX {
+            Duration::MAX
+        } else {
+            Duration::from_secs_f64(sample_time as f64 / sample_rate as f64)
+        }
     }
 
     /// Reset the clock to start counting from the given sample time.

@@ -296,6 +296,19 @@ impl Source for StreamedFileSource {
             return 0;
         }
 
+        // send Position start event, if needed
+        if !self.file_source.playback_started {
+            self.file_source.playback_started = false;
+            let is_start_event = true;
+            self.file_source.send_playback_position_status(
+                time,
+                is_start_event,
+                self.written_samples(0),
+                self.signal_spec.channels.count(),
+                self.signal_spec.rate,
+            );
+        }
+
         // fetch input from our ring-buffer and resample it
         let mut total_written = 0;
         if self.file_source.current_speed != self.file_source.target_speed {
@@ -341,8 +354,10 @@ impl Source for StreamedFileSource {
             .process(&mut output[..total_written]);
 
         // send Position change events, if needed
+        let is_start_event = false;
         self.file_source.send_playback_position_status(
             time,
+            is_start_event,
             self.written_samples(total_written as u64),
             self.signal_spec.channels.count(),
             self.signal_spec.rate,
