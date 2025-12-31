@@ -27,7 +27,7 @@ pub struct DcFilterEffect {
 }
 
 impl DcFilterEffect {
-    pub const EFFECT_NAME: &str = "DcFilterEffect";
+    pub const EFFECT_NAME: &str = "DC-Filter";
 
     pub const MODE: EnumParameter = EnumParameter::new(
         FourCC(*b"mode"),

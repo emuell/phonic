@@ -58,7 +58,7 @@ pub struct DistortionEffect {
 }
 
 impl DistortionEffect {
-    pub const EFFECT_NAME: &str = "DistortionEffect";
+    pub const EFFECT_NAME: &str = "Distortion";
 
     pub const TYPE: EnumParameter = EnumParameter::new(
         FourCC(*b"type"),

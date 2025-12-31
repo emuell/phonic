@@ -56,7 +56,7 @@ pub struct FilterEffect {
 }
 
 impl FilterEffect {
-    pub const EFFECT_NAME: &str = "FilterEffect";
+    pub const EFFECT_NAME: &str = "Filter";
 
     pub const TYPE: EnumParameter = EnumParameter::new(
         FourCC(*b"type"),

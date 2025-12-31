@@ -38,7 +38,7 @@ pub struct CompressorEffect {
 }
 
 impl CompressorEffect {
-    pub const EFFECT_NAME: &str = "CompressorEffect";
+    pub const EFFECT_NAME: &str = "Compressor";
 
     pub const THRESHOLD: FloatParameter = FloatParameter::new(
         FourCC(*b"thrs"),

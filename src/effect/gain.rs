@@ -19,7 +19,7 @@ pub struct GainEffect {
 }
 
 impl GainEffect {
-    pub const EFFECT_NAME: &str = "GainEffect";
+    pub const EFFECT_NAME: &str = "Gain";
 
     pub const GAIN: FloatParameter = FloatParameter::new(
         FourCC(*b"gain"),

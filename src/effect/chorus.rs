@@ -97,7 +97,7 @@ pub struct ChorusEffect {
 }
 
 impl ChorusEffect {
-    pub const EFFECT_NAME: &str = "ChorusEffect";
+    pub const EFFECT_NAME: &str = "Chorus";
 
     pub const RATE: FloatParameter = FloatParameter::new(
         FourCC(*b"rate"),

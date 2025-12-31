@@ -33,7 +33,7 @@ pub struct Eq5Effect {
 }
 
 impl Eq5Effect {
-    pub const EFFECT_NAME: &str = "Eq5Effect";
+    pub const EFFECT_NAME: &str = "Eq5";
 
     pub const GAINS: [FloatParameter; 5] = [
         FloatParameter::new(
