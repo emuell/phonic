@@ -82,6 +82,7 @@ pub enum EffectMovement {
 /// Player internal info about a currently playing source.
 struct PlayingSource {
     is_playing: Arc<AtomicBool>,
+    is_transient: bool,
     playback_message_queue: PlaybackMessageQueue,
     mixer_id: MixerId,
     source_name: String,
@@ -357,6 +358,7 @@ impl Player {
             playback_id,
             PlayingSource {
                 is_playing: Arc::clone(&is_playing),
+                is_transient: true,
                 playback_message_queue: playback_message_queue.clone(),
                 mixer_id,
                 source_name,
@@ -370,6 +372,7 @@ impl Player {
         let sample_time = start_time.into().unwrap_or(0);
         if mixer_event_queue
             .push(MixerMessage::AddSource {
+                is_transient: true,
                 playback_id,
                 playback_message_queue: playback_message_queue.clone(),
                 source,
@@ -451,6 +454,7 @@ impl Player {
             playback_id,
             PlayingSource {
                 is_playing: Arc::clone(&is_playing),
+                is_transient: true,
                 playback_message_queue: playback_message_queue.clone(),
                 mixer_id,
                 source_name,
@@ -464,6 +468,7 @@ impl Player {
         let sample_time = start_time.into().unwrap_or(0);
         if mixer_event_queue
             .push(MixerMessage::AddSource {
+                is_transient: true,
                 playback_id,
                 playback_message_queue: playback_message_queue.clone(),
                 source,
@@ -485,7 +490,9 @@ impl Player {
         }
     }
 
-    /// Play a generator source with the given options.
+    /// Play a generator source with the given options. *Played* generators will be removed
+    /// when stopping all sources or when stopping it like a regular source. To keep a generator
+    /// running until it get's explicitely removed use [Self::add_generator_source] instead.
     ///
     /// Returns a handle that can be used to control the generator, e.g. to stop it or to send
     /// events to trigger or stop individual notes.
@@ -497,14 +504,59 @@ impl Player {
         generator: G,
         start_time: T,
     ) -> Result<GeneratorPlaybackHandle, Error> {
+        let is_transient = true;
+        let mixer_id = generator
+            .playback_options()
+            .target_mixer
+            .unwrap_or(Self::MAIN_MIXER_ID);
+        self.add_or_play_generator_source(generator, is_transient, mixer_id, start_time)
+    }
+
+    /// Add a generator source with the given options. *Added* generators will not be removed
+    /// when stopping it or when stopping all sources. Use [Self::play_generator_source] if the generator
+    /// source should be automatically removed when stopping like a regular source.
+    ///
+    /// Returns a handle that can be used to control the generator, e.g. to stop it or to send
+    /// events to trigger or stop individual notes.
+    ///
+    /// Use [`DynGenerator`](crate::generators::DynGenerator) as generator impl if you
+    /// only got a `dyn Generator` and not the generator impl itself.
+    pub fn add_generator_source<
+        G: Generator + 'static,
+        M: Into<Option<MixerId>>,
+        T: Into<Option<u64>>,
+    >(
+        &mut self,
+        generator: G,
+        mixer_id: M,
+        start_time: T,
+    ) -> Result<GeneratorPlaybackHandle, Error> {
+        let is_transient = false;
+        let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
+        if let Some(target_mixer_id) = generator.playback_options().target_mixer {
+            if target_mixer_id != mixer_id {
+                log::warn!("Ignoring target mixer id from playback options when adding instead of playing a generator");
+            }
+        }
+        self.add_or_play_generator_source(generator, is_transient, mixer_id, start_time)
+    }
+
+    fn add_or_play_generator_source<G: Generator + 'static, T: Into<Option<u64>>>(
+        &mut self,
+        generator: G,
+        is_transient: bool,
+        mixer_id: MixerId,
+        start_time: T,
+    ) -> Result<GeneratorPlaybackHandle, Error> {
         // validate and get options
         let playback_options = *generator.playback_options();
         playback_options.validate()?;
         // validate and get target mixer
-        let mixer_id = playback_options.target_mixer.unwrap_or(Self::MAIN_MIXER_ID);
         let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
-        // redirect source's playback status channel to us
+        // set generator's transient flag
         let mut generator = generator;
+        generator.set_is_transient(is_transient);
+        // redirect source's playback status channel to us
         generator.set_playback_status_sender(Some(self.playback_status_sender.clone()));
         // get source in playback id and message channel
         let playback_id = generator.playback_id();
@@ -539,8 +591,9 @@ impl Player {
         self.playing_sources.insert(
             playback_id,
             PlayingSource {
-                playback_message_queue: playback_message_queue.clone(),
                 is_playing: Arc::clone(&is_playing),
+                is_transient,
+                playback_message_queue: playback_message_queue.clone(),
                 mixer_id,
                 source_name,
             },
@@ -553,6 +606,7 @@ impl Player {
         let sample_time = start_time.into().unwrap_or(0);
         if mixer_event_queue
             .push(MixerMessage::AddSource {
+                is_transient,
                 playback_id,
                 playback_message_queue: playback_message_queue.clone(),
                 source,
@@ -572,6 +626,30 @@ impl Player {
                 self.collector_handle.clone(),
                 measurement_state,
             ))
+        }
+    }
+
+    /// Remove a generator which was added via [Self::add_generator_source].
+    /// This will not stop all playing sounds in the generator, but simply remove it.
+    pub fn remove_generator(&self, playback_id: PlaybackId) -> Result<(), Error> {
+        if let Some(playing_source) = self.playing_sources.get(&playback_id) {
+            debug_assert!(
+                !playing_source.is_transient,
+                "Expected a non transient generator here, which was added via 'add_generator'"
+            );
+            let parent_mixer_event_queue = self.mixer_event_queue(playing_source.mixer_id)?;
+            // Send the remove message to parent
+            if parent_mixer_event_queue
+                .push(MixerMessage::RemoveSource { playback_id })
+                .is_err()
+            {
+                Err(Self::mixer_event_queue_error("remove_generator"))
+            } else {
+                self.playing_sources.remove(&playback_id);
+                Ok(())
+            }
+        } else {
+            Err(Error::GeneratorNotFoundError(playback_id))
         }
     }
 
@@ -799,15 +877,18 @@ impl Player {
     pub fn stop_all_sources(&mut self) -> Result<(), Error> {
         // stop everything that is playing now
         for playing_source in self.playing_sources.iter() {
-            let _ = playing_source.playback_message_queue.send_stop();
+            if playing_source.is_transient {
+                let _ = playing_source.playback_message_queue.send_stop();
+            }
         }
-        self.playing_sources.clear();
+        self.playing_sources.retain(|_, p| !p.is_transient);
+
         // remove all upcoming, scheduled sources in all mixers too (force push stop events!)
         for entry in self.mixers.iter() {
             if entry
                 .value()
                 .event_queue
-                .force_push(MixerMessage::RemoveAllPendingSources)
+                .force_push(MixerMessage::RemoveAllPendingEvents)
                 .is_some()
             {
                 log::warn!("Mixer's event queue is full.");

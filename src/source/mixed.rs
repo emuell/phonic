@@ -33,6 +33,7 @@ use submixer::SubMixerProcessor;
 /// Mixer internal struct to keep track of currently playing sources.
 pub(crate) struct PlayingSource {
     is_active: bool,
+    is_transient: bool,
     playback_id: PlaybackId,
     playback_message_queue: PlaybackMessageQueue,
     source: Owned<Box<dyn Source>>,
@@ -104,8 +105,11 @@ impl Event for MixerEvent {
 
 /// Messages send from player to mixer to start or stop playing sources.
 pub(crate) enum MixerMessage {
+    // General
+    RemoveAllPendingEvents,
     // Sources
     AddSource {
+        is_transient: bool,
         playback_id: PlaybackId,
         playback_message_queue: PlaybackMessageQueue,
         source: Owned<Box<dyn Source>>,
@@ -136,10 +140,10 @@ pub(crate) enum MixerMessage {
         playback_id: PlaybackId,
         sample_time: u64,
     },
-    #[allow(dead_code)]
-    RemoveAllSources,
-    RemoveAllPendingSources,
-    // Generator Sources
+    RemoveSource {
+        playback_id: PlaybackId,
+    },
+    // Generators
     TriggerGeneratorEvent {
         playback_id: PlaybackId,
         event: GeneratorPlaybackEvent,
@@ -253,18 +257,22 @@ impl MixedSource {
         self.events.retain(move |p| !match_fn(p));
     }
 
-    /// remove all entries from self.playing_sources and flush all pending events.
-    fn remove_all_playing_sources(&mut self) {
-        self.playing_sources.clear();
-        self.events.clear();
-    }
-
     /// Process pending mixer messages
     fn process_messages(&mut self, time: &SourceTime) {
         while let Some(event) = self.message_queue.pop() {
             match event {
+                // General
+                MixerMessage::RemoveAllPendingEvents => {
+                    // source playback start events
+                    self.remove_matching_sources(|source| {
+                        source.is_transient && source.start_time > time.pos_in_frames
+                    });
+                    // general playback events
+                    self.remove_matching_events(|event| event.sample_time() > time.pos_in_frames);
+                }
                 // Sources
                 MixerMessage::AddSource {
+                    is_transient,
                     playback_id,
                     playback_message_queue,
                     source,
@@ -289,6 +297,7 @@ impl MixedSource {
                         insert_pos,
                         PlayingSource {
                             is_active: true,
+                            is_transient,
                             playback_id,
                             playback_message_queue,
                             source,
@@ -355,13 +364,20 @@ impl MixedSource {
                         source.stop_time = Some(sample_time);
                     }
                 }
-                MixerMessage::RemoveAllPendingSources => {
-                    // remove all sources which are not yet playing
-                    self.remove_matching_sources(|source| source.start_time > time.pos_in_frames);
-                    self.remove_matching_events(|event| event.sample_time() > time.pos_in_frames);
+                MixerMessage::RemoveSource { playback_id } => {
+                    self.remove_matching_sources(|s| s.playback_id == playback_id);
                 }
-                MixerMessage::RemoveAllSources => {
-                    self.remove_all_playing_sources();
+                // Generators
+                MixerMessage::TriggerGeneratorEvent {
+                    playback_id,
+                    event,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::TriggerGeneratorEvent {
+                        playback_id,
+                        event,
+                        sample_time,
+                    });
                 }
                 // Mixers
                 MixerMessage::AddMixer { mixer_id, mixer } => {
@@ -425,18 +441,6 @@ impl MixedSource {
                         effect_id,
                         parameter_id,
                         value,
-                        sample_time,
-                    });
-                }
-                // Generators
-                MixerMessage::TriggerGeneratorEvent {
-                    playback_id,
-                    event,
-                    sample_time,
-                } => {
-                    self.insert_event(MixerEvent::TriggerGeneratorEvent {
-                        playback_id,
-                        event,
                         sample_time,
                     });
                 }
@@ -518,7 +522,7 @@ impl MixedSource {
                 total_written += written;
                 produced_output |= written > 0;
 
-                if source.is_exhausted() {
+                if playing_source.is_transient && source.is_exhausted() {
                     // source is now exhausted: remove source
                     playing_source.is_active = false;
                     break 'source;
@@ -621,7 +625,7 @@ impl Source for MixedSource {
         }
 
         // drop all sources which finished playing in this iteration
-        self.remove_matching_sources(|s| !s.is_active);
+        self.remove_matching_sources(|s| s.is_transient && !s.is_active);
 
         // Return output len as we've cleared the entire output before processing
         output.len()

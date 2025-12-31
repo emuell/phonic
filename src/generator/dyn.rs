@@ -13,7 +13,8 @@ use crate::{
 /// A generator impl which wraps a (boxed) `dyn Generator`.
 ///
 /// Allows playing dyn generator sources via
-/// [Player::play_generator_source](crate::Player::play_generator_source).
+/// [Player::play_generator_source](crate::Player::play_generator_source) or
+/// [Player::add_generator_source](crate::Player::add_generator_source).
 pub struct DynGenerator {
     generator: Box<dyn Generator>,
 }
@@ -47,10 +48,6 @@ impl Generator for DynGenerator {
         self.generator.generator_name()
     }
 
-    fn parameters(&self) -> Vec<&dyn Parameter> {
-        self.generator.parameters()
-    }
-
     fn playback_id(&self) -> PlaybackId {
         self.generator.playback_id()
     }
@@ -66,6 +63,20 @@ impl Generator for DynGenerator {
     fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
         self.generator.playback_status_sender()
     }
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
+        self.generator.set_playback_status_sender(sender);
+    }
+
+    fn is_transient(&self) -> bool {
+        self.generator.is_transient()
+    }
+    fn set_is_transient(&mut self, is_transient: bool) {
+        self.generator.set_is_transient(is_transient)
+    }
+
+    fn parameters(&self) -> Vec<&dyn Parameter> {
+        self.generator.parameters()
+    }
 
     fn process_parameter_update(
         &mut self,
@@ -73,9 +84,5 @@ impl Generator for DynGenerator {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         self.generator.process_parameter_update(id, value)
-    }
-
-    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
-        self.generator.set_playback_status_sender(sender);
     }
 }

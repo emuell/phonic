@@ -63,8 +63,9 @@ pub struct FunDspGenerator {
     voices: Vec<FunDspVoice>,
     active_voices: usize,
     shared_parameters: HashMap<FourCC, SharedParameterValue>,
-    stopping: bool, // True if stop has been called and we are waiting for voices to decay
-    stopped: bool,  // True if all voices have decayed after a stop call
+    transient: bool, // True if the generator can exhaust
+    stopping: bool,  // True if stop has been called and we are waiting for voices to decay
+    stopped: bool,   // True if all voices have decayed after a stop call
     options: GeneratorPlaybackOptions,
     output_sample_rate: u32,
     output_channel_count: usize,
@@ -140,6 +141,7 @@ impl FunDspGenerator {
 
         let shared_parameters = HashMap::new();
 
+        let transient = false;
         let stopping = false;
         let stopped = false;
 
@@ -151,6 +153,7 @@ impl FunDspGenerator {
             voices,
             active_voices,
             shared_parameters,
+            transient,
             stopping,
             stopped,
             options,
@@ -274,6 +277,7 @@ impl FunDspGenerator {
         }
         let active_voices = 0;
 
+        let transient = false;
         let stopping = false;
         let stopped = false;
 
@@ -285,6 +289,7 @@ impl FunDspGenerator {
             voices,
             active_voices,
             shared_parameters,
+            transient,
             stopping,
             stopped,
             options,
@@ -332,8 +337,8 @@ impl FunDspGenerator {
     }
 
     fn stop(&mut self, current_sample_frame: u64) {
-        // Mark source as about to stop
-        self.stopping = true;
+        // Mark source as about to stop when this is a transient generator
+        self.stopping = self.transient;
         // Stop all active voices, if any
         self.trigger_all_notes_off(current_sample_frame);
     }
@@ -564,6 +569,13 @@ impl Generator for FunDspGenerator {
         for voice in &mut self.voices {
             voice.set_playback_status_sender(sender.clone());
         }
+    }
+
+    fn is_transient(&self) -> bool {
+        self.transient
+    }
+    fn set_is_transient(&mut self, is_transient: bool) {
+        self.transient = is_transient
     }
 
     fn parameters(&self) -> Vec<&dyn Parameter> {

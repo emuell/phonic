@@ -181,8 +181,10 @@ pub enum GeneratorPlaybackEvent {
 
 /// Messages to control playback of and within a [`Generator`].
 pub enum GeneratorPlaybackMessage {
-    /// Stop the generator and remove it from the mixer. This stops playback, waits until the
-    /// source is exhausted and then finally removes the source from the mixer.
+    /// For transient generators which got added via `Player::play_generator_source`, this
+    /// marks the generator as stopped and removes it from the mixer as soon as all voices
+    /// finished playing. For fixed generators which got added via `Player::add_generator_source`,
+    /// this only stops all playing notes and keeps the generator running.
     Stop,
     /// Trigger a playback event. All playback events keep the generator running in the mixer.
     Trigger { event: GeneratorPlaybackEvent },
@@ -217,6 +219,12 @@ pub trait Generator: Source {
     fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>>;
     /// Set the playback status sender for this generator.
     fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>);
+
+    /// Returns true when this generator gets removed after it received a
+    /// [Stop](GeneratorPlaybackMessage::Stop) event.
+    fn is_transient(&self) -> bool;
+    /// Maintained by the player: mark generator as transient or fixed (not transient).
+    fn set_is_transient(&mut self, is_transient: bool);
 
     /// Optional parameter descriptors for the generator.
     ///
