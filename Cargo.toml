@@ -83,7 +83,7 @@ cpal-output = ["dep:cpal"]
 wav-output = ["dep:hound"]
 web-output = []
 fundsp = ["dep:fundsp"]
-default = ["cpal-output", "wav-output", "fundsp", "assert-allocs"]
+default = ["cpal-output", "wav-output", "assert-allocs"]
 
 [package.metadata.docs.rs]
 # don't include "web-audio" here: it fails to compile at docs.rs because of emscripten

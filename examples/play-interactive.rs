@@ -12,7 +12,7 @@ use std::{
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 
 use phonic::{
-    effects::{self, FilterEffectType},
+    effects,
     generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
     Error, FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, NotePlaybackId,
@@ -79,7 +79,7 @@ fn main() -> Result<(), Error> {
         tone_mixer = player.add_mixer(None)?;
         // add a reverb effect
         player.add_effect(
-            effects::ReverbEffect::with_parameters(0.6, 0.8),
+            effects::ReverbEffect::with_parameters(0.6, 0.5),
             tone_mixer.id(),
         )?;
     }
@@ -201,10 +201,10 @@ fn main() -> Result<(), Error> {
                 }
                 Keycode::Key1 | Keycode::Key2 | Keycode::Key3 | Keycode::Key4 if alt_key => {
                     let filter_type = match key {
-                        Keycode::Key1 => FilterEffectType::Lowpass,
-                        Keycode::Key2 => FilterEffectType::Bandpass,
-                        Keycode::Key3 => FilterEffectType::Bandstop,
-                        Keycode::Key4 => FilterEffectType::Highpass,
+                        Keycode::Key1 => effects::FilterEffectType::Lowpass,
+                        Keycode::Key2 => effects::FilterEffectType::Bandpass,
+                        Keycode::Key3 => effects::FilterEffectType::Bandstop,
+                        Keycode::Key4 => effects::FilterEffectType::Highpass,
                         _ => unreachable!(),
                     };
                     println!("Filter type: {filter_type}");
