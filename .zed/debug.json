@@ -1,0 +1,61 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+	{
+		"label": "Build & Debug play-custom",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-custom"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-custom",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
+		"label": "Build & Debug play-file",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-file"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-file",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
+		"label": "Build & Debug play-interactive",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-interactive", "--features", "fundsp"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-interactive",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
+		"label": "Build & Debug play-sequence",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-sequence"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-sequence",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
+		"label": "Build & Debug play-synth",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-synth", "--features", "fundsp"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-synth",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	}
+]

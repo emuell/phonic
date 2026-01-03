@@ -1,0 +1,23 @@
+[
+	{
+		"label": "cargo build",
+		"command": "cargo build --features=fundsp --example=*",
+		"show_command": true,
+		"reveal": "never",
+		"tags": ["build"]
+	},
+	{
+		"label": "cargo test",
+		"command": "cargo test --features=fundsp",
+		"show_command": true,
+		"reveal": "never",
+		"tags": ["test"]
+	},
+	{
+		"label": "cargo clippy",
+		"command": "cargo clippy --features=fundsp --example=*",
+		"show_command": true,
+		"reveal": "never",
+		"tags": ["clippy"]
+	}
+]
