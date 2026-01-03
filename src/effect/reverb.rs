@@ -1,3 +1,4 @@
+use assume::assume;
 use four_cc::FourCC;
 use rand::Rng;
 use std::any::Any;
@@ -7,7 +8,10 @@ use crate::{
     parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
         buffer::InterleavedBufferMut,
-        dsp::filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        dsp::{
+            delay::{AllpassDelayLine, DelayLine},
+            filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+        },
         smoothing::{ExponentialSmoothedValue, LinearSmoothedValue},
     },
     Error, Parameter,
@@ -50,104 +54,22 @@ pub struct ReverbEffect {
     biquad_c_l: BiquadFilter,
     biquad_c_r: BiquadFilter,
 
-    a_al: Vec<f64>,
-    a_ar: Vec<f64>,
-    a_bl: Vec<f64>,
-    a_br: Vec<f64>,
-    a_cl: Vec<f64>,
-    a_cr: Vec<f64>,
-    a_dl: Vec<f64>,
-    a_dr: Vec<f64>,
-    a_el: Vec<f64>,
-    a_er: Vec<f64>,
-    a_fl: Vec<f64>,
-    a_fr: Vec<f64>,
-    a_gl: Vec<f64>,
-    a_gr: Vec<f64>,
-    a_hl: Vec<f64>,
-    a_hr: Vec<f64>,
-    a_il: Vec<f64>,
-    a_ir: Vec<f64>,
-    a_jl: Vec<f64>,
-    a_jr: Vec<f64>,
-    a_kl: Vec<f64>,
-    a_kr: Vec<f64>,
-    a_ll: Vec<f64>,
-    a_lr: Vec<f64>,
-    a_ml: Vec<f64>,
-    a_mr: Vec<f64>,
-
-    count_a: usize,
-    delay_a: usize,
-    count_b: usize,
-    delay_b: usize,
-    count_c: usize,
-    delay_c: usize,
-    count_d: usize,
-    delay_d: usize,
-    count_e: usize,
-    delay_e: usize,
-    count_f: usize,
-    delay_f: usize,
-    count_g: usize,
-    delay_g: usize,
-    count_h: usize,
-    delay_h: usize,
-    count_i: usize,
-    delay_i: usize,
-    count_j: usize,
-    delay_j: usize,
-    count_k: usize,
-    delay_k: usize,
-    count_l: usize,
-    delay_l: usize,
-    count_m: usize,
-    delay_m: usize,
-
-    feedback_al: f64,
-    vib_al: f64,
-    depth_a: f64,
-    feedback_bl: f64,
-    vib_bl: f64,
-    depth_b: f64,
-    feedback_cl: f64,
-    vib_cl: f64,
-    depth_c: f64,
-    feedback_dl: f64,
-    vib_dl: f64,
-    depth_d: f64,
-    feedback_el: f64,
-    vib_el: f64,
-    depth_e: f64,
-    feedback_fl: f64,
-    vib_fl: f64,
-    depth_f: f64,
-    feedback_gl: f64,
-    vib_gl: f64,
-    depth_g: f64,
-    feedback_hl: f64,
-    vib_hl: f64,
-    depth_h: f64,
-
-    feedback_ar: f64,
-    vib_ar: f64,
-    feedback_br: f64,
-    vib_br: f64,
-    feedback_cr: f64,
-    vib_cr: f64,
-    feedback_dr: f64,
-    vib_dr: f64,
-    feedback_er: f64,
-    vib_er: f64,
-    feedback_fr: f64,
-    vib_fr: f64,
-    feedback_gr: f64,
-    vib_gr: f64,
-    feedback_hr: f64,
-    vib_hr: f64,
-
     fpd_l: u32,
     fpd_r: u32,
+
+    a: Box<ReverbDelayLine<2>>,
+    b: Box<ReverbDelayLine<2>>,
+    c: Box<ReverbDelayLine<2>>,
+    d: Box<ReverbDelayLine<2>>,
+    e: Box<ReverbDelayLine<2>>,
+    f: Box<ReverbDelayLine<2>>,
+    g: Box<ReverbDelayLine<2>>,
+    h: Box<ReverbDelayLine<2>>,
+    i: Box<AllpassDelayLine<2>>,
+    j: Box<AllpassDelayLine<2>>,
+    k: Box<AllpassDelayLine<2>>,
+    l: Box<AllpassDelayLine<2>>,
+    m: Box<DelayLine<2>>,
 }
 
 impl ReverbEffect {
@@ -180,24 +102,23 @@ impl ReverbEffect {
             fpd_r = rng.random();
         }
 
-        use std::f64::consts::PI;
-
-        const A_AL_SIZE: usize = 8111;
-        const A_BL_SIZE: usize = 7511;
-        const A_CL_SIZE: usize = 7311;
-        const A_DL_SIZE: usize = 6911;
-        const A_EL_SIZE: usize = 6311;
-        const A_FL_SIZE: usize = 6111;
-        const A_GL_SIZE: usize = 5511;
-        const A_HL_SIZE: usize = 4911;
-        const A_IL_SIZE: usize = 4511;
-        const A_JL_SIZE: usize = 4311;
-        const A_KL_SIZE: usize = 3911;
-        const A_LL_SIZE: usize = 3311;
-        const A_ML_SIZE: usize = 3111;
-
         let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
         let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
+
+        /// Max Delay line sizes
+        const A_SIZE: usize = 8111;
+        const B_SIZE: usize = 7511;
+        const C_SIZE: usize = 7311;
+        const D_SIZE: usize = 6911;
+        const E_SIZE: usize = 6311;
+        const F_SIZE: usize = 6111;
+        const G_SIZE: usize = 5511;
+        const H_SIZE: usize = 4911;
+        const I_SIZE: usize = 4511;
+        const J_SIZE: usize = 4311;
+        const K_SIZE: usize = 3911;
+        const L_SIZE: usize = 3311;
+        const M_SIZE: usize = 3111;
 
         Self {
             sample_rate: 0,
@@ -206,7 +127,8 @@ impl ReverbEffect {
                 Self::ROOM_SIZE
                     .clone()
                     .with_display(to_string_percent, from_string_percent),
-            ),
+            )
+            .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
             wet: SmoothedParameterValue::from_description(
                 Self::WET
                     .clone()
@@ -221,100 +143,21 @@ impl ReverbEffect {
             biquad_c_coefficients: BiquadFilterCoefficients::default(),
             biquad_c_l: BiquadFilter::default(),
             biquad_c_r: BiquadFilter::default(),
-            a_al: vec![0.0; A_AL_SIZE],
-            a_ar: vec![0.0; A_AL_SIZE],
-            a_bl: vec![0.0; A_BL_SIZE],
-            a_br: vec![0.0; A_BL_SIZE],
-            a_cl: vec![0.0; A_CL_SIZE],
-            a_cr: vec![0.0; A_CL_SIZE],
-            a_dl: vec![0.0; A_DL_SIZE],
-            a_dr: vec![0.0; A_DL_SIZE],
-            a_el: vec![0.0; A_EL_SIZE],
-            a_er: vec![0.0; A_EL_SIZE],
-            a_fl: vec![0.0; A_FL_SIZE],
-            a_fr: vec![0.0; A_FL_SIZE],
-            a_gl: vec![0.0; A_GL_SIZE],
-            a_gr: vec![0.0; A_GL_SIZE],
-            a_hl: vec![0.0; A_HL_SIZE],
-            a_hr: vec![0.0; A_HL_SIZE],
-            a_il: vec![0.0; A_IL_SIZE],
-            a_ir: vec![0.0; A_IL_SIZE],
-            a_jl: vec![0.0; A_JL_SIZE],
-            a_jr: vec![0.0; A_JL_SIZE],
-            a_kl: vec![0.0; A_KL_SIZE],
-            a_kr: vec![0.0; A_KL_SIZE],
-            a_ll: vec![0.0; A_LL_SIZE],
-            a_lr: vec![0.0; A_LL_SIZE],
-            a_ml: vec![0.0; A_ML_SIZE],
-            a_mr: vec![0.0; A_ML_SIZE],
-            count_a: 1,
-            delay_a: 79,
-            count_b: 1,
-            delay_b: 73,
-            count_c: 1,
-            delay_c: 71,
-            count_d: 1,
-            delay_d: 67,
-            count_e: 1,
-            delay_e: 61,
-            count_f: 1,
-            delay_f: 59,
-            count_g: 1,
-            delay_g: 53,
-            count_h: 1,
-            delay_h: 47,
-            count_i: 1,
-            delay_i: 43,
-            count_j: 1,
-            delay_j: 41,
-            count_k: 1,
-            delay_k: 37,
-            count_l: 1,
-            delay_l: 31,
-            count_m: 1,
-            delay_m: 29,
-            feedback_al: 0.0,
-            feedback_ar: 0.0,
-            feedback_bl: 0.0,
-            feedback_br: 0.0,
-            feedback_cl: 0.0,
-            feedback_cr: 0.0,
-            feedback_dl: 0.0,
-            feedback_dr: 0.0,
-            feedback_el: 0.0,
-            feedback_er: 0.0,
-            feedback_fl: 0.0,
-            feedback_fr: 0.0,
-            feedback_gl: 0.0,
-            feedback_gr: 0.0,
-            feedback_hl: 0.0,
-            feedback_hr: 0.0,
-            depth_a: 0.003251,
-            depth_b: 0.002999,
-            depth_c: 0.002917,
-            depth_d: 0.002749,
-            depth_e: 0.002503,
-            depth_f: 0.002423,
-            depth_g: 0.002146,
-            depth_h: 0.002088,
-            vib_al: rng.random_range(0.0..2.0 * PI),
-            vib_ar: rng.random_range(0.0..2.0 * PI),
-            vib_bl: rng.random_range(0.0..2.0 * PI),
-            vib_br: rng.random_range(0.0..2.0 * PI),
-            vib_cl: rng.random_range(0.0..2.0 * PI),
-            vib_cr: rng.random_range(0.0..2.0 * PI),
-            vib_dl: rng.random_range(0.0..2.0 * PI),
-            vib_dr: rng.random_range(0.0..2.0 * PI),
-            vib_el: rng.random_range(0.0..2.0 * PI),
-            vib_er: rng.random_range(0.0..2.0 * PI),
-            vib_fl: rng.random_range(0.0..2.0 * PI),
-            vib_fr: rng.random_range(0.0..2.0 * PI),
-            vib_gl: rng.random_range(0.0..2.0 * PI),
-            vib_gr: rng.random_range(0.0..2.0 * PI),
-            vib_hl: rng.random_range(0.0..2.0 * PI),
-            vib_hr: rng.random_range(0.0..2.0 * PI),
             fpd_l,
             fpd_r,
+            a: Box::new(ReverbDelayLine::new(&mut rng, A_SIZE, 0.003251)),
+            b: Box::new(ReverbDelayLine::new(&mut rng, B_SIZE, 0.002999)),
+            c: Box::new(ReverbDelayLine::new(&mut rng, C_SIZE, 0.002917)),
+            d: Box::new(ReverbDelayLine::new(&mut rng, D_SIZE, 0.002749)),
+            e: Box::new(ReverbDelayLine::new(&mut rng, E_SIZE, 0.002503)),
+            f: Box::new(ReverbDelayLine::new(&mut rng, F_SIZE, 0.002423)),
+            g: Box::new(ReverbDelayLine::new(&mut rng, G_SIZE, 0.002146)),
+            h: Box::new(ReverbDelayLine::new(&mut rng, H_SIZE, 0.002088)),
+            i: Box::new(AllpassDelayLine::new(I_SIZE)),
+            j: Box::new(AllpassDelayLine::new(J_SIZE)),
+            k: Box::new(AllpassDelayLine::new(K_SIZE)),
+            l: Box::new(AllpassDelayLine::new(L_SIZE)),
+            m: Box::new(DelayLine::new(M_SIZE)),
         }
     }
 
@@ -326,37 +169,213 @@ impl ReverbEffect {
         reverb
     }
 
-    fn reset(&mut self) {
-        for v in [
-            &mut self.a_al,
-            &mut self.a_ar,
-            &mut self.a_bl,
-            &mut self.a_br,
-            &mut self.a_cl,
-            &mut self.a_cr,
-            &mut self.a_dl,
-            &mut self.a_dr,
-            &mut self.a_el,
-            &mut self.a_er,
-            &mut self.a_fl,
-            &mut self.a_fr,
-            &mut self.a_gl,
-            &mut self.a_gr,
-            &mut self.a_hl,
-            &mut self.a_hr,
-            &mut self.a_il,
-            &mut self.a_ir,
-            &mut self.a_jl,
-            &mut self.a_jr,
-            &mut self.a_kl,
-            &mut self.a_kr,
-            &mut self.a_ll,
-            &mut self.a_lr,
-            &mut self.a_ml,
-            &mut self.a_mr,
-        ] {
-            v.fill(0.0);
+    fn update_filter_coefs(&mut self, cutoff: f32) {
+        if let Err(err) = self
+            .biquad_a_coefficients
+            .set(
+                BiquadFilterType::Lowpass,
+                self.sample_rate,
+                cutoff,
+                1.618034,
+                0.0,
+            )
+            .and_then(|_| {
+                self.biquad_b_coefficients.set(
+                    BiquadFilterType::Lowpass,
+                    self.sample_rate,
+                    cutoff,
+                    0.618034,
+                    0.0,
+                )
+            })
+            .and_then(|_| {
+                self.biquad_c_coefficients.set(
+                    //
+                    BiquadFilterType::Lowpass,
+                    self.sample_rate,
+                    cutoff,
+                    0.5,
+                    0.0,
+                )
+            })
+        {
+            log::error!("Failed to set biquad coefs in reverb effect: {err}");
+        };
+    }
+
+    fn update_delay_sizes(&mut self, size: f64) -> usize {
+        // reverb delays
+        self.a.set_delay((79.0 * size) as usize);
+        self.b.set_delay((73.0 * size) as usize);
+        self.c.set_delay((71.0 * size) as usize);
+        self.d.set_delay((67.0 * size) as usize);
+        self.e.set_delay((61.0 * size) as usize);
+        self.f.set_delay((59.0 * size) as usize);
+        self.g.set_delay((53.0 * size) as usize);
+        self.h.set_delay((47.0 * size) as usize);
+        // allpass
+        self.i.set_delay((43.0 * size) as usize);
+        self.j.set_delay((41.0 * size) as usize);
+        self.k.set_delay((37.0 * size) as usize);
+        self.l.set_delay((31.0 * size) as usize);
+        // predelay
+        (29.0 * size) as usize
+    }
+
+    /// Process a single stereo sample frame with the given parameters
+    #[inline(always)]
+    fn process_frame(
+        &mut self,
+        frame: &mut [f32; 2],
+        blend: f64,
+        regen: f64,
+        predelay: usize,
+        wet: f64,
+    ) {
+        let vib_speed = 0.1;
+        let vib_depth = 7.0;
+
+        let mut input_l = frame[0] as f64;
+        let mut input_r = frame[1] as f64;
+
+        if input_l.abs() < 1.18e-23 {
+            input_l = self.fpd_l as f64 * 1.18e-17;
         }
+        if input_r.abs() < 1.18e-23 {
+            input_r = self.fpd_r as f64 * 1.18e-17;
+        }
+        let dry_l = input_l;
+        let dry_r = input_r;
+
+        // Predelay
+        let predelay_out = self.m.process(predelay, [input_l, input_r]);
+        input_l = predelay_out[0];
+        input_r = predelay_out[1];
+
+        // Biquad A
+        input_l = self
+            .biquad_a_l
+            .process_sample(&self.biquad_a_coefficients, input_l);
+        input_r = self
+            .biquad_a_r
+            .process_sample(&self.biquad_a_coefficients, input_r);
+
+        input_l *= wet;
+        input_r *= wet;
+
+        input_l = input_l.sin();
+        input_r = input_r.sin();
+
+        // Allpasses
+        let out_i = self.i.process([input_l, input_r]);
+        let out_j = self.j.process(out_i);
+        let out_k = self.k.process(out_j);
+        let out_l = self.l.process(out_k);
+
+        let allpass_il = out_i[0];
+        let allpass_ir = out_i[1];
+        let allpass_jl = out_j[0];
+        let allpass_jr = out_j[1];
+        let allpass_kl = out_k[0];
+        let allpass_kr = out_k[1];
+        let allpass_ll = out_l[0];
+        let allpass_lr = out_l[1];
+
+        // Householder Matrix
+        self.a.set([allpass_ll, allpass_lr]);
+        self.b.set([allpass_kl, allpass_kr]);
+        self.c.set([allpass_jl, allpass_jr]);
+        self.d.set([allpass_il, allpass_ir]);
+        self.e.set([allpass_il, allpass_ir]);
+        self.f.set([allpass_jl, allpass_jr]);
+        self.g.set([allpass_kl, allpass_kr]);
+        self.h.set([allpass_ll, allpass_lr]);
+
+        self.a.step(vib_speed);
+        self.b.step(vib_speed);
+        self.c.step(vib_speed);
+        self.d.step(vib_speed);
+        self.e.step(vib_speed);
+        self.f.step(vib_speed);
+        self.g.step(vib_speed);
+        self.h.step(vib_speed);
+
+        let [interpol_al, interpol_ar] = self.a.get(vib_depth, blend);
+        let [interpol_bl, interpol_br] = self.b.get(vib_depth, blend);
+        let [interpol_cl, interpol_cr] = self.c.get(vib_depth, blend);
+        let [interpol_dl, interpol_dr] = self.d.get(vib_depth, blend);
+        let [interpol_el, interpol_er] = self.e.get(vib_depth, blend);
+        let [interpol_fl, interpol_fr] = self.f.get(vib_depth, blend);
+        let [interpol_gl, interpol_gr] = self.g.get(vib_depth, blend);
+        let [interpol_hl, interpol_hr] = self.h.get(vib_depth, blend);
+
+        // Feedback
+        self.a.feedback[0] = (interpol_al - (interpol_bl + interpol_cl + interpol_dl)) * regen;
+        self.b.feedback[0] = (interpol_bl - (interpol_al + interpol_cl + interpol_dl)) * regen;
+        self.c.feedback[0] = (interpol_cl - (interpol_al + interpol_bl + interpol_dl)) * regen;
+        self.d.feedback[0] = (interpol_dl - (interpol_al + interpol_bl + interpol_cl)) * regen;
+        self.e.feedback[0] = (interpol_el - (interpol_fl + interpol_gl + interpol_hl)) * regen;
+        self.f.feedback[0] = (interpol_fl - (interpol_el + interpol_gl + interpol_hl)) * regen;
+        self.g.feedback[0] = (interpol_gl - (interpol_el + interpol_fl + interpol_hl)) * regen;
+        self.h.feedback[0] = (interpol_hl - (interpol_el + interpol_fl + interpol_gl)) * regen;
+
+        self.a.feedback[1] = (interpol_ar - (interpol_br + interpol_cr + interpol_dr)) * regen;
+        self.b.feedback[1] = (interpol_br - (interpol_ar + interpol_cr + interpol_dr)) * regen;
+        self.c.feedback[1] = (interpol_cr - (interpol_ar + interpol_br + interpol_dr)) * regen;
+        self.d.feedback[1] = (interpol_dr - (interpol_ar + interpol_br + interpol_cr)) * regen;
+        self.e.feedback[1] = (interpol_er - (interpol_fr + interpol_gr + interpol_hr)) * regen;
+        self.f.feedback[1] = (interpol_fr - (interpol_er + interpol_gr + interpol_hr)) * regen;
+        self.g.feedback[1] = (interpol_gr - (interpol_er + interpol_fr + interpol_hr)) * regen;
+        self.h.feedback[1] = (interpol_hr - (interpol_er + interpol_fr + interpol_gr)) * regen;
+
+        input_l = (interpol_al
+            + interpol_bl
+            + interpol_cl
+            + interpol_dl
+            + interpol_el
+            + interpol_fl
+            + interpol_gl
+            + interpol_hl)
+            / 8.0;
+        input_r = (interpol_ar
+            + interpol_br
+            + interpol_cr
+            + interpol_dr
+            + interpol_er
+            + interpol_fr
+            + interpol_gr
+            + interpol_hr)
+            / 8.0;
+
+        // Biquad B
+        input_l = self
+            .biquad_b_l
+            .process_sample(&self.biquad_b_coefficients, input_l);
+        input_r = self
+            .biquad_b_r
+            .process_sample(&self.biquad_b_coefficients, input_r);
+
+        input_l = input_l.clamp(-1.0, 1.0);
+        input_r = input_r.clamp(-1.0, 1.0);
+
+        input_l = input_l.asin();
+        input_r = input_r.asin();
+
+        // Biquad C
+        input_l = self
+            .biquad_c_l
+            .process_sample(&self.biquad_c_coefficients, input_l);
+        input_r = self
+            .biquad_c_r
+            .process_sample(&self.biquad_c_coefficients, input_r);
+
+        if wet != 1.0 {
+            input_l += dry_l * (1.0 - wet);
+            input_r += dry_r * (1.0 - wet);
+        }
+
+        frame[0] = input_l as f32;
+        frame[1] = input_r as f32;
     }
 }
 
@@ -394,365 +413,42 @@ impl Effect for ReverbEffect {
     }
 
     fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
-        let room_size = self.room_size.next_value() as f64;
-        let wet = self.wet.next_value() as f64;
-        let vib_speed = 0.1;
-        let vib_depth = 7.0;
-        let size = (room_size.powi(2) * 75.0) + 25.0;
-        let depth_factor =
-            1.0 - (1.0 - (0.82 - (((1.0 - room_size) * 0.7) + (size * 0.002)))).powi(4);
-        let blend = 0.955 - (size * 0.007);
-        let regen = depth_factor * 0.5;
-
-        self.delay_a = (79.0 * size) as usize;
-        self.delay_b = (73.0 * size) as usize;
-        self.delay_c = (71.0 * size) as usize;
-        self.delay_d = (67.0 * size) as usize;
-        self.delay_e = (61.0 * size) as usize;
-        self.delay_f = (59.0 * size) as usize;
-        self.delay_g = (53.0 * size) as usize;
-        self.delay_h = (47.0 * size) as usize;
-        self.delay_i = (43.0 * size) as usize;
-        self.delay_j = (41.0 * size) as usize;
-        self.delay_k = (37.0 * size) as usize;
-        self.delay_l = (31.0 * size) as usize;
-        self.delay_m = (29.0 * size) as usize;
-
-        let cutoff = (10000.0 - (room_size * wet * 3000.0)) as f32;
-        self.biquad_a_coefficients
-            .set(
-                BiquadFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                1.618034,
-                0.0,
-            )
-            .unwrap();
-        self.biquad_b_coefficients
-            .set(
-                BiquadFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                0.618034,
-                0.0,
-            )
-            .unwrap();
-        self.biquad_c_coefficients
-            .set(
-                //
-                BiquadFilterType::Lowpass,
-                self.sample_rate,
-                cutoff,
-                0.5,
-                0.0,
-            )
-            .unwrap();
-
-        assert!(self.channel_count == 2);
-        for frame in output.as_frames_mut::<2>() {
-            let mut input_sample_l = frame[0] as f64;
-            let mut input_sample_r = frame[1] as f64;
-
-            if input_sample_l.abs() < 1.18e-23 {
-                input_sample_l = self.fpd_l as f64 * 1.18e-17;
+        if self.room_size.value_need_ramp() || self.wet.value_need_ramp() {
+            assert!(self.channel_count == 2);
+            for frame in output.as_frames_mut::<2>() {
+                let room_size = self.room_size.next_value() as f64;
+                let wet = self.wet.next_value() as f64;
+                let cutoff = (10000.0 - (room_size * wet * 3000.0)) as f32;
+                let size = (room_size.powi(2) * 75.0) + 25.0;
+                let depth_factor =
+                    1.0 - (1.0 - (0.82 - (((1.0 - room_size) * 0.7) + (size * 0.002)))).powi(4);
+                let blend = 0.955 - (size * 0.007);
+                let regen = depth_factor * 0.5;
+                // delays
+                let predelay = self.update_delay_sizes(size);
+                // filters
+                self.update_filter_coefs(cutoff);
+                // process
+                self.process_frame(frame, blend, regen, predelay, wet);
             }
-            if input_sample_r.abs() < 1.18e-23 {
-                input_sample_r = self.fpd_r as f64 * 1.18e-17;
+        } else {
+            let room_size = self.room_size.target_value() as f64;
+            let wet = self.wet.target_value() as f64;
+            let cutoff = (10000.0 - (room_size * wet * 3000.0)) as f32;
+            let size = (room_size.powi(2) * 75.0) + 25.0;
+            let depth_factor =
+                1.0 - (1.0 - (0.82 - (((1.0 - room_size) * 0.7) + (size * 0.002)))).powi(4);
+            let blend = 0.955 - (size * 0.007);
+            let regen = depth_factor * 0.5;
+            // delays
+            let predelay = self.update_delay_sizes(size);
+            // filters
+            self.update_filter_coefs(cutoff);
+            // process
+            assert!(self.channel_count == 2);
+            for frame in output.as_frames_mut::<2>() {
+                self.process_frame(frame, blend, regen, predelay, wet);
             }
-            let dry_sample_l = input_sample_l;
-            let dry_sample_r = input_sample_r;
-
-            // Predelay
-            self.a_ml[self.count_m] = input_sample_l;
-            self.a_mr[self.count_m] = input_sample_r;
-            self.count_m += 1;
-            if self.count_m > self.delay_m {
-                self.count_m = 0;
-            }
-            input_sample_l = self.a_ml[self.count_m];
-            input_sample_r = self.a_mr[self.count_m];
-
-            // Biquad A
-            input_sample_l = self
-                .biquad_a_l
-                .process_sample(&self.biquad_a_coefficients, input_sample_l);
-            input_sample_r = self
-                .biquad_a_r
-                .process_sample(&self.biquad_a_coefficients, input_sample_r);
-
-            input_sample_l = input_sample_l.sin();
-            input_sample_r = input_sample_r.sin();
-
-            // Allpasses
-            let mut allpass_il = input_sample_l;
-            let mut allpass_ir = input_sample_r;
-            let mut allpass_jl = input_sample_l;
-            let mut allpass_jr = input_sample_r;
-            let mut allpass_kl = input_sample_l;
-            let mut allpass_kr = input_sample_r;
-            let mut allpass_ll = input_sample_l;
-            let mut allpass_lr = input_sample_r;
-
-            let mut ap_temp = self.count_i + 1;
-            if ap_temp > self.delay_i {
-                ap_temp = 0;
-            }
-            allpass_il -= self.a_il[ap_temp] * 0.5;
-            self.a_il[self.count_i] = allpass_il;
-            allpass_il *= 0.5;
-            allpass_ir -= self.a_ir[ap_temp] * 0.5;
-            self.a_ir[self.count_i] = allpass_ir;
-            allpass_ir *= 0.5;
-            self.count_i += 1;
-            if self.count_i > self.delay_i {
-                self.count_i = 0;
-            }
-            allpass_il += self.a_il[self.count_i];
-            allpass_ir += self.a_ir[self.count_i];
-
-            ap_temp = self.count_j + 1;
-            if ap_temp > self.delay_j {
-                ap_temp = 0;
-            }
-            allpass_jl -= self.a_jl[ap_temp] * 0.5;
-            self.a_jl[self.count_j] = allpass_jl;
-            allpass_jl *= 0.5;
-            allpass_jr -= self.a_jr[ap_temp] * 0.5;
-            self.a_jr[self.count_j] = allpass_jr;
-            allpass_jr *= 0.5;
-            self.count_j += 1;
-            if self.count_j > self.delay_j {
-                self.count_j = 0;
-            }
-            allpass_jl += self.a_jl[self.count_j];
-            allpass_jr += self.a_jr[self.count_j];
-
-            ap_temp = self.count_k + 1;
-            if ap_temp > self.delay_k {
-                ap_temp = 0;
-            }
-            allpass_kl -= self.a_kl[ap_temp] * 0.5;
-            self.a_kl[self.count_k] = allpass_kl;
-            allpass_kl *= 0.5;
-            allpass_kr -= self.a_kr[ap_temp] * 0.5;
-            self.a_kr[self.count_k] = allpass_kr;
-            allpass_kr *= 0.5;
-            self.count_k += 1;
-            if self.count_k > self.delay_k {
-                self.count_k = 0;
-            }
-            allpass_kl += self.a_kl[self.count_k];
-            allpass_kr += self.a_kr[self.count_k];
-
-            ap_temp = self.count_l + 1;
-            if ap_temp > self.delay_l {
-                ap_temp = 0;
-            }
-            allpass_ll -= self.a_ll[ap_temp] * 0.5;
-            self.a_ll[self.count_l] = allpass_ll;
-            allpass_ll *= 0.5;
-            allpass_lr -= self.a_lr[ap_temp] * 0.5;
-            self.a_lr[self.count_l] = allpass_lr;
-            allpass_lr *= 0.5;
-            self.count_l += 1;
-            if self.count_l > self.delay_l {
-                self.count_l = 0;
-            }
-            allpass_ll += self.a_ll[self.count_l];
-            allpass_lr += self.a_lr[self.count_l];
-
-            // Householder Matrix
-            self.a_al[self.count_a] = allpass_ll + self.feedback_al;
-            self.a_ar[self.count_a] = allpass_lr + self.feedback_ar;
-            self.a_bl[self.count_b] = allpass_kl + self.feedback_bl;
-            self.a_br[self.count_b] = allpass_kr + self.feedback_br;
-            self.a_cl[self.count_c] = allpass_jl + self.feedback_cl;
-            self.a_cr[self.count_c] = allpass_jr + self.feedback_cr;
-            self.a_dl[self.count_d] = allpass_il + self.feedback_dl;
-            self.a_dr[self.count_d] = allpass_ir + self.feedback_dr;
-            self.a_el[self.count_e] = allpass_il + self.feedback_el;
-            self.a_er[self.count_e] = allpass_ir + self.feedback_er;
-            self.a_fl[self.count_f] = allpass_jl + self.feedback_fl;
-            self.a_fr[self.count_f] = allpass_jr + self.feedback_fr;
-            self.a_gl[self.count_g] = allpass_kl + self.feedback_gl;
-            self.a_gr[self.count_g] = allpass_kr + self.feedback_gr;
-            self.a_hl[self.count_h] = allpass_ll + self.feedback_hl;
-            self.a_hr[self.count_h] = allpass_lr + self.feedback_hr;
-
-            self.count_a += 1;
-            if self.count_a > self.delay_a {
-                self.count_a = 0;
-            }
-            self.count_b += 1;
-            if self.count_b > self.delay_b {
-                self.count_b = 0;
-            }
-            self.count_c += 1;
-            if self.count_c > self.delay_c {
-                self.count_c = 0;
-            }
-            self.count_d += 1;
-            if self.count_d > self.delay_d {
-                self.count_d = 0;
-            }
-            self.count_e += 1;
-            if self.count_e > self.delay_e {
-                self.count_e = 0;
-            }
-            self.count_f += 1;
-            if self.count_f > self.delay_f {
-                self.count_f = 0;
-            }
-            self.count_g += 1;
-            if self.count_g > self.delay_g {
-                self.count_g = 0;
-            }
-            self.count_h += 1;
-            if self.count_h > self.delay_h {
-                self.count_h = 0;
-            }
-
-            // Vibrato
-            self.vib_al += self.depth_a * vib_speed;
-            self.vib_ar += self.depth_a * vib_speed;
-            self.vib_bl += self.depth_b * vib_speed;
-            self.vib_br += self.depth_b * vib_speed;
-            self.vib_cl += self.depth_c * vib_speed;
-            self.vib_cr += self.depth_c * vib_speed;
-            self.vib_dl += self.depth_d * vib_speed;
-            self.vib_dr += self.depth_d * vib_speed;
-            self.vib_el += self.depth_e * vib_speed;
-            self.vib_er += self.depth_e * vib_speed;
-            self.vib_fl += self.depth_f * vib_speed;
-            self.vib_fr += self.depth_f * vib_speed;
-            self.vib_gl += self.depth_g * vib_speed;
-            self.vib_gr += self.depth_g * vib_speed;
-            self.vib_hl += self.depth_h * vib_speed;
-            self.vib_hr += self.depth_h * vib_speed;
-
-            let get_offset = |vib: f64| (vib.sin() + 1.0) * vib_depth;
-            let offset_al = get_offset(self.vib_al);
-            let offset_ar = get_offset(self.vib_ar);
-            let offset_bl = get_offset(self.vib_bl);
-            let offset_br = get_offset(self.vib_br);
-            let offset_cl = get_offset(self.vib_cl);
-            let offset_cr = get_offset(self.vib_cr);
-            let offset_dl = get_offset(self.vib_dl);
-            let offset_dr = get_offset(self.vib_dr);
-            let offset_el = get_offset(self.vib_el);
-            let offset_er = get_offset(self.vib_er);
-            let offset_fl = get_offset(self.vib_fl);
-            let offset_fr = get_offset(self.vib_fr);
-            let offset_gl = get_offset(self.vib_gl);
-            let offset_gr = get_offset(self.vib_gr);
-            let offset_hl = get_offset(self.vib_hl);
-            let offset_hr = get_offset(self.vib_hr);
-
-            let get_interpol = |buf: &[f64], count: usize, delay: usize, offset: f64| {
-                let working = count as f64 + offset;
-                let w_floor = working.floor();
-                let w_frac = working - w_floor;
-                let w_int = w_floor as usize;
-
-                let mut read_1 = w_int;
-                if read_1 > delay {
-                    read_1 -= delay + 1;
-                }
-                let mut read_2 = w_int + 1;
-                if read_2 > delay {
-                    read_2 -= delay + 1;
-                }
-
-                let val1 = buf[read_1];
-                let val2 = buf[read_2];
-                let mut interpol = val1 * (1.0 - w_frac) + val2 * w_frac;
-                interpol = (1.0 - blend) * interpol + (buf[read_1] * blend);
-                interpol
-            };
-
-            let interpol_al = get_interpol(&self.a_al, self.count_a, self.delay_a, offset_al);
-            let interpol_bl = get_interpol(&self.a_bl, self.count_b, self.delay_b, offset_bl);
-            let interpol_cl = get_interpol(&self.a_cl, self.count_c, self.delay_c, offset_cl);
-            let interpol_dl = get_interpol(&self.a_dl, self.count_d, self.delay_d, offset_dl);
-            let interpol_el = get_interpol(&self.a_el, self.count_e, self.delay_e, offset_el);
-            let interpol_fl = get_interpol(&self.a_fl, self.count_f, self.delay_f, offset_fl);
-            let interpol_gl = get_interpol(&self.a_gl, self.count_g, self.delay_g, offset_gl);
-            let interpol_hl = get_interpol(&self.a_hl, self.count_h, self.delay_h, offset_hl);
-
-            let interpol_ar = get_interpol(&self.a_ar, self.count_a, self.delay_a, offset_ar);
-            let interpol_br = get_interpol(&self.a_br, self.count_b, self.delay_b, offset_br);
-            let interpol_cr = get_interpol(&self.a_cr, self.count_c, self.delay_c, offset_cr);
-            let interpol_dr = get_interpol(&self.a_dr, self.count_d, self.delay_d, offset_dr);
-            let interpol_er = get_interpol(&self.a_er, self.count_e, self.delay_e, offset_er);
-            let interpol_fr = get_interpol(&self.a_fr, self.count_f, self.delay_f, offset_fr);
-            let interpol_gr = get_interpol(&self.a_gr, self.count_g, self.delay_g, offset_gr);
-            let interpol_hr = get_interpol(&self.a_hr, self.count_h, self.delay_h, offset_hr);
-
-            // Feedback
-            self.feedback_al = (interpol_al - (interpol_bl + interpol_cl + interpol_dl)) * regen;
-            self.feedback_bl = (interpol_bl - (interpol_al + interpol_cl + interpol_dl)) * regen;
-            self.feedback_cl = (interpol_cl - (interpol_al + interpol_bl + interpol_dl)) * regen;
-            self.feedback_dl = (interpol_dl - (interpol_al + interpol_bl + interpol_cl)) * regen;
-            self.feedback_el = (interpol_el - (interpol_fl + interpol_gl + interpol_hl)) * regen;
-            self.feedback_fl = (interpol_fl - (interpol_el + interpol_gl + interpol_hl)) * regen;
-            self.feedback_gl = (interpol_gl - (interpol_el + interpol_fl + interpol_hl)) * regen;
-            self.feedback_hl = (interpol_hl - (interpol_el + interpol_fl + interpol_gl)) * regen;
-
-            self.feedback_ar = (interpol_ar - (interpol_br + interpol_cr + interpol_dr)) * regen;
-            self.feedback_br = (interpol_br - (interpol_ar + interpol_cr + interpol_dr)) * regen;
-            self.feedback_cr = (interpol_cr - (interpol_ar + interpol_br + interpol_dr)) * regen;
-            self.feedback_dr = (interpol_dr - (interpol_ar + interpol_br + interpol_cr)) * regen;
-            self.feedback_er = (interpol_er - (interpol_fr + interpol_gr + interpol_hr)) * regen;
-            self.feedback_fr = (interpol_fr - (interpol_er + interpol_gr + interpol_hr)) * regen;
-            self.feedback_gr = (interpol_gr - (interpol_er + interpol_fr + interpol_hr)) * regen;
-            self.feedback_hr = (interpol_hr - (interpol_er + interpol_fr + interpol_gr)) * regen;
-
-            input_sample_l = (interpol_al
-                + interpol_bl
-                + interpol_cl
-                + interpol_dl
-                + interpol_el
-                + interpol_fl
-                + interpol_gl
-                + interpol_hl)
-                / 8.0;
-            input_sample_r = (interpol_ar
-                + interpol_br
-                + interpol_cr
-                + interpol_dr
-                + interpol_er
-                + interpol_fr
-                + interpol_gr
-                + interpol_hr)
-                / 8.0;
-
-            // Biquad B
-            input_sample_l = self
-                .biquad_b_l
-                .process_sample(&self.biquad_b_coefficients, input_sample_l);
-            input_sample_r = self
-                .biquad_b_r
-                .process_sample(&self.biquad_b_coefficients, input_sample_r);
-
-            input_sample_l = input_sample_l.clamp(-1.0, 1.0);
-            input_sample_r = input_sample_r.clamp(-1.0, 1.0);
-
-            input_sample_l = input_sample_l.asin();
-            input_sample_r = input_sample_r.asin();
-
-            // Biquad C
-            input_sample_l = self
-                .biquad_c_l
-                .process_sample(&self.biquad_c_coefficients, input_sample_l);
-            input_sample_r = self
-                .biquad_c_r
-                .process_sample(&self.biquad_c_coefficients, input_sample_r);
-
-            input_sample_l = dry_sample_l + input_sample_l * wet;
-            input_sample_r = dry_sample_r + input_sample_r * wet;
-
-            frame[0] = input_sample_l as f32;
-            frame[1] = input_sample_r as f32;
         }
     }
 
@@ -779,7 +475,21 @@ impl Effect for ReverbEffect {
     fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
         if let Some(message) = message.payload().downcast_ref::<ReverbEffectMessage>() {
             match message {
-                ReverbEffectMessage::Reset => self.reset(),
+                ReverbEffectMessage::Reset => {
+                    self.a.flush();
+                    self.b.flush();
+                    self.c.flush();
+                    self.d.flush();
+                    self.e.flush();
+                    self.f.flush();
+                    self.g.flush();
+                    self.h.flush();
+                    self.i.flush();
+                    self.j.flush();
+                    self.k.flush();
+                    self.l.flush();
+                    self.m.flush();
+                }
             }
             Ok(())
         } else {
@@ -805,5 +515,107 @@ impl Effect for ReverbEffect {
             }
         }
         Ok(())
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Reverb delay line with vibrato, feedback and interpolated read
+struct ReverbDelayLine<const CHANNELS: usize> {
+    // Interleaved delay line buffer
+    buffer: Vec<[f64; CHANNELS]>,
+    // Delay line counter
+    count: usize,
+    delay: usize,
+    // Feedback
+    feedback: [f64; CHANNELS],
+    // Vibrato
+    depth: f64,
+    vib_phase: [f64; CHANNELS],
+}
+
+impl<const CHANNELS: usize> ReverbDelayLine<CHANNELS> {
+    pub fn new(rng: &mut impl Rng, size: usize, depth: f64) -> Self {
+        use std::f64::consts::PI;
+
+        let mut vib_phase = [0.0; CHANNELS];
+        for p in vib_phase.iter_mut() {
+            *p = rng.random_range(0.0..2.0 * PI);
+        }
+
+        Self {
+            buffer: vec![[0.0; CHANNELS]; size + 1],
+            count: 1,
+            delay: 1,
+            depth,
+            feedback: [0.0; CHANNELS],
+            vib_phase,
+        }
+    }
+
+    pub fn flush(&mut self) {
+        self.buffer.fill([0.0; CHANNELS]);
+    }
+
+    pub fn get(&self, vib_depth: f64, blend: f64) -> [f64; CHANNELS] {
+        let mut output = [0.0; CHANNELS];
+
+        // Hint to optimizer: `self.delay` is clamped to `self.buffer.len() - 1` in the
+        // setter, so read_1/2 are always valid here.
+        assume!(unsafe: self.delay < self.buffer.len());
+
+        #[allow(clippy::needless_range_loop)]
+        for ch in 0..CHANNELS {
+            let offset = (self.vib_phase[ch].sin() + 1.0) * vib_depth;
+            let working = self.count as f64 + offset;
+            let w_floor = working.floor();
+            let w_frac = working - w_floor;
+            let w_int = w_floor as usize;
+
+            let mut read_1 = w_int;
+            if read_1 > self.delay {
+                read_1 -= self.delay + 1;
+            }
+            let mut read_2 = w_int + 1;
+            if read_2 > self.delay {
+                read_2 -= self.delay + 1;
+            }
+
+            let val1 = self.buffer[read_1][ch];
+            let val2 = self.buffer[read_2][ch];
+
+            let mut interpol = val1 * (1.0 - w_frac) + val2 * w_frac;
+            interpol = (1.0 - blend) * interpol + (val1 * blend);
+            output[ch] = interpol;
+        }
+        output
+    }
+
+    pub fn set(&mut self, values: [f64; CHANNELS]) {
+        assume!(unsafe: self.count < self.buffer.len());
+        let dest = &mut self.buffer[self.count];
+        for ch in 0..CHANNELS {
+            dest[ch] = values[ch] + self.feedback[ch];
+        }
+    }
+
+    pub fn step(&mut self, speed: f64) {
+        self.count += 1;
+        if self.count > self.delay {
+            self.count = 0;
+        }
+        for p in self.vib_phase.iter_mut() {
+            *p += self.depth * speed;
+        }
+    }
+
+    pub fn set_delay(&mut self, delay: usize) {
+        debug_assert!(
+            delay < self.buffer.len() - 1,
+            "Delay must be < {} but is {}",
+            self.buffer.len() - 1,
+            delay
+        );
+        self.delay = delay.min(self.buffer.len() - 1);
     }
 }

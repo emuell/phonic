@@ -12,7 +12,7 @@ use crate::{
     utils::{
         buffer::InterleavedBufferMut,
         dsp::{
-            delay::DelayLine,
+            delay::InterpolatedDelayLine,
             filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
             lfo::{Lfo, LfoWaveform},
         },
@@ -89,8 +89,8 @@ pub struct ChorusEffect {
     current_phase: f64,
     left_osc: Lfo,
     right_osc: Lfo,
-    delay_buffer_left: DelayLine<1>,
-    delay_buffer_right: DelayLine<1>,
+    delay_buffer_left: InterpolatedDelayLine<1>,
+    delay_buffer_right: InterpolatedDelayLine<1>,
     filter_coefficients: BiquadFilterCoefficients,
     filter_left: BiquadFilter,
     filter_right: BiquadFilter,
@@ -212,8 +212,8 @@ impl ChorusEffect {
             left_osc: Lfo::default(),
             right_osc: Lfo::default(),
 
-            delay_buffer_left: DelayLine::default(),
-            delay_buffer_right: DelayLine::default(),
+            delay_buffer_left: InterpolatedDelayLine::default(),
+            delay_buffer_right: InterpolatedDelayLine::default(),
 
             filter_coefficients: BiquadFilterCoefficients::default(),
             filter_left: BiquadFilter::default(),
@@ -331,8 +331,8 @@ impl Effect for ChorusEffect {
             (Self::MAX_APPLIED_DELAY_IN_MS * self.sample_rate as f32 / 1000.0).ceil() as usize;
         let max_buffer_size = 2 + max_delay_time_in_samples + 2 * max_depth_in_samples + 1;
 
-        self.delay_buffer_left = DelayLine::new(max_buffer_size);
-        self.delay_buffer_right = DelayLine::new(max_buffer_size);
+        self.delay_buffer_left = InterpolatedDelayLine::new(max_buffer_size);
+        self.delay_buffer_right = InterpolatedDelayLine::new(max_buffer_size);
 
         self.filter_coefficients = BiquadFilterCoefficients::new(
             self.filter_type.value().into(),
@@ -409,16 +409,12 @@ impl Effect for ChorusEffect {
                 2.0 + delay_in_samples + (1.0 + right_lfo) as f32 * depth_in_samples;
 
             // Feed the delays
-            let left_output = self.delay_buffer_left.process_sample(
-                [filtered_left as f32],
-                feedback,
-                left_delay_pos,
-            )[0];
-            let right_output = self.delay_buffer_right.process_sample(
-                [filtered_right as f32],
-                feedback,
-                right_delay_pos,
-            )[0];
+            let left_output =
+                self.delay_buffer_left
+                    .process([filtered_left as f32], feedback, left_delay_pos)[0];
+            let right_output =
+                self.delay_buffer_right
+                    .process([filtered_right as f32], feedback, right_delay_pos)[0];
 
             // Calc the Output
             let out_l = left_input * dry_amount + left_output * wet_amount;
