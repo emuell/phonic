@@ -38,6 +38,7 @@
 //! use phonic::{
 //!     DefaultOutputDevice, Player, FilePlaybackOptions, Error,
 //!     effects::{ChorusEffect, ReverbEffect, CompressorEffect},
+//!     generators::Sampler, GeneratorPlaybackOptions,
 //! };
 //!
 //! fn main() -> Result<(), Error> {
@@ -80,6 +81,20 @@
 //!     let some_other_file = player.play_file("path/to/your/some_other_file.wav",
 //!       FilePlaybackOptions::default().start_at_time(now + 2 * samples_per_sec)
 //!     )?;
+//!
+//!     // Create a sampler generator to play a sample.
+//!     // We configure it to play on the sub-mixer.
+//!     let generator = player.play_generator(
+//!         Sampler::new(
+//!             "path/to/instrument_sample.wav",
+//!             GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id())
+//!         )?,
+//!         None
+//!      )?;
+//!
+//!     // Trigger a note on the generator. The `generator` handle is `Send + Sync`, so you
+//!     // can also pass it to other threads (e.g. a MIDI thread) to trigger events from there.
+//!     generator.note_on(60, Some(1.0), None, None)?;
 //!
 //!     // The player's audio output stream runs on a separate thread. Keep the
 //!     // main thread running here, until all files finished playing.

@@ -26,13 +26,13 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   - Automatic resampling and channel mapping via a fast custom resampler and [Rubato](https://github.com/HEnquist/rubato).
 
 - **Advanced Playback Control**:
-  - Sample-precise **scheduling** for accurate sequencing.
+  - Sample-precise **scheduling** of playback events for accurate sequencing.
   - Real-time **monitoring** of playback position and status for GUI integration.
   - Dynamic control over volume, panning, and playback speed via `Sync` + `Send` playback handles.
 
 - **Custom Synthesis and DSPs**:
   - Play preloaded sample files via a basic **sampler**.
-  - Play custom-built **synthesizers** or one-shot synth sounds using the optional [fundsp](https://github.com/SamiPerttu/fundsp) integration.
+  - Play custom-built **synthesizers** or one-shot synth sounds using the optional [fundsp](https://github.com/SamiPerttu/fundsp) feature.
   - Apply custom-built or use built-in **DSP effects**: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
   - DSP effects are automatically bypassed to save CPU cycles when they receive no audible input.
@@ -127,6 +127,7 @@ fn main() -> Result<(), Error> {
 
     // If you only want one file to play at the same time, stop all playing sounds.
     player.stop_all_sources()?;
+
     // And then schedule a new source for playback.
     let _boom = player.play_file("PATH_TO/boom.wav", FilePlaybackOptions::default())?;
 
@@ -134,14 +135,17 @@ fn main() -> Result<(), Error> {
 }
 ```
 
-#### File Playback with DSP Effects in a Mixer Graph
+#### File Playback with Generators, DSP Effects in a Mixer Graph
 
 Create DSP graphs by routing sources through different mixers and effects.
 
 ```rust no_run
+use std::time::Duration;
+
 use phonic::{
     DefaultOutputDevice, Player, Error, FilePlaybackOptions,
-    effects::{ChorusEffect, ReverbEffect}
+    effects::{ChorusEffect, ReverbEffect},
+    generators::Sampler, GeneratorPlaybackOptions,
 };
 
 fn main() -> Result<(), Error> {
@@ -162,19 +166,44 @@ fn main() -> Result<(), Error> {
     // The `None` arguments are optional sample times to schedule events.
     reverb.set_parameter(ReverbEffect::ROOM_SIZE.value_update(0.9f32), None)?;
     // Or if no parameter description is available, send the change as normalized value. 
-    chorus.set_parameter_normalized(ChorusEffect::RATE.id(), 0.5, None)?;
+    chorus.set_parameter_normalized(ChorusEffect::RATE.id(), 0.5f32, None)?;
 
     // Play a file through the main mixer (which has reverb only).
-    let _some_file = player.play_file(
+    let some_file = player.play_file(
         "PATH_TO/some_file.wav",
         FilePlaybackOptions::default(),
     )?;
-
     // Play another file through the chorus mixer (and main mixer with the reverb FX).
-    let _another_file = player.play_file(
+    let another_file = player.play_file(
         "PATH_TO/another_file.wav",
-        FilePlaybackOptions::default().target_mixer(chorus_mixer_id),
+        FilePlaybackOptions::default().target_mixer(chorus_mixer.id()),
     )?;
+
+    // Create a sampler generator to play a sample.
+    // We configure it to play on the chorus mixer.
+    let generator = player.play_generator(
+        Sampler::new(
+            "PATH_TO/instrument_sample.wav",
+            GeneratorPlaybackOptions::default().target_mixer(chorus_mixer.id())
+        )?, 
+        None
+    )?;
+    
+    // Trigger a note on the generator. The `generator` handle is `Send + Sync`, so
+    // you could also pass it to some other thread (e.g. a MIDI thread) to trigger
+    // the generator from there.
+    generator.note_on(60, Some(1.0f32), None, None)?;
+
+    // [... do something else ...]
+ 
+    // Stop generator and sample files (keep `some_file` running until it plays to the end)
+    another_file.stop(None)?;
+    generator.stop(None)?;
+
+    // Wait until all files and generators finished playing
+    while some_file.is_playing() || another_file.is_playing() || generator.is_playing() {
+        std::thread::sleep(Duration::from_millis(500));
+    }
 
     Ok(())
 }
