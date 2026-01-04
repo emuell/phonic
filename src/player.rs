@@ -204,7 +204,7 @@ impl Player {
         );
 
         // assign the wrapped main mixer as sink source
-        output_device.play(Box::new(guarded_main_mixer));
+        output_device.play(guarded_main_mixer.into_box());
 
         Self {
             output_device,
@@ -365,10 +365,7 @@ impl Player {
             },
         );
         // send the source to the mixer
-        let source = Owned::new(
-            &self.collector_handle,
-            Box::new(measured_source) as Box<dyn Source>,
-        );
+        let source = Owned::new(&self.collector_handle, measured_source.into_box());
         let sample_time = start_time.into().unwrap_or(0);
         if mixer_event_queue
             .push(MixerMessage::AddSource {
@@ -461,10 +458,7 @@ impl Player {
             },
         );
         // send the source to the mixer
-        let source = Owned::new(
-            &self.collector_handle,
-            Box::new(measured_source) as Box<dyn Source>,
-        );
+        let source = Owned::new(&self.collector_handle, measured_source.into_box());
         let sample_time = start_time.into().unwrap_or(0);
         if mixer_event_queue
             .push(MixerMessage::AddSource {
@@ -492,14 +486,14 @@ impl Player {
 
     /// Play a generator source with the given options. *Played* generators will be removed
     /// when stopping all sources or when stopping it like a regular source. To keep a generator
-    /// running until it get's explicitely removed use [Self::add_generator_source] instead.
+    /// running until it gets explicitly removed use [Self::add_generator] instead.
     ///
     /// Returns a handle that can be used to control the generator, e.g. to stop it or to send
     /// events to trigger or stop individual notes.
     ///
-    /// Use [`DynGenerator`](crate::generators::DynGenerator) as generator impl if you
-    /// only got a `dyn Generator` and not the generator impl itself.
-    pub fn play_generator_source<G: Generator + 'static, T: Into<Option<u64>>>(
+    /// Note that boxed `dyn Generator` can be passed here as well as there's a generator impl
+    /// defined for `Box<dyn Generator>` in the Generator trait definition.
+    pub fn play_generator<G: Generator + 'static, T: Into<Option<u64>>>(
         &mut self,
         generator: G,
         start_time: T,
@@ -509,27 +503,22 @@ impl Player {
             .playback_options()
             .target_mixer
             .unwrap_or(Self::MAIN_MIXER_ID);
-        self.add_or_play_generator_source(generator, is_transient, mixer_id, start_time)
+        self.add_or_play_generator(generator, is_transient, mixer_id, start_time)
     }
 
     /// Add a generator source with the given options. *Added* generators will not be removed
-    /// when stopping it or when stopping all sources. Use [Self::play_generator_source] if the generator
+    /// when stopping it or when stopping all sources. Use [Self::play_generator] if the generator
     /// source should be automatically removed when stopping like a regular source.
     ///
     /// Returns a handle that can be used to control the generator, e.g. to stop it or to send
     /// events to trigger or stop individual notes.
     ///
-    /// Use [`DynGenerator`](crate::generators::DynGenerator) as generator impl if you
-    /// only got a `dyn Generator` and not the generator impl itself.
-    pub fn add_generator_source<
-        G: Generator + 'static,
-        M: Into<Option<MixerId>>,
-        T: Into<Option<u64>>,
-    >(
+    /// Note that boxed `dyn Generator` can be passed here as well as there's a generator impl
+    /// defined for `Box<dyn Generator>` in the Generator trait definition.
+    pub fn add_generator<G: Generator + 'static, M: Into<Option<MixerId>>>(
         &mut self,
         generator: G,
         mixer_id: M,
-        start_time: T,
     ) -> Result<GeneratorPlaybackHandle, Error> {
         let is_transient = false;
         let mixer_id = mixer_id.into().unwrap_or(Self::MAIN_MIXER_ID);
@@ -538,98 +527,10 @@ impl Player {
                 log::warn!("Ignoring target mixer id from playback options when adding instead of playing a generator");
             }
         }
-        self.add_or_play_generator_source(generator, is_transient, mixer_id, start_time)
+        self.add_or_play_generator(generator, is_transient, mixer_id, None)
     }
 
-    fn add_or_play_generator_source<G: Generator + 'static, T: Into<Option<u64>>>(
-        &mut self,
-        generator: G,
-        is_transient: bool,
-        mixer_id: MixerId,
-        start_time: T,
-    ) -> Result<GeneratorPlaybackHandle, Error> {
-        // validate and get options
-        let playback_options = *generator.playback_options();
-        playback_options.validate()?;
-        // validate and get target mixer
-        let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
-        // set generator's transient flag
-        let mut generator = generator;
-        generator.set_is_transient(is_transient);
-        // redirect source's playback status channel to us
-        generator.set_playback_status_sender(Some(self.playback_status_sender.clone()));
-        // get source in playback id and message channel
-        let playback_id = generator.playback_id();
-        let playback_message_queue = generator.playback_message_queue();
-        let source_name = format!("Generator '{}'", generator.generator_name());
-        // convert generator to mixer's rate and channel layout
-        let converted_source = ConvertedSource::new(
-            generator,
-            self.output_device.channel_count(),
-            self.output_device.sample_rate(),
-            ResamplingQuality::Default,
-        );
-        // apply volume options
-        let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
-        let volume_message_queue = amplified_source.message_queue();
-        // apply panning options
-        let panned_source = PannedSource::new(amplified_source, playback_options.panning);
-        let panning_message_queue = panned_source.message_queue();
-        // apply measure options
-        let measure_interval = playback_options
-            .measure_cpu_load
-            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
-        let measured_source = MeasuredSource::new(panned_source, measure_interval);
-        let measurement_state = measured_source.state();
-        // add to playing sources
-        let is_playing = Arc::new(AtomicBool::new(true));
-        let playback_message_queue = PlaybackMessageQueue::Generator {
-            playback: playback_message_queue,
-            volume: volume_message_queue,
-            panning: panning_message_queue,
-        };
-        self.playing_sources.insert(
-            playback_id,
-            PlayingSource {
-                is_playing: Arc::clone(&is_playing),
-                is_transient,
-                playback_message_queue: playback_message_queue.clone(),
-                mixer_id,
-                source_name,
-            },
-        );
-        // send the source to the mixer
-        let source = Owned::new(
-            &self.collector_handle,
-            Box::new(measured_source) as Box<dyn Source>,
-        );
-        let sample_time = start_time.into().unwrap_or(0);
-        if mixer_event_queue
-            .push(MixerMessage::AddSource {
-                is_transient,
-                playback_id,
-                playback_message_queue: playback_message_queue.clone(),
-                source,
-                sample_time,
-            })
-            .is_err()
-        {
-            self.playing_sources.remove(&playback_id);
-            Err(Self::mixer_event_queue_error("play_generator"))
-        } else {
-            // Create and return handle
-            Ok(GeneratorPlaybackHandle::new(
-                is_playing,
-                playback_id,
-                playback_message_queue,
-                mixer_event_queue,
-                self.collector_handle.clone(),
-                measurement_state,
-            ))
-        }
-    }
-
-    /// Remove a generator which was added via [Self::add_generator_source].
+    /// Remove a generator which was added via [Self::add_generator].
     /// This will not stop all playing sounds in the generator, but simply remove it.
     pub fn remove_generator(&self, playback_id: PlaybackId) -> Result<(), Error> {
         if let Some(playing_source) = self.playing_sources.get(&playback_id) {
@@ -759,8 +660,8 @@ impl Player {
     /// Add an effect to the given mixer's output.
     /// Use `None` as mixer_id to add the effect to the main mixer.
     ///
-    /// Use [`DynEffect`](crate::effects::DynEffect) as effect impl if you
-    /// only got a `dyn Effect` and not the effect impl itself.
+    /// Note that boxed `dyn Effect` can be passed here as well as there's a effect impl
+    /// defined for `Box<dyn Effect>` in the Effect trait definition.
     pub fn add_effect<E: Effect, M: Into<Option<MixerId>>>(
         &mut self,
         effect: E,
@@ -773,9 +674,11 @@ impl Player {
         // The effect's parent mixer uses a temp buffer of size:
         let max_frames = MixedSource::MAX_MIX_BUFFER_SAMPLES / channel_count;
 
+        let mut effect = effect.into_box();
         let effect_name = effect.name();
-        let mut effect = Owned::new(&self.collector_handle, Box::new(effect) as Box<dyn Effect>);
         effect.initialize(self.output_sample_rate(), channel_count, max_frames)?;
+
+        let effect = Owned::new(&self.collector_handle, effect);
 
         let effect_id = Self::unique_effect_id();
         if mixer_event_queue
@@ -896,6 +799,91 @@ impl Player {
             }
         }
         Ok(())
+    }
+
+    fn add_or_play_generator<G: Generator + 'static, T: Into<Option<u64>>>(
+        &mut self,
+        generator: G,
+        is_transient: bool,
+        mixer_id: MixerId,
+        start_time: T,
+    ) -> Result<GeneratorPlaybackHandle, Error> {
+        // validate and get options
+        let playback_options = *generator.playback_options();
+        playback_options.validate()?;
+        // validate and get target mixer
+        let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
+        // set generator's transient flag
+        let mut generator = generator;
+        generator.set_is_transient(is_transient);
+        // redirect source's playback status channel to us
+        generator.set_playback_status_sender(Some(self.playback_status_sender.clone()));
+        // get source in playback id and message channel
+        let playback_id = generator.playback_id();
+        let playback_message_queue = generator.playback_message_queue();
+        let source_name = format!("Generator '{}'", generator.generator_name());
+        // convert generator to mixer's rate and channel layout
+        let converted_source = ConvertedSource::new(
+            generator,
+            self.output_device.channel_count(),
+            self.output_device.sample_rate(),
+            ResamplingQuality::Default,
+        );
+        // apply volume options
+        let amplified_source = AmplifiedSource::new(converted_source, playback_options.volume);
+        let volume_message_queue = amplified_source.message_queue();
+        // apply panning options
+        let panned_source = PannedSource::new(amplified_source, playback_options.panning);
+        let panning_message_queue = panned_source.message_queue();
+        // apply measure options
+        let measure_interval = playback_options
+            .measure_cpu_load
+            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measured_source = MeasuredSource::new(panned_source, measure_interval);
+        let measurement_state = measured_source.state();
+        // add to playing sources
+        let is_playing = Arc::new(AtomicBool::new(true));
+        let playback_message_queue = PlaybackMessageQueue::Generator {
+            playback: playback_message_queue,
+            volume: volume_message_queue,
+            panning: panning_message_queue,
+        };
+        self.playing_sources.insert(
+            playback_id,
+            PlayingSource {
+                is_playing: Arc::clone(&is_playing),
+                is_transient,
+                playback_message_queue: playback_message_queue.clone(),
+                mixer_id,
+                source_name,
+            },
+        );
+        // send the source to the mixer
+        let source = Owned::new(&self.collector_handle, measured_source.into_box());
+        let sample_time = start_time.into().unwrap_or(0);
+        if mixer_event_queue
+            .push(MixerMessage::AddSource {
+                is_transient,
+                playback_id,
+                playback_message_queue: playback_message_queue.clone(),
+                source,
+                sample_time,
+            })
+            .is_err()
+        {
+            self.playing_sources.remove(&playback_id);
+            Err(Self::mixer_event_queue_error("play_generator"))
+        } else {
+            // Create and return handle
+            Ok(GeneratorPlaybackHandle::new(
+                is_playing,
+                playback_id,
+                playback_message_queue,
+                mixer_event_queue,
+                self.collector_handle.clone(),
+                measurement_state,
+            ))
+        }
     }
 
     fn handle_playback_events(

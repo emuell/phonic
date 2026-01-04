@@ -10,7 +10,6 @@ pub mod chorus;
 pub mod compressor;
 pub mod dcfilter;
 pub mod distortion;
-pub mod r#dyn;
 pub mod eq5;
 pub mod filter;
 pub mod gain;
@@ -75,6 +74,16 @@ pub type EffectTime = SourceTime;
 /// NB: all `process_XXX` functions are called in realtime audio threads, so they must not
 /// block! All other functions are called in the main thread to initialize the effect.
 pub trait Effect: Send + Sync + 'static {
+    /// Convert the Effect impl into a boxed `dyn Effect`.
+    ///
+    /// Avoids double boxing when an effect impl already is a `Box<dyn Effect>`.
+    fn into_box(self) -> Box<dyn Effect>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+
     /// A unique, static name for the effect.
     ///
     /// This name is used to associate `EffectMessage`s with their target effect type, preventing
@@ -169,5 +178,59 @@ pub trait Effect: Send + Sync + 'static {
             "{}: Received unexpected message payload.",
             self.name()
         )))
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Allow adding/using boxed `dyn Effect`s as `Effect` impls.
+impl Effect for Box<dyn Effect> {
+    fn into_box(self) -> Box<dyn Effect> {
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn parameters(&self) -> Vec<&dyn Parameter> {
+        (**self).parameters()
+    }
+
+    fn initialize(
+        &mut self,
+        sample_rate: u32,
+        channel_count: usize,
+        max_frames: usize,
+    ) -> Result<(), Error> {
+        (**self).initialize(sample_rate, channel_count, max_frames)
+    }
+
+    fn process_started(&mut self) {
+        (**self).process_started()
+    }
+
+    fn process_stopped(&mut self) {
+        (**self).process_stopped()
+    }
+
+    fn process(&mut self, output: &mut [f32], time: &EffectTime) {
+        (**self).process(output, time)
+    }
+
+    fn process_tail(&self) -> Option<usize> {
+        (**self).process_tail()
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        (**self).process_parameter_update(id, value)
+    }
+
+    fn process_message(&mut self, message: &EffectMessagePayload) -> Result<(), Error> {
+        (**self).process_message(message)
     }
 }

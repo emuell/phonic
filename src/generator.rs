@@ -12,6 +12,7 @@ use crate::{
     source::{unique_source_id, Source},
     utils::db_to_linear,
     Error, MixerId, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
+    SourceTime,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -20,8 +21,6 @@ pub mod sampler;
 
 #[cfg(feature = "fundsp")]
 pub mod fundsp;
-
-pub mod r#dyn;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -181,9 +180,9 @@ pub enum GeneratorPlaybackEvent {
 
 /// Messages to control playback of and within a [`Generator`].
 pub enum GeneratorPlaybackMessage {
-    /// For transient generators which got added via `Player::play_generator_source`, this
+    /// For transient generators which got added via `Player::play_generator`, this
     /// marks the generator as stopped and removes it from the mixer as soon as all voices
-    /// finished playing. For fixed generators which got added via `Player::add_generator_source`,
+    /// finished playing. For fixed generators which got added via `Player::add_generator`,
     /// this only stops all playing notes and keeps the generator running.
     Stop,
     /// Trigger a playback event. All playback events keep the generator running in the mixer.
@@ -197,12 +196,31 @@ pub enum GeneratorPlaybackMessage {
 /// It supports the usual volume and panning events and additional note trigger events via
 /// its playback message queue.
 ///
-/// A generator is active as long as it get's actively stopped. Stopping will remove the
-/// generator from it's parent mixer, so to keep it running stop all playing notes only instead.
+/// Generators can be used in two ways:
+/// 1. **Played** via [`Player::play_generator`](crate::Player::play_generator):
+///    The generator is treated as a transient source. It will be automatically removed from the
+///    mixer when it is stopped via its handle or when [`Player::stop_all_sources`](crate::Player::stop_all_sources)
+///    is called. This is useful for one-shot generators or temporary sound sources.
+///
+/// 2. **Added** via [`Player::add_generator`](crate::Player::add_generator):
+///    The generator is treated as a permanent source. It will remain in the mixer even when
+///    stopped via its handle (which only stops playing notes) or when `stop_all_sources` is called.
+///    It must be explicitly removed via [`Player::remove_generator`](crate::Player::remove_generator).
+///    This is useful for instruments that should persist throughout the application's lifetime.
 ///
 /// Generator parameters work similarly to [`Effect`](crate::Effect) parameters: they provide
 /// automation capabilities and can be queried via [`parameters()`](Self::parameters).
 pub trait Generator: Source {
+    /// Convert the Generator impl into a boxed `dyn Generator`.
+    ///
+    /// Avoids double boxing when a generator impl already is a `Box<dyn Generator>`.
+    fn into_box(self) -> Box<dyn Generator>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+
     /// Name of the generator for display debugging purposes.
     fn generator_name(&self) -> String;
 
@@ -244,5 +262,77 @@ pub trait Generator: Source {
             "When providing parameters, implement 'process_parameter_update' too!"
         );
         Ok(())
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Allow adding/using boxed `dyn Generator`s as `Source` impls.
+impl Source for Box<dyn Generator> {
+    fn sample_rate(&self) -> u32 {
+        (**self).sample_rate()
+    }
+
+    fn channel_count(&self) -> usize {
+        (**self).channel_count()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        (**self).is_exhausted()
+    }
+
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        (**self).write(output, time)
+    }
+}
+
+/// Allow adding/using boxed `dyn Generator`s as `Generator` impls.
+impl Generator for Box<dyn Generator> {
+    fn into_box(self) -> Box<dyn Generator> {
+        self
+    }
+
+    fn generator_name(&self) -> String {
+        (**self).generator_name()
+    }
+
+    fn playback_id(&self) -> PlaybackId {
+        (**self).playback_id()
+    }
+
+    fn playback_options(&self) -> &GeneratorPlaybackOptions {
+        (**self).playback_options()
+    }
+
+    fn playback_message_queue(&self) -> Arc<ArrayQueue<GeneratorPlaybackMessage>> {
+        (**self).playback_message_queue()
+    }
+
+    fn playback_status_sender(&self) -> Option<SyncSender<PlaybackStatusEvent>> {
+        (**self).playback_status_sender()
+    }
+
+    fn set_playback_status_sender(&mut self, sender: Option<SyncSender<PlaybackStatusEvent>>) {
+        (**self).set_playback_status_sender(sender)
+    }
+
+    fn is_transient(&self) -> bool {
+        (**self).is_transient()
+    }
+
+    fn set_is_transient(&mut self, is_transient: bool) {
+        (**self).set_is_transient(is_transient)
+    }
+
+    fn parameters(&self) -> Vec<&dyn Parameter> {
+        (**self).parameters()
+    }
+
+    fn process_parameter_update(
+        &mut self,
+        id: FourCC,
+        value: &ParameterValueUpdate,
+    ) -> Result<(), Error> {
+        (**self).process_parameter_update(id, value)
     }
 }

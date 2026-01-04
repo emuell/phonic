@@ -137,7 +137,7 @@ impl App {
         let playback_beat_counter = 0;
 
         // add fundsp synth generator
-        let synth_handle = player.play_generator_source(
+        let synth_handle = player.play_generator(
             FunDspGenerator::new(
                 "organ_synth",
                 organ_synth::voice_factory,

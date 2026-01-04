@@ -71,6 +71,16 @@ impl Default for SourceTime {
 ///
 /// NB: `write` is called in realtime audio threads, so it must not block!
 pub trait Source: Send + Sync + 'static {
+    /// Convert the Source impl into a boxed `dyn Source`.
+    ///
+    /// Avoids double boxing when a generator impl already is a `Box<dyn Source>`.
+    fn into_box(self) -> Box<dyn Source>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+
     /// The source's output sample rate.
     fn sample_rate(&self) -> u32;
     /// The source's output channel count.
@@ -93,4 +103,29 @@ pub trait Source: Send + Sync + 'static {
 pub(crate) fn unique_source_id() -> usize {
     static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
     ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Allow adding/using boxed `dyn Source`s as `Source` impls.
+impl Source for Box<dyn Source> {
+    fn into_box(self) -> Box<dyn Source> {
+        self
+    }
+
+    fn sample_rate(&self) -> u32 {
+        (**self).sample_rate()
+    }
+
+    fn channel_count(&self) -> usize {
+        (**self).channel_count()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        (**self).is_exhausted()
+    }
+
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        (**self).write(output, time)
+    }
 }

@@ -34,7 +34,7 @@ fn main() -> Result<(), Error> {
     player.stop();
 
     // Create metronome sampler
-    let metronome = player.play_generator_source(
+    let metronome = player.play_generator(
         Sampler::from_file(
             "assets/cowbell.wav",
             None,
@@ -46,7 +46,7 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Create bass sampler
-    let bass = player.play_generator_source(
+    let bass = player.play_generator(
         Sampler::from_file(
             "assets/bass.wav",
             Some(AhdsrParameters::new(

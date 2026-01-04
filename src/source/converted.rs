@@ -21,28 +21,26 @@ impl ConvertedSource {
     where
         InputSource: Source + Sized,
     {
-        if source.sample_rate() != sample_rate {
-            let resampled = ResampledSource::new(source, sample_rate, resample_quality);
-            if resampled.channel_count() != channel_count {
+        let converted = match (
+            source.sample_rate() != sample_rate,
+            source.channel_count() != channel_count,
+        ) {
+            (true, true) => {
+                let resampled = ResampledSource::new(source, sample_rate, resample_quality);
                 let mapped = ChannelMappedSource::new(resampled, channel_count);
-                Self {
-                    converted: Box::new(mapped),
-                }
-            } else {
-                Self {
-                    converted: Box::new(resampled),
-                }
+                mapped.into_box()
             }
-        } else if source.channel_count() != channel_count {
-            let mapped = ChannelMappedSource::new(source, channel_count);
-            Self {
-                converted: Box::new(mapped),
+            (false, true) => {
+                let mapped = ChannelMappedSource::new(source, channel_count);
+                mapped.into_box()
             }
-        } else {
-            Self {
-                converted: Box::new(source),
+            (true, false) => {
+                let resampled = ResampledSource::new(source, sample_rate, resample_quality);
+                resampled.into_box()
             }
-        }
+            (false, false) => source.into_box(),
+        };
+        Self { converted }
     }
 }
 

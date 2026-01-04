@@ -189,7 +189,7 @@ pub mod generators {
     //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
     pub use super::generator::{
-        r#dyn::DynGenerator, sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
     };
 
     #[cfg(feature = "fundsp")]
@@ -216,7 +216,6 @@ pub mod effects {
         eq5::Eq5Effect,
         filter::{FilterEffect, FilterEffectType},
         gain::GainEffect,
-        r#dyn::DynEffect,
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }

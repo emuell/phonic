@@ -100,7 +100,7 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Create FunDSP synth generator with FM synthesis
-    let synth_generator = player.play_generator_source(
+    let synth_generator = player.play_generator(
         FunDspGenerator::with_parameters(
             "fm_synth",
             fm3_synth::parameters(),
@@ -115,7 +115,7 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Create sampler generator for sample-based playback
-    let sampler_generator = player.play_generator_source(
+    let sampler_generator = player.play_generator(
         Sampler::from_file(
             "assets/pad-ambient.wav",
             Some(AhdsrParameters::new(
