@@ -533,25 +533,27 @@ impl Player {
     /// Remove a generator which was added via [Self::add_generator].
     /// This will not stop all playing sounds in the generator, but simply remove it.
     pub fn remove_generator(&self, playback_id: PlaybackId) -> Result<(), Error> {
-        if let Some(playing_source) = self.playing_sources.get(&playback_id) {
-            debug_assert!(
-                !playing_source.is_transient,
-                "Expected a non transient generator here, which was added via 'add_generator'"
-            );
-            let parent_mixer_event_queue = self.mixer_event_queue(playing_source.mixer_id)?;
-            // Send the remove message to parent
-            if parent_mixer_event_queue
-                .push(MixerMessage::RemoveSource { playback_id })
-                .is_err()
-            {
-                Err(Self::mixer_event_queue_error("remove_generator"))
-            } else {
-                self.playing_sources.remove(&playback_id);
-                Ok(())
+        // remove from mixer
+        match self.playing_sources.get(&playback_id) {
+            Some(playing_source) => {
+                debug_assert!(
+                    !playing_source.is_transient,
+                    "Expected a non transient generator here, which was added via 'add_generator'"
+                );
+                // Send the remove message to parent
+                if self
+                    .mixer_event_queue(playing_source.mixer_id)?
+                    .push(MixerMessage::RemoveSource { playback_id })
+                    .is_err()
+                {
+                    return Err(Self::mixer_event_queue_error("remove_generator"));
+                }
             }
-        } else {
-            Err(Error::GeneratorNotFoundError(playback_id))
+            None => return Err(Error::GeneratorNotFoundError(playback_id)),
         }
+        // remove from playing sources (outside of the `playing_sources.get` dashmap lock!)
+        self.playing_sources.remove(&playback_id);
+        Ok(())
     }
 
     /// Add a new mixer to an existing mixer.
