@@ -243,7 +243,7 @@ impl AhdsrParameters {
         if time_secs == 0.0 {
             self.release_rate = f32::MAX;
         } else {
-            self.release_rate = self.sustain_level / (time_secs * self.sample_rate as f32);
+            self.release_rate = 1.0 / (time_secs * self.sample_rate as f32);
         }
         Ok(())
     }
@@ -423,7 +423,11 @@ impl AhdsrEnvelope {
         if parameters.release_time > Duration::ZERO {
             self.target_volume = 0.0;
             self.release_output = self.output;
-            self.stage = AhdsrStage::Release;
+            if self.release_output > f32::EPSILON {
+                self.stage = AhdsrStage::Release;
+            } else {
+                self.stage = AhdsrStage::Idle;
+            }
         } else {
             self.output = 0.0;
             self.release_output = 0.0;
@@ -499,8 +503,7 @@ impl AhdsrEnvelope {
 
             AhdsrStage::Release => {
                 // Apply release level dynamically based on output at note_off time
-                self.output -=
-                    self.release_output / parameters.sustain_level * parameters.release_rate;
+                self.output -= self.release_output * parameters.release_rate;
                 if self.output <= Self::SILENCE {
                     self.output = 0.0;
                     self.stage = AhdsrStage::Idle;
