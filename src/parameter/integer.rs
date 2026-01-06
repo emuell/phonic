@@ -146,9 +146,15 @@ impl IntegerParameter {
 
     /// Convert the given string to a plain value, using a custom conversion function if provided.
     pub fn string_to_value(&self, string: &str) -> Option<i32> {
+        let string = string.trim();
         let value = match &self.string_to_value {
-            Some(f) => f(string.trim()),
-            None => string.trim().trim_end_matches(self.unit).parse().ok(),
+            Some(f) => f(string),
+            None => string
+                .to_lowercase()
+                .trim_end_matches(self.unit.to_lowercase().as_str())
+                .trim_end()
+                .parse()
+                .ok(),
         }?;
         Some(self.clamp_value(value))
     }
