@@ -477,7 +477,7 @@ impl Source for PreloadedFileSource {
         }
 
         // send Position start event, if needed
-        if !self.file_source.playback_started {
+        if self.file_source.playback_started {
             self.file_source.playback_started = false;
             let is_start_event = true;
             self.file_source.send_playback_position_status(
