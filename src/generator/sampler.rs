@@ -18,8 +18,8 @@ use crate::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
     },
-    Error, FilePlaybackOptions, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId,
-    PlaybackStatusContext, PlaybackStatusEvent,
+    Error, FilePlaybackOptions, FileSource, Generator, GeneratorPlaybackOptions, NotePlaybackId,
+    PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -118,7 +118,6 @@ impl Sampler {
 
         Self::from_file_source(
             file_source,
-            file_path,
             envelope_parameters,
             options,
             output_channel_count,
@@ -146,7 +145,6 @@ impl Sampler {
 
         Self::from_file_source(
             file_source,
-            file_path,
             envelope_parameters,
             options,
             output_channel_count,
@@ -154,16 +152,17 @@ impl Sampler {
         )
     }
 
-    fn from_file_source<P: AsRef<Path>>(
+    /// Create a new sampler with the given preloaded file source.
+    /// See [Self::from_file] for more info about the parameters.
+    pub fn from_file_source(
         file_source: PreloadedFileSource,
-        file_path: P,
         envelope_parameters: Option<AhdsrParameters>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
         // Memorize file path
-        let file_path = Arc::new(file_path.as_ref().to_string_lossy().to_string());
+        let file_path = Arc::new(file_source.file_name());
 
         // Pre-allocate playback message queue
         const PLAYBACK_MESSAGE_QUEUE_SIZE: usize = 10 + 16;
