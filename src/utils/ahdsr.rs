@@ -599,6 +599,7 @@ mod tests {
     #[test]
     fn test_note_on_triggers_attack() -> Result<(), Box<Error>> {
         let mut parameters = AhdsrParameters::default();
+        parameters.set_sample_rate(44100)?;
         parameters.setup(
             Duration::from_millis(100),
             Duration::ZERO,
@@ -615,6 +616,7 @@ mod tests {
     #[test]
     fn test_note_off_triggers_release() -> Result<(), Box<Error>> {
         let mut parameters = AhdsrParameters::default();
+        parameters.set_sample_rate(44100)?;
         parameters.setup(
             Duration::from_millis(100),
             Duration::ZERO,
@@ -624,6 +626,7 @@ mod tests {
         )?;
         let mut env = AhdsrEnvelope::new();
         env.note_on(&parameters, 1.0);
+        let _ = env.process(&parameters);
         env.note_off(&parameters);
         assert_eq!(env.stage(), AhdsrStage::Release);
         Ok(())
