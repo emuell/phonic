@@ -42,7 +42,7 @@ impl SharedParameterValue {
             );
             scaling = ParameterScaling::Linear;
         } else if let Some(enum_param) = description_any.downcast_ref::<EnumParameter>() {
-            range = RangeInclusive::new(0.0, enum_param.values().len() as f32);
+            range = RangeInclusive::new(0.0, (enum_param.values().len() - 1) as f32);
             scaling = ParameterScaling::Linear;
         } else if description_any.downcast_ref::<BooleanParameter>().is_some() {
             range = RangeInclusive::new(0.0, 1.0);
