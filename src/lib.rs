@@ -85,9 +85,12 @@
 //!     // Create a sampler generator to play a sample.
 //!     // We configure it to play on the sub-mixer.
 //!     let generator = player.play_generator(
-//!         Sampler::new(
+//!         Sampler::from_file(
 //!             "path/to/instrument_sample.wav",
-//!             GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id())
+//!             None,
+//!             GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id()),
+//!             player.output_channel_count(),
+//!             player.output_sample_rate(),
 //!         )?,
 //!         None
 //!      )?;

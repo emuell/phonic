@@ -293,7 +293,12 @@ impl Sampler {
                             }
                             GeneratorPlaybackEvent::SetParameter { id, value } => {
                                 if let Err(err) = self.process_parameter_update(id, &value) {
-                                    log::warn!("Failed to update sampler parameter {id:?}: {err}");
+                                    log::warn!("Failed to process parameter '{id}' update: {err}");
+                                }
+                            }
+                            GeneratorPlaybackEvent::SetParameters { values } => {
+                                if let Err(err) = self.process_parameter_updates(&values) {
+                                    log::warn!("Failed to process parameter updates: {err}");
                                 }
                             }
                         }

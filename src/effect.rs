@@ -166,6 +166,24 @@ pub trait Effect: Send + Sync + 'static {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error>;
 
+    /// Handles multiple parameter updates in a batch in the real-time thread.
+    ///
+    /// See [Self::process_parameter_update] for more info about parameter changes.
+    ///
+    /// The default impl applies all parameter changes individially, but some effects may override
+    /// this to apply multiple changes more efficiently.
+    ///
+    /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
+    fn process_parameter_updates(
+        &mut self,
+        values: &[(FourCC, ParameterValueUpdate)],
+    ) -> Result<(), Error> {
+        for (id, value) in values {
+            self.process_parameter_update(*id, value)?;
+        }
+        Ok(())
+    }
+
     /// Handles optional effect specific messages in the real-time thread. This can be used to pass
     /// payloads to the effects, which can or should not be expressed as a trivial parameter change.
     ///

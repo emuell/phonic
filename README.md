@@ -144,7 +144,7 @@ use std::time::Duration;
 
 use phonic::{
     DefaultOutputDevice, Player, Error, FilePlaybackOptions,
-    effects::{ChorusEffect, ReverbEffect},
+    effects::{ChorusEffect, ReverbEffect}, ParameterValueUpdate, FourCC,
     generators::Sampler, GeneratorPlaybackOptions,
 };
 
@@ -164,9 +164,9 @@ fn main() -> Result<(), Error> {
 
     // Effect parameters can be automated via the returned handles.
     // The `None` arguments are optional sample times to schedule events.
-    reverb.set_parameter(ReverbEffect::ROOM_SIZE.value_update(0.9f32), None)?;
-    // Or if no parameter description is available, send the change as normalized value. 
-    chorus.set_parameter_normalized(ChorusEffect::RATE.id(), 0.5f32, None)?;
+    reverb.set_parameter(ReverbEffect::ROOM_SIZE.value_update(0.9), None)?;
+    // Or if no parameter description is available (e.g. in UIs), send a normalized value. 
+    chorus.set_parameter((FourCC(*b"rate"), ParameterValueUpdate::Normalized(0.5)), None)?;
 
     // Play a file through the main mixer (which has reverb only).
     let some_file = player.play_file(
@@ -182,10 +182,13 @@ fn main() -> Result<(), Error> {
     // Create a sampler generator to play a sample.
     // We configure it to play on the chorus mixer.
     let generator = player.play_generator(
-        Sampler::new(
-            "PATH_TO/instrument_sample.wav",
-            GeneratorPlaybackOptions::default().target_mixer(chorus_mixer.id())
-        )?, 
+        Sampler::from_file(
+            "path/to/some_sample.wav",
+            None,
+            GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id())
+            player.output_channel_count(),
+            player.output_sample_rate(),
+        )?,
         None
     )?;
     

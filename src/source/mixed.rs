@@ -85,6 +85,11 @@ pub(crate) enum MixerEvent {
         value: Owned<ParameterValueUpdate>,
         sample_time: u64,
     },
+    ProcessEffectParameterUpdates {
+        effect_id: EffectId,
+        values: Owned<Vec<(FourCC, ParameterValueUpdate)>>,
+        sample_time: u64,
+    },
 }
 
 impl Event for MixerEvent {
@@ -97,6 +102,7 @@ impl Event for MixerEvent {
             Self::TriggerGeneratorEvent { sample_time, .. } => *sample_time,
             Self::ProcessEffectMessage { sample_time, .. } => *sample_time,
             Self::ProcessEffectParameterUpdate { sample_time, .. } => *sample_time,
+            Self::ProcessEffectParameterUpdates { sample_time, .. } => *sample_time,
         }
     }
 }
@@ -178,6 +184,11 @@ pub(crate) enum MixerMessage {
         effect_id: EffectId,
         parameter_id: FourCC,
         value: Owned<ParameterValueUpdate>,
+        sample_time: u64,
+    },
+    ProcessEffectParameterUpdates {
+        effect_id: EffectId,
+        values: Owned<Vec<(FourCC, ParameterValueUpdate)>>,
         sample_time: u64,
     },
 }
@@ -441,6 +452,17 @@ impl MixedSource {
                         effect_id,
                         parameter_id,
                         value,
+                        sample_time,
+                    });
+                }
+                MixerMessage::ProcessEffectParameterUpdates {
+                    effect_id,
+                    values,
+                    sample_time,
+                } => {
+                    self.insert_event(MixerEvent::ProcessEffectParameterUpdates {
+                        effect_id,
+                        values,
                         sample_time,
                     });
                 }
@@ -776,6 +798,23 @@ impl EventProcessor for MixedSource {
                 } else {
                     log::warn!(
                         "Effect with id {effect_id} not found for scheduled parameter update"
+                    );
+                }
+            }
+            MixerEvent::ProcessEffectParameterUpdates {
+                effect_id,
+                values,
+                sample_time: _,
+            } => {
+                if let Some((_, mixer_effect)) =
+                    self.effects.iter_mut().find(|(id, _)| *id == effect_id)
+                {
+                    if let Err(err) = mixer_effect.effect.process_parameter_updates(&values) {
+                        log::error!("Failed to update parameters on effect {effect_id}: {err}",);
+                    }
+                } else {
+                    log::warn!(
+                        "Effect with id {effect_id} not found for scheduled parameter updates"
                     );
                 }
             }

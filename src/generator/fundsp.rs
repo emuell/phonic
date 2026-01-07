@@ -460,7 +460,12 @@ impl FunDspGenerator {
                             }
                             GeneratorPlaybackEvent::SetParameter { id, value } => {
                                 if let Err(err) = self.process_parameter_update(id, &value) {
-                                    log::warn!("Failed to process parameter update: {err}");
+                                    log::warn!("Failed to process parameter '{id}' update: {err}");
+                                }
+                            }
+                            GeneratorPlaybackEvent::SetParameters { values } => {
+                                if let Err(err) = self.process_parameter_updates(&values) {
+                                    log::warn!("Failed to process parameter updates: {err}");
                                 }
                             }
                         }

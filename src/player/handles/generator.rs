@@ -337,34 +337,40 @@ impl GeneratorPlaybackHandle {
         (parameter_id, update): (FourCC, ParameterValueUpdate),
         sample_time: T,
     ) -> Result<(), Error> {
+        if let ParameterValueUpdate::Normalized(normalized_value) = update {
+            if !(0.0..=1.0).contains(&normalized_value) {
+                return Err(Error::ParameterError(format!(
+                    "Invalid parameter update: value should be a normalized value, but is: '{normalized_value}'"
+                )));
+            }
+        }
         let sample_time = sample_time.into();
+        let id = parameter_id;
+        let value = Owned::new(&self.collector_handle, update);
         self.send_generator_event(
             sample_time,
-            GeneratorPlaybackEvent::SetParameter {
-                id: parameter_id,
-                value: Owned::new(&self.collector_handle, update),
-            },
+            GeneratorPlaybackEvent::SetParameter { id, value },
             "set_parameter",
         )
     }
 
-    /// Set a normalized parameter value at a specific sample time or immediately.
+    /// Set multiple parameter values via the given raw or normalized value update definition
+    /// at a specific sample time or immediately.
     ///
-    /// The `value` must be in the range `0.0..=1.0`.
-    pub fn set_parameter_normalized<T: Into<Option<u64>>>(
+    /// Note: Value update (id, value) tuples can be created safely via `value_update` functions
+    /// in [FloatParameter](crate::parameters::FloatParameter), [IntegerParameter](crate::parameters::IntegerParameter),
+    /// [EnumParameter](crate::parameters::EnumParameter) and [BooleanParameter](crate::parameters::BooleanParameter).
+    pub fn set_parameters<T: Into<Option<u64>>>(
         &self,
-        parameter_id: FourCC,
-        value: f32,
+        values: Vec<(FourCC, ParameterValueUpdate)>,
         sample_time: T,
     ) -> Result<(), Error> {
-        if !(0.0..=1.0).contains(&value) {
-            return Err(Error::ParameterError(format!(
-                "Invalid parameter update: value should be normalized, but is: '{value}'"
-            )));
-        }
-        self.set_parameter(
-            (parameter_id, ParameterValueUpdate::Normalized(value)),
+        let sample_time = sample_time.into();
+        let values = Owned::new(&self.collector_handle, values);
+        self.send_generator_event(
             sample_time,
+            GeneratorPlaybackEvent::SetParameters { values },
+            "set_parameters",
         )
     }
 

@@ -168,11 +168,14 @@ pub enum GeneratorPlaybackEvent {
         note_id: NotePlaybackId,
         panning: f32,
     },
-
-    /// Update a generator automation parameter.
+    /// Update a single generator automation parameter.
     SetParameter {
         id: FourCC,
         value: Owned<ParameterValueUpdate>,
+    },
+    /// Update multiple generator automation parameters.
+    SetParameters {
+        values: Owned<Vec<(FourCC, ParameterValueUpdate)>>,
     },
 }
 
@@ -263,6 +266,20 @@ pub trait Generator: Source {
         );
         Ok(())
     }
+
+    /// Process multiple parameter updates in a batch in the audio thread.
+    ///
+    /// The default impl applies all parameter changes individially, but some generators
+    /// may override this to apply multiple changes more efficiently.
+    fn process_parameter_updates(
+        &mut self,
+        values: &[(FourCC, ParameterValueUpdate)],
+    ) -> Result<(), Error> {
+        for (id, value) in values {
+            self.process_parameter_update(*id, value)?
+        }
+        Ok(())
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -334,5 +351,11 @@ impl Generator for Box<dyn Generator> {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         (**self).process_parameter_update(id, value)
+    }
+    fn process_parameter_updates(
+        &mut self,
+        values: &[(FourCC, ParameterValueUpdate)],
+    ) -> Result<(), Error> {
+        (**self).process_parameter_updates(values)
     }
 }
