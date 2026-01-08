@@ -1,5 +1,5 @@
 //! Substractive synth with 3 main and one sub oscillator, insprired by Novation's Bass Station.
-//! To be wrapped into a [`FunDspGenerator`]
+//! To be wrapped into a [`FunDspGenerator`].
 //!
 //! - 4 oscillators (OSC 1, OSC 2, Sub OSC + Noise).
 //! - Ring Modulation (OSC 1*2).
@@ -7,17 +7,12 @@
 //! - Moog Ladder filter with Drive and Key Tracking.
 //! - 2 LFOs and 2 AHDSR Envelopes (Modulation & Amplitude).
 
-use std::sync::Arc;
-
 use phonic::{
     four_cc::FourCC,
-    fundsp::{
-        hacker32::*,
-        wavetable::{saw_table, triangle_table, Wavetable},
-    },
-    generators::shared_ahdsr,
+    fundsp::prelude32::*,
     parameters::{EnumParameter, FloatParameter, IntegerParameter},
-    Error, GeneratorPlaybackHandle, Parameter, ParameterScaling,
+    utils::fundsp::{fast_sine, multi_osc, shared_ahdsr},
+    Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -237,8 +232,129 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
 }
 
 #[allow(unused)]
-pub fn randomize(_generator: &GeneratorPlaybackHandle) -> Result<(), Error> {
-    Ok(())
+pub fn randomize() -> Vec<(FourCC, f32)> {
+    let mut updates = Vec::new();
+    for param in parameters() {
+        let id = param.id();
+        let value = if id == O1_RANGE.id() || id == O2_RANGE.id() {
+            // 0=16', 1=8', 2=4', 3=2'
+            // Weighted towards 8' (1) and 4' (2)
+            let r = rand::random_range(0.0..1.0);
+            let idx = if r < 0.1 {
+                0
+            } else if r < 0.5 {
+                1
+            } else if r < 0.9 {
+                2
+            } else {
+                3
+            };
+            idx as f32 / 3.0
+        } else if id == O1_WAVE.id() || id == O2_WAVE.id() {
+            // 0=Sine, 1=Tri, 2=Saw, 3=Pulse
+            let idx = rand::random_range(0..4);
+            idx as f32 / 3.0
+        } else if id == SUB_WAVE.id() {
+            // 0=Sine, 1=Pulse, 2=Square
+            let idx = rand::random_range(0..3);
+            idx as f32 / 2.0
+        } else if id == SUB_OCTAVE.id() {
+            // -2 or -1
+            if rand::random_range(0.0..1.0) < 0.5 {
+                0.0
+            } else {
+                1.0
+            }
+        } else if id == O1_COARSE.id() || id == O2_COARSE.id() {
+            // Mostly 0, sometimes -12, +12, +7
+            let r = rand::random_range(0.0..1.0);
+            let val = if r < 0.7 {
+                0
+            } else if r < 0.85 {
+                -12
+            } else if r < 0.95 {
+                12
+            } else {
+                7
+            };
+            O1_COARSE.normalize_value(val)
+        } else if id == O1_FINE.id() || id == O2_FINE.id() {
+            // Slight detune
+            let val = rand::random_range(-10.0..10.0);
+            O1_FINE.normalize_value(val)
+        } else if id == O1_PW.id() || id == O2_PW.id() {
+            let val = rand::random_range(30.0..70.0);
+            O1_PW.normalize_value(val)
+        } else if id == O1_LEVEL.id() {
+            rand::random_range(0.8..1.0)
+        } else if id == O2_LEVEL.id() {
+            rand::random_range(0.4..1.0)
+        } else if id == SUB_LEVEL.id() {
+            rand::random_range(0.0..0.6)
+        } else if id == NOISE_LEVEL.id() {
+            if rand::random_range(0.0..1.0) < 0.2 {
+                rand::random_range(0.0..0.3)
+            } else {
+                0.0
+            }
+        } else if (id == O1_LFO1_DEPTH.id() || id == O2_LFO1_DEPTH.id()) {
+            if rand::random_range(0.0..1.0) < 0.2 {
+                rand::random_range(0.0..1.0)
+            } else {
+                0.5
+            }
+        } else if (id == O1_MENV_DEPTH.id() || id == O2_MENV_DEPTH.id()) {
+            if rand::random_range(0.0..1.0) < 0.3 {
+                rand::random_range(0.0..1.0)
+            } else {
+                0.5
+            }
+        } else if id == RING_LEVEL.id() {
+            if rand::random_range(0.0..1.0) < 0.2 {
+                rand::random_range(0.0..0.5)
+            } else {
+                0.0
+            }
+        } else if id == FILTER_FREQ.id() {
+            rand::random_range(0.2..1.0)
+        } else if id == FILTER_RES.id() {
+            rand::random_range(0.0..0.7)
+        } else if id == FILTER_DRIVE.id() {
+            rand::random_range(0.0..0.5)
+        } else if id == FILTER_TRACK.id() {
+            if rand::random_range(0.0..1.0) < 0.7 {
+                0.0
+            } else {
+                rand::random_range(0.0..0.5)
+            }
+        } else if (id == FILTER_MENV_DEPTH.id() || id == FILTER_LFO2_DEPTH.id()) {
+            if rand::random_range(0.0..1.0) < 0.5 {
+                0.5
+            } else {
+                rand::random_range(0.0..0.5)
+            }
+        } else if id == AENV_ATTACK.id() {
+            if rand::random_range(0.0..1.0) < 0.5 {
+                0.0
+            } else {
+                let val = rand::random_range(0.001..0.5);
+                AENV_ATTACK.normalize_value(val)
+            }
+        } else if id == MENV_ATTACK.id() {
+            let val = rand::random_range(0.001..0.5);
+            MENV_ATTACK.normalize_value(val)
+        } else if id == AENV_SUSTAIN.id() {
+            rand::random_range(0.5..1.0)
+        } else if id == AENV_RELEASE.id() {
+            let val = rand::random_range(0.1..1.0);
+            AENV_RELEASE.normalize_value(val)
+        } else {
+            rand::random_range(0.0..1.0)
+        };
+
+        updates.push((id, value));
+    }
+    updates
 }
 
 pub fn voice_factory(
@@ -251,9 +367,9 @@ pub fn voice_factory(
     // --- Modulation Sources ---
 
     // LFO 1
-    let lfo1 = var(&parameter(LFO1_SPEED.id())) >> sine();
+    let lfo1 = var(&parameter(LFO1_SPEED.id())) >> fast_sine();
     // LFO 2
-    let lfo2 = var(&parameter(LFO2_SPEED.id())) >> sine();
+    let lfo2 = var(&parameter(LFO2_SPEED.id())) >> fast_sine();
 
     // Mod Env
     let mod_env = shared_ahdsr(
@@ -289,7 +405,7 @@ pub fn voice_factory(
     // 0=Sine, 1=Tri, 2=Saw, 3=Pulse
     let o1_w_sel = var(&parameter(O1_WAVE.id()));
     let o1_pw = var(&parameter(O1_PW.id())) * 0.01; // 5..95 -> 0.05..0.95
-    let o1_sig = (o1_freq.clone() | o1_pw | o1_w_sel) >> An(MultiOsc::new());
+    let o1_sig = (o1_freq.clone() | o1_pw | o1_w_sel) >> multi_osc();
     let o1_out = o1_sig.clone() * var(&parameter(O1_LEVEL.id()));
 
     // --- Oscillator 2 ---
@@ -308,7 +424,7 @@ pub fn voice_factory(
     // Waveform Generation
     let o2_w_sel = var(&parameter(O2_WAVE.id()));
     let o2_pw = var(&parameter(O2_PW.id())) * 0.01;
-    let o2_sig = (o2_freq.clone() | o2_pw | o2_w_sel) >> An(MultiOsc::new());
+    let o2_sig = (o2_freq.clone() | o2_pw | o2_w_sel) >> multi_osc();
     let o2_out = o2_sig.clone() * var(&parameter(O2_LEVEL.id()));
 
     // --- Sub Oscillator ---
@@ -325,7 +441,7 @@ pub fn voice_factory(
     let sub_sel = sub_w_sel.clone() >> shape_fn(|x| if x.round() == 0.0 { 0.0 } else { 3.0 });
     // PW: 1->0.25, 2->0.50. (0->don't care)
     let sub_pw = sub_w_sel.clone() >> shape_fn(|x| if x.round() == 1.0 { 0.25 } else { 0.50 });
-    let sub_sig = (sub_freq.clone() | sub_pw | sub_sel) >> An(MultiOsc::new());
+    let sub_sig = (sub_freq.clone() | sub_pw | sub_sel) >> multi_osc();
     let sub_out = sub_sig * var(&parameter(SUB_LEVEL.id()));
 
     // --- Noise ---
@@ -397,95 +513,4 @@ pub fn voice_factory(
     let final_mix = ((filtered * amp_env * var(&vol)) | var(&panning)) >> panner();
 
     Box::new(final_mix)
-}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Oscillator that switches between Sine, Triangle, Saw, and Pulse
-/// without calculating all waveforms simultaneously.
-///
-/// Inputs:
-/// 0: Frequency (Hz)
-/// 1: Pulse Width (0.0 - 1.0)
-/// 2: Waveform Selection (0=Sin, 1=Tri, 2=Saw, 3=Pulse)
-#[derive(Clone)]
-struct MultiOsc {
-    saw: Arc<Wavetable>,
-    tri: Arc<Wavetable>,
-    phase: f32,
-    sample_rate: f32,
-    sample_duration: f32,
-    saw_hint: usize,
-    tri_hint: usize,
-}
-
-impl MultiOsc {
-    fn new() -> Self {
-        Self {
-            saw: saw_table(),
-            tri: triangle_table(),
-            phase: 0.0,
-            sample_rate: 44100.0,
-            sample_duration: 1.0 / 44100.0,
-            saw_hint: 0,
-            tri_hint: 0,
-        }
-    }
-}
-
-impl AudioNode for MultiOsc {
-    const ID: u64 = 0x5E1EC7;
-    type Inputs = U3;
-    type Outputs = U1;
-
-    fn reset(&mut self) {
-        self.phase = 0.0;
-        self.saw_hint = 0;
-        self.tri_hint = 0;
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f64) {
-        self.sample_rate = sample_rate as f32;
-        self.sample_duration = 1.0 / self.sample_rate;
-    }
-
-    #[inline]
-    fn tick(&mut self, input: &Frame<f32, Self::Inputs>) -> Frame<f32, Self::Outputs> {
-        let freq = input[0];
-        let pw = input[1];
-        let sel = input[2];
-
-        let delta = freq * self.sample_duration;
-        self.phase += delta;
-        self.phase -= self.phase.floor();
-
-        // Selection: 0=Sin, 1=Tri, 2=Saw, 3=Pulse
-        let sel_i = sel.round() as i32;
-
-        let out = match sel_i {
-            0 => (self.phase * std::f32::consts::TAU).sin(),
-            1 => {
-                let (v, h) = self.tri.read(self.tri_hint, freq.abs(), self.phase);
-                self.tri_hint = h;
-                v
-            }
-            2 => {
-                let (v, h) = self.saw.read(self.saw_hint, freq.abs(), self.phase);
-                self.saw_hint = h;
-                v
-            }
-            3 => {
-                let (v1, h1) = self.saw.read(self.saw_hint, freq.abs(), self.phase);
-
-                let mut p2 = self.phase + pw;
-                p2 -= p2.floor();
-                let (v2, h2) = self.saw.read(h1, freq.abs(), p2);
-
-                self.saw_hint = h2;
-                v1 - v2
-            }
-            _ => 0.0,
-        };
-        [out].into()
-    }
 }

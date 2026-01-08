@@ -16,7 +16,7 @@ use phonic::{
     generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
     Error, FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, NotePlaybackId,
-    ResamplingQuality,
+    ParameterValueUpdate, ResamplingQuality,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -149,7 +149,10 @@ fn main() -> Result<(), Error> {
     // global key state
     let alt_key_pressed = Arc::new(AtomicBool::new(false));
 
-    // print header
+    // print DSP graph
+    println!("Player Graph:\n{}", player);
+
+    // print message
     println!("*** phonic interactive playback example:");
     println!("  Use keys 'A, S, D, F, G, H,J' to play notes 'C, D, E, F, G, A, H'.");
     println!("  Arrow 'up/down' keys change the current octave.");
@@ -161,14 +164,11 @@ fn main() -> Result<(), Error> {
     println!("  Alt + 1,2,3,4 to change filter type (LP,BP,BR,HP).");
     println!("  Alt + R to randomize the FM synths parameters.");
     println!();
-    println!("  NB: this example uses a HighQuality resampler for the loop. ");
-    println!("  In debug builds this may be very slow and may thus cause crackles...");
+    println!("  !! NB: this example uses a HQ resampler and a complex fundsp synth. ");
+    println!("  In debug builds this may be very slow and may thus cause crackles. !!");
     println!();
     println!("  To quit press 'Esc'.");
     println!();
-
-    // Print DSP graph
-    println!("Player Graph:\n{}", player);
 
     // run key event handlers to play, stop and modify sounds interactively
     let event_handler = DeviceEventsHandler::new(Duration::from_millis(10))
@@ -265,7 +265,11 @@ fn main() -> Result<(), Error> {
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
                 }
                 Keycode::R if alt_key => {
-                    fm3_synth::randomize(&synth_generator).unwrap();
+                    let values = fm3_synth::randomize()
+                        .into_iter()
+                        .map(|(id, value)| (id, ParameterValueUpdate::Normalized(value)))
+                        .collect();
+                    synth_generator.set_parameters(values, None).unwrap();
                     println!("Randomized FM synth params");
                 }
                 _ => {

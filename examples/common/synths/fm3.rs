@@ -9,10 +9,10 @@
 
 use phonic::{
     four_cc::FourCC,
-    fundsp::hacker32::*,
-    generators::shared_ahdsr,
+    fundsp::prelude32::*,
     parameters::{EnumParameter, FloatParameter},
-    Error, GeneratorPlaybackHandle, Parameter, ParameterScaling,
+    utils::fundsp::{fast_sine, shared_ahdsr},
+    Parameter, ParameterScaling,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -29,7 +29,7 @@ pub const FREQ_B: FloatParameter =
         .with_scaling(ParameterScaling::Exponential(3.0));
 
 pub const FREQ_C: FloatParameter =
-    FloatParameter::new(FourCC(*b"frqC"), "C Frequency", 20.0..=20000.0, 10000.0)
+    FloatParameter::new(FourCC(*b"frqC"), "C Frequency", 20.0..=20000.0, 440.0)
         .with_unit("Hz")
         .with_scaling(ParameterScaling::Exponential(3.0));
 
@@ -39,11 +39,11 @@ pub const BLEND: FloatParameter =
 
 // Modulation depth parameters
 pub const DEPTH_B_TO_A: FloatParameter =
-    FloatParameter::new(FourCC(*b"dpBA"), "Depth B→A", 0.0..=10.0, 5.0);
+    FloatParameter::new(FourCC(*b"dpBA"), "Depth B→A", 0.0..=10.0, 1.5);
 pub const DEPTH_C_TO_A: FloatParameter =
-    FloatParameter::new(FourCC(*b"dpCA"), "Depth C→A", 0.0..=10.0, 3.0);
+    FloatParameter::new(FourCC(*b"dpCA"), "Depth C→A", 0.0..=10.0, 1.0);
 pub const DEPTH_C_TO_B: FloatParameter =
-    FloatParameter::new(FourCC(*b"dpCB"), "Depth C→B", 0.0..=10.0, 2.0);
+    FloatParameter::new(FourCC(*b"dpCB"), "Depth C→B", 0.0..=10.0, 0.5);
 
 // LFO Parameters
 pub const LFO_FREQ: FloatParameter =
@@ -200,11 +200,59 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
 
 /// Randomize all parameters.
 #[allow(unused)]
-pub fn randomize(generator: &GeneratorPlaybackHandle) -> Result<(), Error> {
-    for param in parameters().iter().filter(|p| p.id() != FREQ_A.id()) {
-        generator.set_parameter_normalized(param.id(), rand::random_range(0.0..=1.0), None)?;
+pub fn randomize() -> Vec<(FourCC, f32)> {
+    let mut updates = Vec::new();
+    // Pre-select filter type: 0=Lowpass, 1=Highpass, 2=Bandpass
+    let filter_type_idx = rand::random_range(0..3);
+
+    for param in parameters() {
+        let id = param.id();
+        let value = if id == FREQ_A.id() {
+            FREQ_A.normalize_value(FREQ_A.default_value())
+        } else if id == FREQ_B.id() {
+            let ratios = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0];
+            let ratio = ratios[rand::random_range(0..ratios.len())];
+            let detune = rand::random_range(0.99..=1.01);
+            FREQ_B.normalize_value(440.0 * ratio * detune)
+        } else if id == FREQ_C.id() {
+            let ratios = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0];
+            let ratio = ratios[rand::random_range(0..ratios.len())];
+            let detune = rand::random_range(0.99..=1.01);
+            FREQ_C.normalize_value(440.0 * ratio * detune)
+        } else if id == MOD_LFO_PITCH.id() {
+            if rand::random_range(0.0..1.0) < 0.2 {
+                rand::random_range(0.0..=1.0)
+            } else {
+                0.0
+            }
+        } else if id == ATTACK_A.id() {
+            if rand::random_range(0.0..1.0) < 0.5 {
+                0.0
+            } else {
+                rand::random_range(0.0..=1.0)
+            }
+        } else if id == DEPTH_B_TO_A.id() || id == DEPTH_C_TO_A.id() || id == DEPTH_C_TO_B.id() {
+            // Limit FM depth to 40% (0.0 to 4.0) to avoid extreme aliasing
+            rand::random_range(0.0..=0.4)
+        } else if id == MOD_ENV_DEPTH_BA.id() {
+            // Limit Env->Depth modulation to +/- 0.5 (normalized 0.25 to 0.75)
+            rand::random_range(0.25..=0.75)
+        } else if id == FILTER_TYPE.id() {
+            FILTER_TYPE.normalize_value(FILTER_TYPE.values()[filter_type_idx])
+        } else if id == FILTER_CUTOFF.id() {
+            // Set cutoff based on selected filter type
+            match filter_type_idx {
+                0 => rand::random_range(0.5..=1.0),
+                1 => rand::random_range(0.0..=0.5),
+                _ => rand::random_range(0.15..=0.35),
+            }
+        } else {
+            rand::random_range(0.0..=1.0)
+        };
+
+        updates.push((id, value));
     }
-    Ok(())
+    updates
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -221,7 +269,7 @@ pub fn voice_factory(
 
     // LFO
     let lfo_freq = var(&parameter(LFO_FREQ.id()));
-    let lfo = lfo_freq >> sine();
+    let lfo = lfo_freq >> fast_sine();
 
     // Aux Envelope
     let aux_env = shared_ahdsr(

@@ -58,8 +58,6 @@ pub enum ParameterType {
 ///
 /// Note that parameter descriptions don't hold the actual parameter values, just the default values.
 /// The effect or generator processor owns the actual value.
-///
-/// Parameters can be cloned into `Box<dyn Parameter>` via  `dyn_clone::clone_box(parameter)`
 pub trait Parameter: Debug + Send + Sync + Any {
     /// The unique id of the parameter.
     fn id(&self) -> FourCC;

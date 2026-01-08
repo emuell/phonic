@@ -1,7 +1,15 @@
 //! FunDSP AudioNode wrapper for the AHDSR envelope.
 
-use fundsp::hacker32::*;
 use std::time::Duration;
+
+use fundsp::{
+    audionode::AudioNode,
+    buffer::{BufferMut, BufferRef},
+    prelude::An,
+    shared::Shared,
+    typenum::{U0, U1},
+    Frame,
+};
 
 use crate::utils::ahdsr::{AhdsrEnvelope, AhdsrParameters};
 
@@ -156,7 +164,7 @@ impl AudioNode for SharedAhdsrNode {
 ///
 /// # Example
 /// ```rust
-/// use phonic::{fundsp::hacker32::*, generators::shared_ahdsr};
+/// use phonic::{fundsp::prelude32::*, utils::fundsp::shared_ahdsr};
 ///
 /// let gate = shared(0.0);
 /// let attack = shared(0.01);
@@ -184,6 +192,8 @@ pub fn shared_ahdsr(
 
 #[cfg(test)]
 mod tests {
+    use fundsp::prelude32::shared;
+
     use super::*;
 
     #[test]

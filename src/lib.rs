@@ -211,7 +211,7 @@ pub mod generators {
     };
 
     #[cfg(feature = "fundsp")]
-    pub use super::generator::fundsp::{shared_ahdsr, FunDspGenerator, SharedAhdsrNode};
+    pub use super::generator::fundsp::FunDspGenerator;
 }
 
 pub mod parameters {

@@ -20,11 +20,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-mod ahdsr;
 mod parameter;
 mod voice;
-
-pub use ahdsr::{shared_ahdsr, SharedAhdsrNode};
 
 use parameter::SharedParameterValue;
 use voice::FunDspVoice;
@@ -40,7 +37,7 @@ use voice::FunDspVoice;
 /// # Example
 /// ```rust
 /// use phonic::{GeneratorPlaybackOptions, generators::FunDspGenerator};
-/// use phonic::fundsp::hacker32::*;
+/// use phonic::fundsp::prelude32::*;
 ///
 /// // Simple fundsp generator without additional parameters
 /// let generator = FunDspGenerator::new(

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossbeam_queue::ArrayQueue;
-use fundsp::hacker32::*;
+use fundsp::prelude32::*;
 
 use super::{
     common::{SynthSourceGenerator, SynthSourceImpl},
@@ -248,7 +248,7 @@ impl Player {
     ///
     /// Example one-shot sound:
     /// ```rust, no_run
-    /// use phonic::fundsp::hacker32::*;
+    /// use phonic::fundsp::prelude32::*;
     ///
     /// // Create a 2-second sine wave at 440 Hz
     /// let duration = 2.0;

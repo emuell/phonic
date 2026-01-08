@@ -5,7 +5,7 @@ use crate::{
     Parameter, ParameterScaling, ParameterValueUpdate,
 };
 
-use fundsp::hacker32::Shared;
+use fundsp::shared::Shared;
 
 // -------------------------------------------------------------------------------------------------
 

@@ -10,6 +10,8 @@ pub(crate) mod time;
 
 pub mod ahdsr;
 pub mod buffer;
+#[cfg(feature = "fundsp")]
+pub mod fundsp;
 pub mod smoothing;
 pub mod waveform;
 

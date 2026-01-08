@@ -2,8 +2,6 @@
 
 use std::{sync::mpsc::sync_channel, time::Duration};
 
-use fundsp::hacker32::*;
-
 use phonic::{Error, PlaybackStatusEvent, SynthPlaybackHandle, SynthPlaybackOptions};
 
 // -------------------------------------------------------------------------------------------------
@@ -35,6 +33,8 @@ fn main() -> Result<(), Error> {
 
     // Creates a mono FunDSP synth node for a chord note
     let generate_chord_note = |pitch: f32, amplitude: f32, duration_secs: f32| {
+        use fundsp::prelude32::*;
+
         let freq = shared(pitch);
         let amp = shared(amplitude);
         // Duration envelope with smooth fade-out
@@ -63,6 +63,8 @@ fn main() -> Result<(), Error> {
 
     // Creates a stereo FM synth signal with FunDSP
     let generate_synth_note = |pitch: f32, amplitude: f32, duration_secs: f32| {
+        use fundsp::prelude32::*;
+
         let freq = shared(pitch);
         let amp = shared(amplitude);
         // Duration envelope with smooth exponential fade-out after duration
