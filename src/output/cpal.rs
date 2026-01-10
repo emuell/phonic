@@ -216,7 +216,10 @@ impl OutputDevice for CpalOutput {
     }
 
     fn stop(&mut self) {
-        self.send_to_callback(CallbackMessage::PlaySource(Box::new(EmptySource)));
+        self.send_to_callback(CallbackMessage::PlaySource(Box::new(EmptySource::new(
+            self.channel_count(),
+            self.sample_rate(),
+        ))));
     }
 
     fn close(&mut self) {
@@ -286,7 +289,10 @@ impl Stream {
         let mut callback = StreamCallback {
             stream_sender,
             callback_receiver,
-            source: Box::new(EmptySource),
+            source: Box::new(EmptySource::new(
+                config.channels as usize,
+                config.sample_rate.0,
+            )),
             playback_pos,
             playback_pos_instant: Instant::now(),
             temp_buffer: Vec::with_capacity(StreamCallback::required_buffer_size(

@@ -17,8 +17,8 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+pub mod empty;
 pub mod sampler;
-
 #[cfg(feature = "fundsp")]
 pub mod fundsp;
 

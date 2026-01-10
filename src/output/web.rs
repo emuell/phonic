@@ -220,7 +220,7 @@ impl WebOutput {
 
         let context = Box::new(WebContext {
             callback_receiver,
-            source: Box::new(EmptySource),
+            source: Box::new(EmptySource::new(channel_count, sample_rate)),
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
@@ -307,7 +307,10 @@ impl OutputDevice for WebOutput {
 
     fn stop(&mut self) {
         self.is_running = false;
-        self.send_to_callback(CallbackMessage::PlaySource(Box::new(EmptySource)));
+        self.send_to_callback(CallbackMessage::PlaySource(Box::new(EmptySource::new(
+            self.channel_count(),
+            self.sample_rate(),
+        ))));
     }
 
     fn close(&mut self) {

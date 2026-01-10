@@ -188,6 +188,8 @@ pub mod sources {
     //! Set of basic, common File & Synth tone [`Source`](super::Source) and
     //! [`Generator`](super::Generator) implementations.
 
+    pub use super::source::empty::EmptySource;
+
     pub use super::source::file::{
         common::FileSourceImpl,
         preloaded::{PreloadedFileBuffer, PreloadedFileSource},
@@ -207,7 +209,7 @@ pub mod generators {
     //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
     pub use super::generator::{
-        sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        empty::EmptyGenerator, sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
     };
 
     #[cfg(feature = "fundsp")]

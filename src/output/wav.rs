@@ -77,7 +77,7 @@ impl WavOutput {
             writer: Some(writer),
             channel_count,
             sample_rate,
-            source: Box::new(EmptySource),
+            source: Box::new(EmptySource::new(spec.channels as usize, spec.sample_rate)),
             smoothed_volume: ExponentialSmoothedValue::new(1.0, spec.sample_rate),
             buffer: vec![0.0; BUFFER_SIZE_FRAMES * spec.channels as usize],
             started: false,
@@ -177,7 +177,7 @@ impl OutputDevice for WavOutput {
 
     fn stop(&mut self) {
         let mut inner = self.stream.lock().unwrap();
-        inner.source = Box::new(EmptySource);
+        inner.source = Box::new(EmptySource::new(self.channel_count(), self.sample_rate()));
     }
 
     fn close(&mut self) {
