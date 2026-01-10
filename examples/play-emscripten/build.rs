@@ -9,6 +9,8 @@ fn main() {
         println!("cargo::rustc-link-arg=-sUSE_PTHREADS=1");
         println!("cargo::rustc-link-arg=-sPTHREAD_POOL_SIZE=4");
         println!("cargo::rustc-link-arg=-sALLOW_MEMORY_GROWTH=1");
+        println!("cargo::rustc-link-arg=-sSTACK_SIZE=2MB");
+        println!("cargo::rustc-link-arg=-sINITIAL_MEMORY=100MB");
         if profile == "debug" {
             println!("cargo::rustc-link-arg=-sASSERTIONS=2");
             println!("cargo::rustc-link-arg=-sSAFE_HEAP=1");
@@ -23,13 +25,22 @@ fn main() {
             "_start",
             "_stop",
             "_get_cpu_load",
+            "_set_metronome_enabled",
+            "_set_active_synth",
+            "_get_synth_parameters",
+            "_set_synth_parameter_value",
+            "_set_synth_voice_count",
+            "_synth_parameter_value_to_string",
+            "_synth_parameter_string_to_value",
             "_synth_note_on",
             "_synth_note_off",
             "_get_available_effects",
             "_add_effect",
             "_remove_effect",
-            "_get_effect_parameter_string",
+            "_effect_parameter_value_to_string",
+            "_effect_parameter_string_to_value",
             "_set_effect_parameter_value",
+            "_randomize_synth",
         ];
         println!(
             "cargo::rustc-link-arg=-sEXPORTED_FUNCTIONS={}",

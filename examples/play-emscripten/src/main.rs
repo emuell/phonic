@@ -1,363 +1,13 @@
 //! An example showcasing how to use phonic with emscripten to create a web-based audio application.
 
-use std::{cell::RefCell, collections::HashMap, ffi};
+use std::ffi;
 
-use emscripten_rs_sys::emscripten_request_animation_frame_loop;
 use four_cc::FourCC;
-use serde::Serialize;
-
-use phonic::{
-    effects,
-    generators::FunDspGenerator,
-    sources::PreloadedFileSource,
-    utils::{db_to_linear, speed_from_note},
-    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
-    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
-    ParameterType, Player,
-};
-
-#[path = "../../common/synths/organ.rs"]
-mod organ_synth;
 
 // -------------------------------------------------------------------------------------------------
 
-// Serializable parameter metadata for JavaScript
-
-#[derive(Serialize)]
-#[serde(tag = "type")]
-enum ParamTypeInfo {
-    Float { step: f32 },
-    Integer { step: f32 },
-    Enum { values: Vec<String> },
-    Boolean,
-}
-
-#[derive(Serialize)]
-struct ParameterInfo {
-    id: u32,
-    name: String,
-    #[serde(flatten)]
-    param_type: ParamTypeInfo,
-    default: f32,
-}
-
-#[derive(Serialize)]
-struct EffectInfo {
-    name: String,
-    parameters: Vec<ParameterInfo>,
-}
-
-impl From<&dyn Effect> for EffectInfo {
-    fn from(effect: &dyn Effect) -> Self {
-        let params = effect.parameters();
-        let parameters = params
-            .iter()
-            .map(|p| {
-                let id: u32 = p.id().into();
-                let name = p.name().to_string();
-                let param_type = match p.parameter_type() {
-                    ParameterType::Float { step, polarity: _ } => ParamTypeInfo::Float { step },
-                    ParameterType::Integer { step, polarity: _ } => ParamTypeInfo::Integer { step },
-                    ParameterType::Enum { values } => ParamTypeInfo::Enum { values },
-                    ParameterType::Boolean => ParamTypeInfo::Boolean,
-                };
-                let default = p.default_value();
-                ParameterInfo {
-                    id,
-                    name,
-                    param_type,
-                    default,
-                }
-            })
-            .collect();
-
-        EffectInfo {
-            name: effect.name().to_string(),
-            parameters,
-        }
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
-// Hold the data structures statically so we can bind the Emscripten C method callbacks.
-thread_local!(static APP: RefCell<Option<App>> = const { RefCell::new(None) });
-
-struct App {
-    player: Player,
-    playback_beat_counter: u32,
-    playback_start_time: u64,
-    synth_handle: GeneratorPlaybackHandle,
-    playing_synth_notes: HashMap<u8, NotePlaybackId>,
-    samples: Vec<PreloadedFileSource>,
-    synth_mixer: MixerHandle,
-    active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
-}
-
-impl App {
-    // Create a new player and preload samples
-    pub fn new() -> Result<Self, Error> {
-        println!("Initialize audio output...");
-        let output = DefaultOutputDevice::open()?;
-
-        println!("Creating audio file player...");
-        let mut player = Player::new(output, None);
-        let sample_rate = player.output_sample_rate();
-
-        // lower master volume a bit
-        player.set_output_volume(db_to_linear(-3.0));
-
-        // create a new mixer for the synth
-        let synth_mixer = player.add_mixer(None)?;
-
-        // maintain added effects
-        let active_effects = HashMap::new();
-
-        println!("Preloading sample files...");
-        let mut samples = Vec::new();
-        for sample in ["./assets/cowbell.wav", "./assets/bass.wav"] {
-            match PreloadedFileSource::from_file(
-                sample,
-                FilePlaybackOptions::default(),
-                sample_rate,
-            ) {
-                Ok(sample) => samples.push(sample),
-                Err(err) => return Err(err),
-            }
-        }
-
-        println!("Start running...");
-        unsafe {
-            emscripten_request_animation_frame_loop(Some(Self::run_frame), std::ptr::null_mut())
-        };
-
-        // start playback in a second from now
-        let playback_start_time =
-            player.output_sample_frame_position() + player.output_sample_rate() as u64;
-        let playback_beat_counter = 0;
-
-        // add fundsp synth generator
-        let synth_handle = player.play_generator(
-            FunDspGenerator::new(
-                "organ_synth",
-                organ_synth::voice_factory,
-                GeneratorPlaybackOptions::default()
-                    .voices(8)
-                    .volume_db(3.0)
-                    .target_mixer(synth_mixer.id()),
-                sample_rate,
-            )?,
-            None,
-        )?;
-
-        let playing_synth_notes = HashMap::new();
-
-        Ok(Self {
-            player,
-            playback_start_time,
-            playback_beat_counter,
-            synth_handle,
-            playing_synth_notes,
-            samples,
-            synth_mixer,
-            active_effects,
-        })
-    }
-
-    // Animation frame callback which drives the player
-    extern "C" fn run_frame(_time: f64, _user_data: *mut ffi::c_void) -> bool {
-        APP.with_borrow_mut(|app| {
-            // is a player running?
-            if let Some(app) = app {
-                app.run();
-                true // continue running
-            } else {
-                false // stop running
-            }
-        })
-    }
-
-    // Trigger a synth note on.
-    fn synth_note_on(&mut self, note: u8) {
-        // If a note is already playing for this key, stop it first.
-        if let Some(note_id) = self.playing_synth_notes.remove(&note) {
-            let _ = self.synth_handle.note_off(note_id, None);
-        }
-
-        // Trigger the new note with velocity 0.3 and default panning
-        if let Ok(note_id) = self.synth_handle.note_on(note, Some(0.3), None, None) {
-            self.playing_synth_notes.insert(note, note_id);
-        }
-    }
-
-    // Trigger a synth note off.
-    fn synth_note_off(&mut self, note: u8) {
-        if let Some(note_id) = self.playing_synth_notes.remove(&note) {
-            let _ = self.synth_handle.note_off(note_id, None);
-        }
-    }
-
-    // Get list of available effects
-    fn get_available_effects() -> Vec<String> {
-        vec![
-            "Gain".to_string(),
-            "DcFilter".to_string(),
-            "Filter".to_string(),
-            "Eq5".to_string(),
-            "Reverb".to_string(),
-            "Chorus".to_string(),
-            "Compressor".to_string(),
-            "Distortion".to_string(),
-        ]
-    }
-
-    // Add an effect by name to the synth mixer, returning effect ID and parameter metadata JSON
-    fn add_effect_with_name(&mut self, effect_name: &str) -> Result<(EffectId, String), Error> {
-        match effect_name {
-            "Gain" => self.add_effect(effects::GainEffect::new()),
-            "DcFilter" => self.add_effect(effects::DcFilterEffect::new()),
-            "Filter" => self.add_effect(effects::FilterEffect::new()),
-            "Eq5" => self.add_effect(effects::Eq5Effect::new()),
-            "Reverb" => self.add_effect(effects::ReverbEffect::new()),
-            "Chorus" => self.add_effect(effects::ChorusEffect::new()),
-            "Compressor" => self.add_effect(effects::CompressorEffect::new_compressor()),
-            "Distortion" => self.add_effect(effects::DistortionEffect::new()),
-            _ => {
-                return Err(Error::ParameterError(format!(
-                    "Unknown effect: {}",
-                    effect_name
-                )))
-            }
-        }
-    }
-
-    // Add given effect instance to the synth mixer, returning effect ID and parameter metadata JSON
-    fn add_effect<E: Effect>(&mut self, effect: E) -> Result<(EffectId, String), Error> {
-        // Store parameter metadata
-        let parameters = effect
-            .parameters()
-            .iter()
-            .map(|p| p.dyn_clone())
-            .collect::<Vec<_>>();
-        let info_json = serde_json::to_string(&EffectInfo::from(&effect as &dyn Effect))
-            .unwrap_or_else(|_| "{}".to_string());
-        let effect_handle = self.player.add_effect(effect, self.synth_mixer.id())?;
-        let effect_id = effect_handle.id();
-
-        self.active_effects
-            .insert(effect_id, (effect_handle, parameters));
-
-        Ok((effect_id, info_json))
-    }
-
-    // Remove an effect
-    fn remove_effect(&mut self, effect_id: EffectId) -> Result<(), Error> {
-        if let Some((_, _)) = self.active_effects.remove(&effect_id) {
-            self.player.remove_effect(effect_id)?;
-            Ok(())
-        } else {
-            Err(Error::EffectNotFoundError(effect_id))
-        }
-    }
-
-    // Set an effect parameter value and update our tracking
-    fn set_effect_parameter_value(
-        &mut self,
-        effect_id: EffectId,
-        param_id: FourCC,
-        normalized_value: f32,
-    ) -> Result<(), Error> {
-        let (effect_handle, _) = self
-            .active_effects
-            .get(&effect_id)
-            .ok_or(Error::EffectNotFoundError(effect_id))?;
-
-        effect_handle.set_parameter_normalized(param_id, normalized_value.clamp(0.0, 1.0), None)
-    }
-
-    // Get an effect parameter's value as a string
-    fn get_effect_parameter_string(
-        &self,
-        effect_id: EffectId,
-        param_id: FourCC,
-        normalized_value: f32,
-    ) -> Result<String, Error> {
-        let (_, parameters) = self
-            .active_effects
-            .get(&effect_id)
-            .ok_or(Error::EffectNotFoundError(effect_id))?;
-
-        // Find the parameter
-        let parameter =
-            parameters
-                .iter()
-                .find(|p| p.id() == param_id)
-                .ok_or(Error::ParameterError(format!(
-                    "Parameter {:?} not found in effect {}",
-                    param_id, effect_id
-                )))?;
-
-        // Convert to string using the parameter's method
-        Ok(parameter.value_to_string(normalized_value, true))
-    }
-
-    // Schedule samples for playback
-    fn run(&mut self) {
-        // time consts
-        const BEATS_PER_MIN: f64 = 120.0;
-        const BEATS_PER_BAR: u32 = 4;
-
-        // calculate metronome speed and signature
-        let sample_rate = self.player.output_sample_rate();
-        let samples_per_sec = self.player.output_sample_rate();
-        let samples_per_beat = samples_per_sec as f64 * 60.0 / BEATS_PER_MIN;
-
-        // schedule playback events one second ahead of the players current time
-        let preroll_time = samples_per_sec as u64;
-
-        // when is the next beat playback due?
-        let next_beats_sample_time = (self.playback_start_time as f64
-            + self.playback_beat_counter as f64 * samples_per_beat)
-            as u64;
-        let output_sample_time = self.player.output_sample_frame_position();
-
-        // schedule next sample when it's due within the preroll time, else do nothing
-        if next_beats_sample_time > output_sample_time + preroll_time
-            || self.playback_beat_counter == 0
-        {
-            // play an octave higher every new bar start
-            let sample_speed = speed_from_note(
-                if self.playback_beat_counter.is_multiple_of(BEATS_PER_BAR) {
-                    72
-                } else {
-                    60
-                },
-            );
-            // select a new sample every 2 bars
-            let sample_index =
-                (self.playback_beat_counter / (2 * BEATS_PER_BAR)) as usize % self.samples.len();
-            // clone the preloaded sample
-            let sample = self.samples[sample_index]
-                .clone(
-                    FilePlaybackOptions::default().speed(sample_speed),
-                    sample_rate,
-                )
-                .unwrap();
-
-            // play it at the new beat's time
-            if let Ok(playback_handle) = self
-                .player
-                .play_file_source(sample, Some(next_beats_sample_time))
-            {
-                // and stop it again (fade out) before the next beat starts
-                let _ = playback_handle.stop(next_beats_sample_time + samples_per_beat as u64);
-            }
-
-            // advance beat counter
-            self.playback_beat_counter += 1;
-        }
-    }
-}
+mod app;
+use app::*;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -409,9 +59,156 @@ pub extern "C" fn stop() {
 pub extern "C" fn get_cpu_load() -> ffi::c_float {
     APP.with_borrow(|app| {
         if let Some(app) = app.as_ref() {
-            app.player.cpu_load().average
+            app.cpu_load()
         } else {
             0.0
+        }
+    })
+}
+
+/// Set the active synth.
+#[no_mangle]
+pub extern "C" fn set_active_synth(synth_type: ffi::c_int) {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            if let Err(err) = app.set_active_synth(synth_type) {
+                eprintln!("Failed to set active synth to {}: {}", synth_type, err);
+            }
+        }
+    });
+}
+
+/// Set the voice count for all synths. Exported as `_set_synth_voice_count` function in the WASM.
+#[no_mangle]
+pub extern "C" fn set_synth_voice_count(voice_count: ffi::c_int) {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let voice_count = voice_count.max(1) as usize;
+            if let Err(err) = app.set_synth_voice_count(voice_count) {
+                eprintln!("Failed to set voice count to {}: {}", voice_count, err);
+            }
+        }
+    });
+}
+
+/// Set metronome enabled state. Exported as `_set_metronome_enabled` function in the WASM.
+#[no_mangle]
+pub extern "C" fn set_metronome_enabled(enabled: bool) {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            app.set_metronome_enabled(enabled);
+        }
+    });
+}
+
+/// Get the active synth parameters. Exported as `_get_synth_parameters` function in the WASM.
+///
+/// Returns a pointer to a JSON string containing parameter metadata, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn get_synth_parameters() -> *const ffi::c_char {
+    APP.with_borrow(|app| {
+        if let Some(app) = app.as_ref() {
+            let info = app.get_active_synth_parameters();
+            match serde_json::to_string(&info) {
+                Ok(json) => {
+                    let c_str = ffi::CString::new(json).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!("Failed to serialize synth parameters: {}", err);
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Set a synth parameter value (normalized 0.0-1.0). Exported as `_set_synth_parameter_value` function in the WASM.
+#[no_mangle]
+pub extern "C" fn set_synth_parameter_value(param_id: ffi::c_uint, value: ffi::c_float) {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            app.set_synth_parameter_value(param_fourcc, value);
+        }
+    });
+}
+
+/// Get a synth parameter's value as a string. Exported as `_synth_parameter_value_to_string`
+/// function in the WASM.
+///
+/// Returns a pointer to a C string containing the parameter value, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn synth_parameter_value_to_string(
+    param_id: ffi::c_uint,
+    normalized_value: ffi::c_float,
+) -> *const ffi::c_char {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            match app.synth_parameter_value_to_string(param_fourcc, normalized_value) {
+                Ok(value_string) => {
+                    let c_str = ffi::CString::new(value_string).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!(
+                        "Failed to get synth parameter {:?} string: {}",
+                        param_fourcc, err
+                    );
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Convert an synth parameter's string value to a normalized value.
+/// Exported as `_synth_parameter_string_to_value` function in the WASM.
+///
+/// Returns a normalized parameter value, or NaN on error.
+#[no_mangle]
+pub extern "C" fn synth_parameter_string_to_value(
+    param_id: ffi::c_uint,
+    string: *const ffi::c_char,
+) -> ffi::c_float {
+    if string.is_null() {
+        eprintln!("Parameter string is null");
+        return ffi::c_float::NAN;
+    }
+    let string = unsafe {
+        match ffi::CStr::from_ptr(string).to_str() {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("Failed to convert string: {}", err);
+                return ffi::c_float::NAN;
+            }
+        }
+    }
+    .to_string();
+
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            match app.synth_parameter_string_to_value(param_fourcc, string) {
+                Ok(Some(value)) => value,
+                Ok(None) => ffi::c_float::NAN,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to get synth parameter {} value: {}",
+                        param_fourcc, err
+                    );
+                    ffi::c_float::NAN
+                }
+            }
+        } else {
+            ffi::c_float::NAN
         }
     })
 }
@@ -419,10 +216,10 @@ pub extern "C" fn get_cpu_load() -> ffi::c_float {
 /// Play a single synth note when the app is running. Exported as `_synth_note_on`
 /// function in the WASM.
 #[no_mangle]
-pub extern "C" fn synth_note_on(key: ffi::c_int) {
+pub extern "C" fn synth_note_on(note: ffi::c_int) {
     APP.with_borrow_mut(|app| {
         if let Some(app) = app {
-            let note = (60 + key).min(127) as u8;
+            let note = note.clamp(0, 127) as u8;
             app.synth_note_on(note);
         }
     });
@@ -431,13 +228,38 @@ pub extern "C" fn synth_note_on(key: ffi::c_int) {
 /// Stop a previously played synth note when the player is running. Exported as `_synth_note_off`
 /// function in the WASM.
 #[no_mangle]
-pub extern "C" fn synth_note_off(key: ffi::c_int) {
+pub extern "C" fn synth_note_off(note: ffi::c_int) {
     APP.with_borrow_mut(|app| {
         if let Some(app) = app {
-            let note = (60 + key).min(127) as u8;
+            let note = note.clamp(0, 127) as u8;
             app.synth_note_off(note);
         }
     });
+}
+
+/// Randomize synth parameters. Exported as `_randomize_synth` function in the WASM.
+///
+/// Returns a pointer to a JSON string containing the updated parameter values, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn randomize_synth() -> *const ffi::c_char {
+    APP.with_borrow(|app| {
+        if let Some(app) = app.as_ref() {
+            let updates = app.randomize_synth();
+            match serde_json::to_string(&updates) {
+                Ok(json) => {
+                    let c_str = ffi::CString::new(json).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!("Failed to serialize param updates: {}", err);
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
 }
 
 /// Get the list of available effects. Exported as `_get_available_effects` function in the WASM.
@@ -520,23 +342,23 @@ pub extern "C" fn remove_effect(effect_id: ffi::c_int) -> ffi::c_int {
     })
 }
 
-/// Get an effect parameter's value as a string. Exported as `_get_effect_parameter_string`
+/// Get an effect parameter's value as a string. Exported as `_effect_parameter_value_to_string`
 /// function in the WASM.
 ///
 /// Returns a pointer to a C string containing the parameter value, or null on error.
 /// The return pointer must be freed with `_free_cstring` after getting consumed!
 #[no_mangle]
-pub extern "C" fn get_effect_parameter_string(
+pub extern "C" fn effect_parameter_value_to_string(
     effect_id: ffi::c_int,
     param_id: ffi::c_uint,
     normalized_value: ffi::c_float,
 ) -> *const ffi::c_char {
     APP.with_borrow_mut(|app| {
         if let Some(app) = app {
-            let param_fourcc = FourCC::from(param_id);
-            match app.get_effect_parameter_string(
+            let param_id = FourCC::from(param_id);
+            match app.effect_parameter_value_to_string(
                 effect_id as usize,
-                param_fourcc,
+                param_id,
                 normalized_value,
             ) {
                 Ok(value_string) => {
@@ -545,14 +367,59 @@ pub extern "C" fn get_effect_parameter_string(
                 }
                 Err(err) => {
                     eprintln!(
-                        "Failed to get effect {} parameter {:?} string: {}",
-                        effect_id, param_fourcc, err
+                        "Failed to get effect {} parameter {} string: {}",
+                        effect_id, param_id, err
                     );
                     std::ptr::null()
                 }
             }
         } else {
             std::ptr::null()
+        }
+    })
+}
+
+/// Convert an effect parameter's string value to a normalized value.
+/// Exported as `_effect_parameter_string_to_value` function in the WASM.
+///
+/// Returns a normalized parameter value, or NaN on error.
+#[no_mangle]
+pub extern "C" fn effect_parameter_string_to_value(
+    effect_id: ffi::c_int,
+    param_id: ffi::c_uint,
+    string: *const ffi::c_char,
+) -> ffi::c_float {
+    if string.is_null() {
+        eprintln!("Parameter string is null");
+        return ffi::c_float::NAN;
+    }
+    let string = unsafe {
+        match ffi::CStr::from_ptr(string).to_str() {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("Failed to convert string: {}", err);
+                return ffi::c_float::NAN;
+            }
+        }
+    }
+    .to_string();
+
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let param_fourcc = FourCC::from(param_id);
+            match app.effect_parameter_string_to_value(effect_id as usize, param_fourcc, string) {
+                Ok(Some(value)) => value,
+                Ok(None) => ffi::c_float::NAN,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to get effect {} parameter {} value: {}",
+                        effect_id, param_fourcc, err
+                    );
+                    ffi::c_float::NAN
+                }
+            }
+        } else {
+            ffi::c_float::NAN
         }
     })
 }

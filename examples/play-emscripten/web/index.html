@@ -7,14 +7,18 @@
     </head>
 
     <body>
-        <h1>Phonic Emscripten Demo</h1>
-        <p>Hit `Start` to initialize the audio backend and start a simple player engine.</p>
-
-        <p></p>
+        <div id="header" class="header">
+            <div id="first">phonic</div>
+            <div id="second">web demo</div>
+        </div>
 
         <div class="controls">
-            <button id="playButton" disabled>Start Player</button>
-            <button id="stopButton" disabled>Stop Player</button>
+            <button id="playButton" tabindex='-1' disabled>Start Player</button>
+            <button id="stopButton" tabindex='-1' disabled>Stop Player</button>
+            <label class="checkbox-container">
+                <input type="checkbox" id="metronomeCheckbox" checked disabled>
+                Metronome
+            </label>
             <div id="cpu-display" class="cpu-display"></div>
         </div>
 
@@ -24,12 +28,40 @@
             The example player schedules preloaded sample files in a
             <a href="https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_request_animation_frame_loop">
                 requestAnimationFrame</a> timer as metronome. <br/>
-            <br/>
-            Piano keys interactively play a simple
-            <a href="https://github.com/SamiPerttu/fundsp">fundsp synth</a> generator.
+            Piano keys interactively play a
+            <a href="https://github.com/SamiPerttu/fundsp">fundsp</a> generator.
+
+            DSP effects are applied to the synth output's mixer only.
         </p>
 
+        <div id="synth-controls" class="synth-controls">
+            <button id="randomizeButton" tabindex='-1' disabled>Randomize</button>
+
+            <select id="synthSelector" tabindex='-1' disabled>
+                <option value="0" selected>sub3</option>
+                <option value="1">fm3</option>
+                <option value="2">organ</option>
+                <option value="3">dx7</option>
+            </select>
+
+            <select id="voiceCountSelector" tabindex='-1' disabled>
+                <option value="1">1 voice</option>
+                <option value="2">2 voices</option>
+                <option value="4">4 voices</option>
+                <option value="8" selected>8 voices</option>
+                <option value="16">16 voices</option>
+                <option value="32">32 voices</option>
+            </select>
+        </div>
+
+        <div id="synth-parameters" class="synth-parameters hidden"></div>
+
         <div class="piano-wrapper">
+            <div class="piano-controls">
+                <button id="octaveDown" tabindex='-1' disabled>-</button>
+                <span id="octaveDisplay">Octave: 4</span>
+                <button id="octaveUp" tabindex='-1' disabled>+</button>
+            </div>
             <ul class="piano-keys">
                 <li class="key white" data-key="0"><span>a</span></li>
                 <li class="key black" data-key="1"><span>w</span></li>
@@ -51,15 +83,11 @@
             </ul>
         </div>
 
-        <p>
-            DSP effects are applied to the synth output's mixer only.
-        </p>
-
         <div class="effects-section">
             <div class="add-effect-menu"></div>
             <div class="effects-chain" id="effectsChain">
                 <div class="empty-message">
-                    No effects added yet. Add an effect using the buttons above.
+                    No effects added.
                 </div>
             </div>
         </div>
