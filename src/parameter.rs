@@ -9,9 +9,9 @@ use four_cc::FourCC;
 /// Describes polarity of a [`Parameter`] for visual representations in a UI.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterPolarity {
-    /// A continous, ranged value.
+    /// A continuous, ranged value.
     Unipolar,
-    /// A continous, symetrically ranged value, centered around 0.
+    /// A continuous, symmetrically ranged value, centered around 0.
     Bipolar,
 }
 
@@ -53,11 +53,19 @@ pub enum ParameterType {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Describes a single parameter in a [`Effect`](super::Effect) or [`Generator`](super::Generator)
-/// for use in UIs automation, and can be `Send` and `Sync`ed across threads.
+/// Describes a single parameter in an [`Effect`](super::Effect) or [`Generator`](super::Generator).
 ///
-/// Note that parameter descriptions don't hold the actual parameter values, just the default values.
-/// The effect or generator processor owns the actual value.
+/// **This is a descriptor, not a value holder.** Parameters describe the *metadata* about a
+/// parameter (id, name, type, range, default) but don't hold the actual runtime value. The
+/// effect or generator owns the actual value internally.
+///
+/// **Runtime value changes** happen through handles: after adding an effect or generator to the
+/// player, use the returned [`EffectHandle`](crate::EffectHandle) or
+/// [`GeneratorPlaybackHandle`](crate::GeneratorPlaybackHandle) to send parameter updates to the
+/// audio thread via their `set_parameter()` methods.
+///
+/// Parameters can be `Send` and `Sync`ed across threads, allowing UIs to safely access parameter
+/// metadata from any thread.
 pub trait Parameter: Debug + Send + Sync + Any {
     /// The unique id of the parameter.
     fn id(&self) -> FourCC;

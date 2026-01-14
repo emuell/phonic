@@ -1,4 +1,4 @@
-//! Fundsp AudioNode impls
+//! Fundsp AudioNode tools and custom implementations.
 
 mod ahdsr;
 mod fast_sine;

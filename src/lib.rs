@@ -110,7 +110,7 @@
 //! ```
 //!
 //! For more advanced usage, such as monitoring playback, sequencing playback, using generator
-//! or creating more complex mixer graphs, please see the examples in the `README.md` and the
+//! and creating more complex mixer graphs, please see the examples in the `README.md` and the
 //! `/examples` directory of the repository.
 
 // enable feature config when building for docs.rs
@@ -185,8 +185,7 @@ pub mod outputs {
 }
 
 pub mod sources {
-    //! Set of basic, common File & Synth tone [`Source`](super::Source) and
-    //! [`Generator`](super::Generator) implementations.
+    //! Set of basic, common File & Synth tone [`Source`](super::Source) implementations.
 
     pub use super::source::empty::EmptySource;
 

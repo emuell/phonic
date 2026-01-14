@@ -44,7 +44,7 @@ pub struct GeneratorPlaybackOptions {
     /// By default 8. Maximum number of simultaneous voices in the generator.
     pub voices: usize,
 
-    /// By default None, which means play on the main mixer. When set to some specific id,
+    /// By default `None`, which means play on the main mixer. When set to some specific id,
     /// the source will be played on the given mixer instead of the default one.
     pub target_mixer: Option<MixerId>,
 
@@ -196,8 +196,10 @@ pub enum GeneratorPlaybackMessage {
 
 /// A [`Source`] that is driven by note events.
 ///
-/// It supports the usual volume and panning events and additional note trigger events via
-/// its playback message queue.
+/// Generators extend the *static* `Source` trait to support event-driven playback of e.g. musical 
+/// instruments or sample players. They respond to note-on/note-off events, velocity, pitch changes,
+/// and custom parameters, while also supporting standard volume and panning controls via the playback
+/// message queue.
 ///
 /// Generators can be used in two ways:
 /// 1. **Played** via [`Player::play_generator`](crate::Player::play_generator):
@@ -269,7 +271,7 @@ pub trait Generator: Source {
 
     /// Process multiple parameter updates in a batch in the audio thread.
     ///
-    /// The default impl applies all parameter changes individially, but some generators
+    /// The default impl applies all parameter changes individually, but some generators
     /// may override this to apply multiple changes more efficiently.
     fn process_parameter_updates(
         &mut self,

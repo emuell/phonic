@@ -40,7 +40,7 @@ impl SourceTime {
         }
     }
 
-    /// return a new SourceTime with a frame time which is this times's frame time
+    /// Returns a new SourceTime with a frame time which is this time's frame time
     /// plus the given amount in frames.
     pub fn with_added_frames(&self, frames: u64) -> Self {
         let mut copy = *self;
@@ -62,14 +62,20 @@ impl Default for SourceTime {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Source types produce audio samples in `f32` format and can be `Send` and `Sync`ed
-/// across threads.
+/// Audio signal producer that generates new or processes existing audio samples.
 ///
-/// The output buffer is a raw interleaved buffer, which is going to be written by the source
-/// in the specified `channel_count` and `sample_rate` specs. Specs may not change during runtime,
-/// so following sources don't have to adapt to new specs.
+/// Sources are the fundamental building blocks of audio playback in phonic. They produce audio
+/// samples in `f32` format and can represent various kinds of audio:
+/// - Audio file playback via [`FileSource`](crate::FileSource)
+/// - Synthesized tones via [`SynthSource`](crate::SynthSource)
+/// - Note-driven instruments via [`Generator`](crate::Generator) (which is a specialized `Source`)
+/// - DSP operations like mixing, panning, resampling, etc.
 ///
-/// NB: `write` is called in realtime audio threads, so it must not block!
+/// The output buffer is a raw interleaved buffer, which is written by the source in the specified
+/// `channel_count` and `sample_rate` specs. Specs may not change during runtime, so downstream
+/// sources don't have to adapt to new specs.
+///
+/// **Important:** `write` is called in real-time audio threads, so it must not block!
 pub trait Source: Send + Sync + 'static {
     /// Convert the Source impl into a boxed `dyn Source`.
     ///
@@ -86,11 +92,11 @@ pub trait Source: Send + Sync + 'static {
     /// The source's output channel count.
     fn channel_count(&self) -> usize;
 
-    /// returns if the source finished playback. Exhausted sources should only return 0 on `write`
+    /// Returns whether the source finished playback. Exhausted sources should only return 0 on `write`
     /// and can be removed from a source render graph.
     fn is_exhausted(&self) -> bool;
 
-    /// Write at most of `output.len()` samples into the interleaved `output`
+    /// Write at most `output.len()` samples into the interleaved `output`
     /// The given [`SourceTime`] parameter specifies which absolute time this buffer in the
     /// final output stream refers to. It can be used to schedule and apply real-time events.
     /// Returns the number of written **samples** (not frames).

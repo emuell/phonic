@@ -17,7 +17,7 @@ pub mod reverb;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Carries [`Effect`] specific payloads/automation, which can't or should not be expressed as
+/// Carries [`Effect`]-specific payloads/automation, which can't or should not be expressed as
 /// [`Parameter`](crate::Parameter).
 ///
 /// This trait is implemented by message enums specific to each effect. It provides a way to
@@ -54,13 +54,21 @@ pub type EffectTime = SourceTime;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Effects manipulate audio samples in `f32` format and can be `Send` and `Sync`ed across threads.
-/// Buffers are processed in-place in the audio real-time thread.
+/// DSP effect that processes audio signals within a mixer's effect chain.
 ///
-/// After an effect got added to a mixer, effect parameters can only be changed by sending parameter
-/// value changes or custom messages via the [`EffectHandle`](crate::EffectHandle) that got returned
-/// from the player's [`add_effect`](crate::Player::add_effect) function. This ensures that the
-/// actual effect processing state can not be mutated outside of the audio thread.
+/// Effects manipulate audio samples in `f32` format and are applied within a mixer in the
+/// [`Player`](crate::Player). Each mixer can have its own chain of effects that process audio
+/// in series. Effects are added to mixers via [`Player::add_effect()`](crate::Player::add_effect),
+/// which returns an [`EffectHandle`](crate::EffectHandle) for controlling the effect at runtime.
+///
+/// Buffers are processed in-place in the audio real-time thread. Effects can be `Send` and
+/// `Sync`ed across threads.
+///
+/// ## Parameter Control
+///
+/// After an effect is added to a mixer, effect parameters can only be changed by sending parameter
+/// value changes or custom messages via the [`EffectHandle`](crate::EffectHandle). This ensures
+/// that the actual effect processing state cannot be mutated outside of the audio thread.
 ///
 /// Non real-time thread clients, such as UIs, can query info about an effect's parameter set via
 /// [`Effect::parameters`] after creating the effect. For reasons mentioned above, the actual
@@ -93,7 +101,7 @@ pub trait Effect: Send + Sync + 'static {
     /// Returns a list of parameter descriptors for this effect.
     ///
     /// This can be used by UIs or automation systems to query available parameters of a specific
-    /// effect. This method may only be called on non-real-time threads: Usually it will be called
+    /// effect. This method may only be called on non-real-time threads. Usually it will be called
     /// after creating a new effect instance, before adding it to the player's effect chains, in
     /// order to gather parameter info for generic effect UIs.
     fn parameters(&self) -> Vec<&dyn Parameter>;
@@ -170,7 +178,7 @@ pub trait Effect: Send + Sync + 'static {
     ///
     /// See [Self::process_parameter_update] for more info about parameter changes.
     ///
-    /// The default impl applies all parameter changes individially, but some effects may override
+    /// The default impl applies all parameter changes individually, but some effects may override
     /// this to apply multiple changes more efficiently.
     ///
     /// Like `process`, this method must not block, allocate memory, or do other time-consuming tasks.
@@ -184,7 +192,7 @@ pub trait Effect: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Handles optional effect specific messages in the real-time thread. This can be used to pass
+    /// Handles optional effect-specific messages in the real-time thread. This can be used to pass
     /// payloads to the effects, which can or should not be expressed as a trivial parameter change.
     ///
     /// The implementation should downcast the `message` payload to its specific message enum type

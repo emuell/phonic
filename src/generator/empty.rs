@@ -10,7 +10,7 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
-/// A generator source which does not produce any samples and ignors all events.
+/// A generator source which does not produce any samples and ignores all events.
 ///
 /// Can be useful when a temorary placeholder generator is needed.
 #[derive(Debug, Clone)]

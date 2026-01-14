@@ -34,7 +34,18 @@ use super::source::Source;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Audio output stream device.
+/// Audio output stream device backend.
+///
+/// Represents the platform-specific audio backend that manages the actual audio hardware stream.
+/// The [`Player`](crate::Player) requires an `OutputDevice` implementation to play audio.
+///
+/// Phonic provides different implementations for various platforms:
+/// - `CpalOutput`: Cross-platform audio via cpal (desktop).
+/// - `WebOutput`: WebAssembly support via Web Audio API.
+/// - `WavOutput`: File-based output for offline rendering.
+///
+/// The `OutputDevice` is passed to [`Player::new()`](crate::Player::new) and manages the
+/// real-time audio thread that pulls audio data from [`Source`](crate::Source)s.
 pub trait OutputDevice: Send {
     /// Actual device's output sample buffer channel count.
     fn channel_count(&self) -> usize;
@@ -48,11 +59,11 @@ pub trait OutputDevice: Send {
     /// Set a new output volume.
     fn set_volume(&mut self, volume: f32);
 
-    /// true when audio output is currently suspended by the system.
-    /// Only used in web audio backends, other backends do never suspend.
+    /// `true` when audio output is currently suspended by the system.
+    /// Only used in web audio backends, other backends never suspend.
     fn is_suspended(&self) -> bool;
 
-    /// Returns true while not paused.
+    /// Returns `true` while not paused.
     fn is_running(&self) -> bool;
     /// Pause playback without dropping the output source.
     fn pause(&mut self);
@@ -61,8 +72,8 @@ pub trait OutputDevice: Send {
 
     /// Play given source as main output source.
     fn play(&mut self, source: Box<dyn Source>);
-    /// Drop actual source, replacing it with silence
+    /// Drop actual source, replacing it with silence.
     fn stop(&mut self);
-    /// Release audio device
+    /// Release audio device.
     fn close(&mut self);
 }
