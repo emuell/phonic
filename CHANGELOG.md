@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.14.0 - 2025/01/14
+
+- [breaking] replaced dasp with fundsp
+- [breaking] effect parameter changes can now only be applied via new `EffectHandle`s
+- [breaking] removed `ClonableParameter`, added a new `dyn_clone` function to `Parameter` instead
+- add new `Generator` trait, a source which gets triggered by note/parameter change events:
+  - Generators can be transient like Sources or can be added like effects to sub-mixers
+  - Generators may have automatable parameters, just like effects 
+  - add simple `Sampler` Generator impl which plays back a single sample with optional AHDSR envelopes
+  - add parameterized `FunDspGenerator` impl and a few fundsp synth examples
+- optionally measure CPU load of sources & mixers via new playback options
+- add new `GuardedSource` and an optional panic hook for the player in order to gracefull deal with crashes
+- add `Display` impl for player to debug dump Player's mixer, source and effect structure
+- add Effect impl for `Box<dyn Effect>` so `dyn Effect`s can be added just like effect impls in the player
+- add new `ParameterPolarity` property to `ParameterType`
+- immediately send playback position events when starting sources
+- updated examples to showcase new `FunDspGenerator` and `Sampler`
+- refactored, speed up the airwindows Reverb effect implementation and fixed parameter smoothing
+- fixed deserialization of `FloatParameter` and `IntegerParameter` values which have units
+
 ## v0.13.0 - 2025/11/26
 
 - [breaking] `play_file/synth` and `add_effect` functions now return playback handles:

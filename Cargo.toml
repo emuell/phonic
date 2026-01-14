@@ -9,7 +9,7 @@ license = "	AGPL-3.0"
 name = "phonic"
 readme = "README.md"
 repository = "https://github.com/emuell/phonic"
-version = "0.13.0"
+version = "0.14.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
