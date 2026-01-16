@@ -385,6 +385,8 @@ impl<'a> InterleavedBufferMut<'a> for &'a mut [f32] {
 
 impl<'a> InterleavedBuffer<'a> for Vec<f32> {
     fn buffer(&self) -> &'a [f32] {
+        // SAFETY: The lifetime 'a is tied to the underlying slice, which is valid.
+        // The compiler incorrectly restricts the lifetime to that of `&self`.
         unsafe { &*(self.as_slice() as *const [f32]) }
     }
 }

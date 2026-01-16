@@ -10,8 +10,8 @@ use crate::{
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, measured::MeasuredSource,
-        panned::PannedSourceMessage, playback::PlaybackMessageQueue, Source, SourceTime,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
+        playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
         buffer::{add_buffers, clear_buffer},
@@ -25,8 +25,9 @@ use crate::{
 mod effect;
 mod submixer;
 
-use effect::EffectProcessor;
-use submixer::SubMixerProcessor;
+pub(crate) use effect::EffectProcessor;
+pub(crate) use submixer::SubMixerProcessor;
+pub(crate) use submixer::SubMixerThreadPool;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -158,7 +159,7 @@ pub(crate) enum MixerMessage {
     // Mixers
     AddMixer {
         mixer_id: MixerId,
-        mixer: Box<MeasuredSource<MixedSource>>,
+        mixer_proessor: Owned<SubMixerProcessor>,
     },
     RemoveMixer {
         mixer_id: MixerId,
@@ -166,7 +167,7 @@ pub(crate) enum MixerMessage {
     // Effects
     AddEffect {
         effect_id: EffectId,
-        effect: Owned<Box<dyn Effect>>,
+        effect_processor: Owned<EffectProcessor>,
     },
     MoveEffect {
         effect_id: EffectId,
@@ -198,14 +199,17 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
-    mixers: Vec<(MixerId, SubMixerProcessor)>,
-    effects: Vec<(EffectId, EffectProcessor)>,
+    mixers: Vec<(MixerId, Owned<SubMixerProcessor>)>,
+    effects: Vec<(EffectId, Owned<EffectProcessor>)>,
     effects_bypassed: bool,
     message_queue: Arc<ArrayQueue<MixerMessage>>,
     events: VecDeque<MixerEvent>,
+    thread_pool: Option<Arc<SubMixerThreadPool>>,
     channel_count: usize,
     sample_rate: u32,
     temp_out: Vec<f32>,
+    /// Pre-allocated buffer for parallel processing results (reused each frame)
+    parallel_results: Vec<submixer::SubMixerProcessingResult>,
 }
 
 impl MixedSource {
@@ -224,6 +228,9 @@ impl MixedSource {
         let effects = Vec::with_capacity(EFFECTS_CAPACITY);
         let effects_bypassed = true;
 
+        // processing state
+        let thread_pool = None;
+
         // prealloc event queues
         const MESSAGE_QUEUE_SIZE: usize = 4096;
         let message_queue = Arc::new(ArrayQueue::new(MESSAGE_QUEUE_SIZE));
@@ -233,6 +240,9 @@ impl MixedSource {
         // create temp mix buffer
         let temp_out = vec![0.0; Self::MAX_MIX_BUFFER_SAMPLES];
 
+        // pre-allocate parallel processing results buffer (matches ThreadPool::MAX_MIXERS_HINT)
+        let parallel_results = Vec::with_capacity(128);
+
         Self {
             playing_sources,
             mixers,
@@ -240,9 +250,11 @@ impl MixedSource {
             effects,
             effects_bypassed,
             message_queue,
+            thread_pool,
             channel_count,
             sample_rate,
             temp_out,
+            parallel_results,
         }
     }
 
@@ -250,6 +262,30 @@ impl MixedSource {
     /// NB: When adding new sources, ensure they match the mixers sample rate and channel layout
     pub(crate) fn message_queue(&self) -> Arc<ArrayQueue<MixerMessage>> {
         self.message_queue.clone()
+    }
+
+    /// Configure parallel processing for this mixer.
+    /// Should be called once during initialization before any processing begins.
+    pub(crate) fn set_parallel_processing(&mut self, thread_pool: Option<Arc<SubMixerThreadPool>>) {
+        self.thread_pool = thread_pool;
+    }
+
+    /// Returns the number of currently playing sources.
+    /// Used for weight calculation in parallel processing.
+    pub(crate) fn playing_source_count(&self) -> usize {
+        self.playing_sources.len()
+    }
+
+    /// Returns the number of effects in this mixer.
+    /// Used for weight calculation in parallel processing.
+    pub(crate) fn effect_count(&self) -> usize {
+        self.effects.len()
+    }
+
+    /// Returns an iterator over the sub-mixers.
+    /// Used for recursive weight calculation in parallel processing.
+    pub(crate) fn submixer_iter(&self) -> impl Iterator<Item = &Owned<SubMixerProcessor>> {
+        self.mixers.iter().map(|(_, submixer)| submixer)
     }
 
     /// remove all entries from self.playing_sources which match the given filter function.
@@ -391,15 +427,21 @@ impl MixedSource {
                     });
                 }
                 // Mixers
-                MixerMessage::AddMixer { mixer_id, mixer } => {
-                    self.mixers.push((mixer_id, SubMixerProcessor::new(mixer)));
+                MixerMessage::AddMixer {
+                    mixer_id,
+                    mixer_proessor,
+                } => {
+                    self.mixers.push((mixer_id, mixer_proessor));
                 }
                 MixerMessage::RemoveMixer { mixer_id } => {
                     self.mixers.retain(|(id, _)| *id != mixer_id);
                 }
                 // Effects
-                MixerMessage::AddEffect { effect_id, effect } => {
-                    self.effects.push((effect_id, EffectProcessor::new(effect)));
+                MixerMessage::AddEffect {
+                    effect_id,
+                    effect_processor,
+                } => {
+                    self.effects.push((effect_id, effect_processor));
                     self.effects_bypassed = false;
                 }
                 MixerMessage::RemoveEffect { effect_id } => {
@@ -470,9 +512,69 @@ impl MixedSource {
         }
     }
 
-    // Process all sub-mixers and add their output to the given output buffer.
+    // Check if parallel processing should be used based on current state.
+    fn should_use_parallel_processing(&self) -> bool {
+        // Check if we have a pool and should use it
+        if let Some(pool) = &self.thread_pool {
+            return pool.should_use_parallel_processing(self.mixers.len());
+        }
+        false
+    }
+
+    // Process all sub-mixers in parallel when parallel mixing is enabled
     // Returns true if any sub-mixer produced audible output.
-    fn process_sub_mixers(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
+    fn process_sub_mixers_parallel(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
+        let mut produced_output = false;
+
+        if let Some(thread_pool) = self.thread_pool.as_ref().and_then(|thread_pool| {
+            if self.should_use_parallel_processing() {
+                Some(thread_pool)
+            } else {
+                None
+            }
+        }) {
+            // Process all mixers in parallel with weighted batching (reuses pre-allocated buffer)
+            thread_pool.process_mixers_parallel(
+                &mut self.mixers,
+                self.channel_count,
+                self.sample_rate,
+                output.len(),
+                time,
+                &mut self.parallel_results,
+            );
+
+            // Combine outputs from all processed mixers
+            for result in &self.parallel_results {
+                if result.is_audible {
+                    // Find the mixer and read from its temp_output_buffer (zero-copy)
+                    if let Some((_, mixer)) =
+                        self.mixers.iter().find(|(id, _)| *id == result.mixer_id)
+                    {
+                        add_buffers(output, &mixer.temp_output_buffer[..output.len()]);
+                        produced_output = true;
+                    }
+                }
+            }
+        } else {
+            for (_, sub_mixer) in &mut self.mixers {
+                let mix_buffer = &mut self.temp_out[..output.len()];
+                let is_audible = sub_mixer.process(
+                    output,
+                    mix_buffer,
+                    self.channel_count,
+                    self.sample_rate,
+                    time,
+                );
+                produced_output |= is_audible;
+            }
+        }
+
+        produced_output
+    }
+
+    // Process all sub-mixers sequencially and add their output to the given output buffer.
+    // Returns true if any sub-mixer produced audible output.
+    fn process_sub_mixers_sequential(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
         let mut produced_output = false;
         for (_, sub_mixer) in &mut self.mixers {
             let mix_buffer = &mut self.temp_out[..output.len()];
@@ -634,7 +736,11 @@ impl Source for MixedSource {
                     ..(total_frames_written + frames_to_process) * self.channel_count];
 
                 // apply sub-mixers and track if they produced audible output
-                let mut audible_input = self.process_sub_mixers(chunk_output, &chunk_time);
+                let mut audible_input = if self.should_use_parallel_processing() {
+                    self.process_sub_mixers_parallel(chunk_output, &chunk_time)
+                } else {
+                    self.process_sub_mixers_sequential(chunk_output, &chunk_time)
+                };
 
                 // apply sources
                 audible_input |= self.process_sources(chunk_output, &chunk_time);

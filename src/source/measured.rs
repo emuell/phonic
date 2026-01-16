@@ -53,6 +53,12 @@ impl<S: Source> MeasuredSource<S> {
         }
     }
 
+    /// Returns a reference to the wrapped source.
+    /// Used for accessing the inner source for weight calculation and other internal operations.
+    pub(crate) fn source(&self) -> &S {
+        &self.source
+    }
+
     /// Returns a thread-safe handle to the measurement state, when measuring is enabled.
     pub(crate) fn state(&self) -> Option<SharedMeasurementState> {
         self.state.clone()

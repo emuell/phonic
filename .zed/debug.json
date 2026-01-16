@@ -37,6 +37,18 @@
 		"adapter": "CodeLLDB"
 	},
 	{
+		"label": "Build & Debug play-parallel",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-parallel", "--features", "fundsp"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-parallel",
+		"args": ["--parallel", "--submixers", "10"],
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
 		"label": "Build & Debug play-sequence",
 		"build": {
 			"command": "cargo",

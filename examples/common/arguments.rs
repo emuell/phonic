@@ -16,6 +16,7 @@ const DEFAULT_LOG_LEVEL: log::Level = if cfg!(debug_assertions) {
 
 /// Default program arguments for phonic example applications.
 #[derive(Args, Debug, Default)]
+#[allow(unused)]
 pub struct Arguments {
     #[arg(short = "o", long = "output")]
     /// Write audio output into the given wav file, instead of using the default audio device.
@@ -29,30 +30,36 @@ pub struct Arguments {
 // -------------------------------------------------------------------------------------------------
 
 /// Parse common example arguments and apply the log-level arg to the logger
+#[allow(unused)]
 pub fn parse() -> Arguments {
     // Parse args
     let args = parse_args::<Arguments>();
 
+    create_logger(args.log_level);
+    args
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Create default logger from arguments. Invoked from `parse`.
+#[allow(unused)]
+pub fn create_logger(log_level: Option<log::Level>) {
     // Init logger
     simple_logger::SimpleLogger::new()
         // use default or arg level by default
-        .with_level(
-            args.log_level
-                .unwrap_or(DEFAULT_LOG_LEVEL)
-                .to_level_filter(),
-        )
+        .with_level(log_level.unwrap_or(DEFAULT_LOG_LEVEL).to_level_filter())
         // disable logging in chatty modules
         .with_module_level("symphonia_core", log::LevelFilter::Warn)
         .with_module_level("symphonia_format", log::LevelFilter::Warn)
         .with_module_level("audio_thread_priority", log::LevelFilter::Warn)
         .init()
         .expect("Failed to set logger");
-    args
 }
 
 // -------------------------------------------------------------------------------------------------
 
 // Create a new player instance using the given argument options.
+#[allow(unused)]
 pub fn new_player<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
     args: &Arguments,
     status_sender: S,
