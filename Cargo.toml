@@ -112,3 +112,6 @@ required-features = ["wav-output"]
 [[example]]
 name = "play-sequence"
 required-features = ["wav-output"]
+[[example]]
+name = "play-multi-threaded"
+required-features = ["wav-output", "fundsp"]
