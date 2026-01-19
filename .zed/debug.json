@@ -37,6 +37,18 @@
 		"adapter": "CodeLLDB"
 	},
 	{
+		"label": "Build & Debug play-multi-threaded",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-multi-threaded", "--features", "fundsp"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-multi-threaded",
+		"args": ["--submixers", "10"],
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
 		"label": "Build & Debug play-sequence",
 		"build": {
 			"command": "cargo",

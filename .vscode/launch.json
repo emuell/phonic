@@ -11,7 +11,6 @@
 			"cargo": {
 				"args": ["build", "--example=play-file"]
 			},
-			"program": "target/debug/examples/play-file",
 			"args": [
 				// "--output", "output.wav"
 			],
@@ -24,7 +23,6 @@
 			"cargo": {
 				"args": ["build", "--example=play-synth", "--features=fundsp"]
 			},
-			"program": "target/debug/examples/play-synth",
 			"args": [
 				// "--output", "output.wav"
 			],
@@ -37,7 +35,6 @@
 			"cargo": {
 				"args": ["build", "--example=play-sequence"]
 			},
-			"program": "target/debug/examples/play-sequence",
 			"args": [
 				// "--output", "output.wav"
 			],
@@ -50,7 +47,6 @@
 			"cargo": {
 				"args": ["build", "--example=play-custom"]
 			},
-			"program": "target/debug/examples/play-custom",
 			"args": [
 				// "--output", "output.wav"
 			],
@@ -63,8 +59,17 @@
 			"cargo": {
 				"args": ["build", "--example=play-interactive", "--features=fundsp"]
 			},
-			"program": "target/debug/examples/play-interactive",
 			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug example 'play-multi-threaded'",
+			"cargo": {
+				"args": ["build", "--example=play-multi-threaded", "--features=fundsp"]
+			},
+			"args": ["--submixers", "10"],
 			"cwd": "${workspaceFolder}"
 		}
 	]
