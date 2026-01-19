@@ -236,6 +236,8 @@ impl Player {
         playback_status_sender: S,
         #[allow(unused)] config: PlayerConfig,
     ) -> Self {
+        log::info!("Creating a new player...");
+
         // Memorize the sink
         let mut output_device = Box::new(output_device);
 
@@ -259,7 +261,7 @@ impl Player {
             && config.effective_concurrent_worker_threads() > 1)
             .then(|| {
                 log::info!(
-                    "Creating mixer thread pool with {} threads",
+                    "Creating mixer thread pool with {} threads...",
                     config.effective_concurrent_worker_threads()
                 );
                 SubMixerThreadPool::new(
@@ -995,7 +997,7 @@ impl Player {
         playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
     ) -> SyncSender<PlaybackStatusEvent> {
         // use a relatively big bounded channel for playback status tracking
-        const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 1024;
+        const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 2048;
         let (playback_sender_proxy, playback_receiver_proxy) =
             sync_channel(DEFAULT_PLAYBACK_EVENTS_CAPACITY);
 
@@ -1127,6 +1129,7 @@ impl Player {
 
 impl Drop for Player {
     fn drop(&mut self) {
+        log::info!("Dropping player...");
         // stop collector thread
         self.collector_running
             .store(false, atomic::Ordering::Relaxed);
