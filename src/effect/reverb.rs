@@ -390,6 +390,10 @@ impl Effect for ReverbEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        5
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.room_size.description(), self.wet.description()]
     }

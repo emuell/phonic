@@ -98,6 +98,11 @@ pub trait Effect: Send + Sync + 'static {
     /// mis-typed messages from being processed. It can also be used for logging or in UIs.
     fn name(&self) -> &'static str;
 
+    /// Return a rough **estimate** of the processing costs for this effect in range `~1..10`,
+    /// where 1 means pretty lightweight and 10 very CPU intensive. This is used in parallel
+    /// processing to distribute work loads evenly before or without actual CPU measurements.
+    fn weight(&self) -> usize;
+
     /// Returns a list of parameter descriptors for this effect.
     ///
     /// This can be used by UIs or automation systems to query available parameters of a specific
@@ -217,6 +222,10 @@ impl Effect for Box<dyn Effect> {
 
     fn name(&self) -> &'static str {
         (**self).name()
+    }
+
+    fn weight(&self) -> usize {
+        (**self).weight()
     }
 
     fn parameters(&self) -> Vec<&dyn Parameter> {

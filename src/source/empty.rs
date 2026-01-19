@@ -27,10 +27,6 @@ impl Default for EmptySource {
 }
 
 impl Source for EmptySource {
-    fn write(&mut self, _output: &mut [f32], _time: &SourceTime) -> usize {
-        0
-    }
-
     fn channel_count(&self) -> usize {
         self.channel_count
     }
@@ -41,5 +37,13 @@ impl Source for EmptySource {
 
     fn is_exhausted(&self) -> bool {
         true
+    }
+
+    fn weight(&self) -> usize {
+        0
+    }
+
+    fn write(&mut self, _output: &mut [f32], _time: &SourceTime) -> usize {
+        0
     }
 }

@@ -92,9 +92,14 @@ pub trait Source: Send + Sync + 'static {
     /// The source's output channel count.
     fn channel_count(&self) -> usize;
 
-    /// Returns whether the source finished playback. Exhausted sources should only return 0 on `write`
-    /// and can be removed from a source render graph.
+    /// Returns whether the source finished playback. Exhausted sources should only return 0
+    /// on `write` and may be removed from a source render graph.
     fn is_exhausted(&self) -> bool;
+
+    /// Return a rough **estimate** of the processing costs for this source in range `~1..10`,
+    /// where 1 means pretty lightweight and 10 very CPU intensive. This is used in parallel
+    /// processing to distribute work loads evenly before or without actual CPU measurements.
+    fn weight(&self) -> usize;
 
     /// Write at most `output.len()` samples into the interleaved `output`
     /// The given [`SourceTime`] parameter specifies which absolute time this buffer in the
@@ -129,6 +134,10 @@ impl Source for Box<dyn Source> {
 
     fn is_exhausted(&self) -> bool {
         (**self).is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        (**self).weight()
     }
 
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {

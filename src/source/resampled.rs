@@ -162,4 +162,9 @@ impl<InputSource: Source + 'static> Source for ResampledSource<InputSource> {
     fn is_exhausted(&self) -> bool {
         self.source.is_exhausted() && self.input_buffer.is_empty() && self.output_buffer.is_empty()
     }
+
+    fn weight(&self) -> usize {
+        let resampler_weight = if self.resampler.is_some() { 1 } else { 0 };
+        self.source.weight() + resampler_weight
+    }
 }

@@ -235,6 +235,10 @@ impl Effect for Eq5Effect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        3
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.gains[0].description(),

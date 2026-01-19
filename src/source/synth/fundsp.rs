@@ -221,10 +221,6 @@ impl SynthSource for FunDspSynthSource {
 }
 
 impl Source for FunDspSynthSource {
-    fn write(&mut self, output: &mut [f32], time: &crate::SourceTime) -> usize {
-        self.0.write(output, time)
-    }
-
     fn channel_count(&self) -> usize {
         self.0.channel_count()
     }
@@ -235,6 +231,14 @@ impl Source for FunDspSynthSource {
 
     fn is_exhausted(&self) -> bool {
         self.0.is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        self.0.weight()
+    }
+
+    fn write(&mut self, output: &mut [f32], time: &crate::SourceTime) -> usize {
+        self.0.write(output, time)
     }
 }
 

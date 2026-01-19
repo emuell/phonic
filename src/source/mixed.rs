@@ -665,6 +665,22 @@ impl Source for MixedSource {
         // mixer never is exhausted, as we may get new sources added any time
         false
     }
+
+    fn weight(&self) -> usize {
+        let source_weight = self
+            .playing_sources
+            .iter()
+            .fold(0, |acc, s| acc + s.source.weight());
+        let effect_weight = self
+            .effects
+            .iter() //
+            .fold(0, |acc, (_, e)| acc + e.effect().weight());
+        let sub_mixer_weight = self
+            .mixers
+            .iter() //
+            .fold(0, |acc, (_, s)| acc + s.mixer().weight());
+        source_weight + effect_weight + sub_mixer_weight
+    }
 }
 
 impl EventProcessor for MixedSource {
@@ -771,7 +787,7 @@ impl EventProcessor for MixedSource {
                 if let Some((_, mixer_effect)) =
                     self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
-                    if let Err(err) = mixer_effect.effect.process_message(&**message) {
+                    if let Err(err) = mixer_effect.effect_mut().process_message(&**message) {
                         log::error!("Failed to process message on effect {effect_id}: {err}");
                     }
                 } else {
@@ -788,7 +804,7 @@ impl EventProcessor for MixedSource {
                     self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
                     if let Err(err) = mixer_effect
-                        .effect
+                        .effect_mut()
                         .process_parameter_update(parameter_id, &value)
                     {
                         log::error!(
@@ -809,7 +825,7 @@ impl EventProcessor for MixedSource {
                 if let Some((_, mixer_effect)) =
                     self.effects.iter_mut().find(|(id, _)| *id == effect_id)
                 {
-                    if let Err(err) = mixer_effect.effect.process_parameter_updates(&values) {
+                    if let Err(err) = mixer_effect.effect_mut().process_parameter_updates(&values) {
                         log::error!("Failed to update parameters on effect {effect_id}: {err}",);
                     }
                 } else {

@@ -65,6 +65,10 @@ impl Effect for DcFilterEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        1
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.mode.description()]
     }

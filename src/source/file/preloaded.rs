@@ -467,6 +467,22 @@ impl FileSource for PreloadedFileSource {
 }
 
 impl Source for PreloadedFileSource {
+    fn channel_count(&self) -> usize {
+        self.file_source.output_channel_count
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.file_source.output_sample_rate
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.file_source.playback_finished
+    }
+
+    fn weight(&self) -> usize {
+        1
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // consume playback messages
         self.process_messages();
@@ -545,18 +561,6 @@ impl Source for PreloadedFileSource {
         }
 
         total_written
-    }
-
-    fn channel_count(&self) -> usize {
-        self.file_source.output_channel_count
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.file_source.output_sample_rate
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.file_source.playback_finished
     }
 }
 
