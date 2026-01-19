@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use panic_message::panic_message;
+
 use super::{Source, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
@@ -72,7 +74,11 @@ impl<InputSource: Source + 'static> Source for GuardedSource<InputSource> {
                 if let Some(handler) = self.handler.lock().unwrap().as_ref() {
                     handler(payload);
                 } else {
-                    log::error!("Ouch. {} source panicked: {:?}", self.source_name, payload);
+                    log::error!(
+                        "Ouch. '{}' panicked: {}",
+                        self.source_name,
+                        panic_message(&payload)
+                    );
                 }
                 0
             }
