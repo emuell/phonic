@@ -41,6 +41,26 @@ impl<InputSource: Source + 'static> GuardedSource<InputSource> {
 }
 
 impl<InputSource: Source + 'static> Source for GuardedSource<InputSource> {
+    fn channel_count(&self) -> usize {
+        self.source.channel_count()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.source.sample_rate()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted() || self.panicked
+    }
+
+    fn weight(&self) -> usize {
+        if self.panicked {
+            0
+        } else {
+            self.source.weight()
+        }
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         if self.panicked {
             return 0;
@@ -57,17 +77,5 @@ impl<InputSource: Source + 'static> Source for GuardedSource<InputSource> {
                 0
             }
         }
-    }
-
-    fn channel_count(&self) -> usize {
-        self.source.channel_count()
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.source.sample_rate()
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.source.is_exhausted() || self.panicked
     }
 }

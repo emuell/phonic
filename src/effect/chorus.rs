@@ -288,6 +288,10 @@ impl Effect for ChorusEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        3
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.rate.description(),

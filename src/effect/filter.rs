@@ -125,6 +125,10 @@ impl Effect for FilterEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        2
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.filter_type.description(),

@@ -300,6 +300,10 @@ impl Source for Box<dyn Generator> {
         (**self).is_exhausted()
     }
 
+    fn weight(&self) -> usize {
+        (**self).weight()
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         (**self).write(output, time)
     }

@@ -53,6 +53,13 @@ impl<S: Source> MeasuredSource<S> {
         }
     }
 
+    /// Returns a reference to the wrapped source.
+    #[allow(unused)]
+    #[inline]
+    pub(crate) fn source(&self) -> &S {
+        &self.source
+    }
+
     /// Returns a thread-safe handle to the measurement state, when measuring is enabled.
     pub(crate) fn state(&self) -> Option<SharedMeasurementState> {
         self.state.clone()
@@ -70,6 +77,10 @@ impl<S: Source> Source for MeasuredSource<S> {
 
     fn is_exhausted(&self) -> bool {
         self.source.is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        self.source.weight()
     }
 
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {

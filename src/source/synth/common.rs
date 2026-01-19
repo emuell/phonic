@@ -175,6 +175,22 @@ impl<Generator> Source for SynthSourceImpl<Generator>
 where
     Generator: SynthSourceGenerator + Send + Sync + 'static,
 {
+    fn channel_count(&self) -> usize {
+        self.channel_count
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.playback_finished
+    }
+
+    fn weight(&self) -> usize {
+        2
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // receive playback events
         let mut stop_playing = false;
@@ -244,17 +260,5 @@ where
         }
 
         written
-    }
-
-    fn channel_count(&self) -> usize {
-        self.channel_count
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.playback_finished
     }
 }

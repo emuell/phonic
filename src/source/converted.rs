@@ -45,10 +45,6 @@ impl ConvertedSource {
 }
 
 impl Source for ConvertedSource {
-    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
-        self.converted.write(output, time)
-    }
-
     fn channel_count(&self) -> usize {
         self.converted.channel_count()
     }
@@ -59,5 +55,13 @@ impl Source for ConvertedSource {
 
     fn is_exhausted(&self) -> bool {
         self.converted.is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        self.converted.weight()
+    }
+
+    fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
+        self.converted.write(output, time)
     }
 }

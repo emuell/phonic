@@ -81,6 +81,10 @@ impl Effect for GainEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        1
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![self.gain.description()]
     }

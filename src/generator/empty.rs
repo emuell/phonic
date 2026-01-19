@@ -50,13 +50,6 @@ impl Default for EmptyGenerator {
 }
 
 impl Source for EmptyGenerator {
-    fn write(&mut self, _output: &mut [f32], _time: &SourceTime) -> usize {
-        while self.playback_message_queue.pop().is_some() {
-            // consume, but ignore events
-        }
-        0
-    }
-
     fn channel_count(&self) -> usize {
         self.channel_count
     }
@@ -67,6 +60,17 @@ impl Source for EmptyGenerator {
 
     fn is_exhausted(&self) -> bool {
         self.is_transient
+    }
+
+    fn weight(&self) -> usize {
+        0
+    }
+
+    fn write(&mut self, _output: &mut [f32], _time: &SourceTime) -> usize {
+        while self.playback_message_queue.pop().is_some() {
+            // consume, but ignore events
+        }
+        0
     }
 }
 

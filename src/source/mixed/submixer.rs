@@ -26,6 +26,19 @@ impl SubMixerProcessor {
         }
     }
 
+    /// Access to our mixer source.
+    #[inline]
+    pub fn mixer(&self) -> &MeasuredSource<MixedSource> {
+        self.mixer.as_ref()
+    }
+
+    /// Mut access to our mixer source.
+    #[inline]
+    #[allow(unused)]
+    pub fn mixer_mut(&mut self) -> &mut MeasuredSource<MixedSource> {
+        self.mixer.as_mut()
+    }
+
     /// Process the sub-mixer and check if it produced audible output.
     /// Returns true if the sub-mixer is producing audible audio.
     pub fn process(

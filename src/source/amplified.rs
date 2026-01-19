@@ -74,6 +74,22 @@ impl<InputSource: Source + 'static> AmplifiedSource<InputSource> {
 }
 
 impl<InputSource: Source + 'static> Source for AmplifiedSource<InputSource> {
+    fn channel_count(&self) -> usize {
+        self.source.channel_count()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.source.sample_rate()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        self.source.weight()
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // process pending messages
         self.process_messages();
@@ -85,17 +101,5 @@ impl<InputSource: Source + 'static> Source for AmplifiedSource<InputSource> {
         let written_out = &mut output[0..written];
         apply_smoothed_gain(written_out, &mut self.volume);
         written
-    }
-
-    fn channel_count(&self) -> usize {
-        self.source.channel_count()
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.source.sample_rate()
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.source.is_exhausted()
     }
 }

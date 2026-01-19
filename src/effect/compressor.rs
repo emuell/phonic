@@ -197,6 +197,10 @@ impl Effect for CompressorEffect {
         Self::EFFECT_NAME
     }
 
+    fn weight(&self) -> usize {
+        4
+    }
+
     fn parameters(&self) -> Vec<&dyn Parameter> {
         vec![
             self.threshold.description(),

@@ -499,6 +499,10 @@ impl Source for FunDspGenerator {
         self.stopped
     }
 
+    fn weight(&self) -> usize {
+        (self.active_voices * 2).max(1)
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         // Process pending messages, if any
         self.process_playback_messages(time.pos_in_frames);

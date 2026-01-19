@@ -37,6 +37,22 @@ impl<InputSource: Source + 'static> ChannelMappedSource<InputSource> {
 }
 
 impl<InputSource: Source + 'static> Source for ChannelMappedSource<InputSource> {
+    fn channel_count(&self) -> usize {
+        self.output_channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.source.sample_rate()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted()
+    }
+
+    fn weight(&self) -> usize {
+        self.source.weight()
+    }
+
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
         if !output.is_empty() {
             let mut total_written = 0;
@@ -115,17 +131,5 @@ impl<InputSource: Source + 'static> Source for ChannelMappedSource<InputSource> 
             // pass empty buffers as they are, to process messages only
             self.source.write(output, time)
         }
-    }
-
-    fn channel_count(&self) -> usize {
-        self.output_channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.source.sample_rate()
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.source.is_exhausted()
     }
 }

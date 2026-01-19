@@ -10,7 +10,7 @@ use crate::{utils::buffer::max_abs_sample, Effect, SourceTime};
 /// calling `process_started` and `process_stopped` on state transitions. Tracks tail duration using
 /// `process_tail` or silence detection for effects that don't implement it.
 pub(super) struct EffectProcessor {
-    pub(super) effect: Owned<Box<dyn Effect>>,
+    effect: Owned<Box<dyn Effect>>,
     bypassed: bool,
     tail_counter: usize,
     silence_counter: usize,
@@ -29,6 +29,18 @@ impl EffectProcessor {
             tail_counter: 0,
             silence_counter: usize::MAX,
         }
+    }
+
+    /// Access to the processor's effect.
+    #[inline]
+    pub fn effect(&self) -> &dyn Effect {
+        self.effect.as_ref()
+    }
+
+    /// Mut access to the processor's effect.
+    #[inline]
+    pub fn effect_mut(&mut self) -> &mut dyn Effect {
+        self.effect.as_mut()
     }
 
     /// Process this effect with full bypass logic and tail management.
