@@ -5,13 +5,13 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
-    effect::{Effect, EffectMessage},
+    effect::EffectMessage,
     generator::GeneratorPlaybackMessage,
     parameter::ParameterValueUpdate,
     player::{EffectId, EffectMovement},
     source::{
-        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, measured::MeasuredSource,
-        panned::PannedSourceMessage, playback::PlaybackMessageQueue, Source, SourceTime,
+        amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
+        playback::PlaybackMessageQueue, Source, SourceTime,
     },
     utils::{
         buffer::{add_buffers, clear_buffer},
@@ -25,8 +25,8 @@ use crate::{
 mod effect;
 mod submixer;
 
-use effect::EffectProcessor;
-use submixer::SubMixerProcessor;
+pub(crate) use effect::EffectProcessor;
+pub(crate) use submixer::{SubMixerProcessingResult, SubMixerProcessor, SubMixerThreadPool};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -158,7 +158,7 @@ pub(crate) enum MixerMessage {
     // Mixers
     AddMixer {
         mixer_id: MixerId,
-        mixer: Box<MeasuredSource<MixedSource>>,
+        mixer_processor: Owned<SubMixerProcessor>,
     },
     RemoveMixer {
         mixer_id: MixerId,
@@ -166,7 +166,7 @@ pub(crate) enum MixerMessage {
     // Effects
     AddEffect {
         effect_id: EffectId,
-        effect: Owned<Box<dyn Effect>>,
+        effect_processor: Owned<EffectProcessor>,
     },
     MoveEffect {
         effect_id: EffectId,
@@ -198,14 +198,16 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
-    mixers: Vec<(MixerId, SubMixerProcessor)>,
-    effects: Vec<(EffectId, EffectProcessor)>,
+    mixers: Vec<(MixerId, Owned<SubMixerProcessor>)>,
+    effects: Vec<(EffectId, Owned<EffectProcessor>)>,
     effects_bypassed: bool,
     message_queue: Arc<ArrayQueue<MixerMessage>>,
     events: VecDeque<MixerEvent>,
     channel_count: usize,
     sample_rate: u32,
-    temp_out: Vec<f32>,
+    mix_buffer: Vec<f32>,
+    thread_pool: Option<SubMixerThreadPool>,
+    thread_pool_results: Vec<SubMixerProcessingResult>,
 }
 
 impl MixedSource {
@@ -224,6 +226,9 @@ impl MixedSource {
         let effects = Vec::with_capacity(EFFECTS_CAPACITY);
         let effects_bypassed = true;
 
+        // processing state
+        let thread_pool = None;
+
         // prealloc event queues
         const MESSAGE_QUEUE_SIZE: usize = 4096;
         let message_queue = Arc::new(ArrayQueue::new(MESSAGE_QUEUE_SIZE));
@@ -231,7 +236,10 @@ impl MixedSource {
         let events = VecDeque::with_capacity(EVENTS_CAPACITY);
 
         // create temp mix buffer
-        let temp_out = vec![0.0; Self::MAX_MIX_BUFFER_SAMPLES];
+        let mix_buffer = vec![0.0; Self::MAX_MIX_BUFFER_SAMPLES];
+
+        // create thread pool processing results buffer
+        let thread_pool_results = Vec::new();
 
         Self {
             playing_sources,
@@ -242,7 +250,9 @@ impl MixedSource {
             message_queue,
             channel_count,
             sample_rate,
-            temp_out,
+            thread_pool,
+            thread_pool_results,
+            mix_buffer,
         }
     }
 
@@ -250,6 +260,18 @@ impl MixedSource {
     /// NB: When adding new sources, ensure they match the mixers sample rate and channel layout
     pub(crate) fn message_queue(&self) -> Arc<ArrayQueue<MixerMessage>> {
         self.message_queue.clone()
+    }
+
+    /// Configure thread pool for concurrent processing for this mixer.
+    /// Should be called once during initialization *before any processing begins*.
+    pub(crate) fn set_thread_pool(&mut self, thread_pool: Option<SubMixerThreadPool>) {
+        self.thread_pool = thread_pool;
+        if self.thread_pool.is_some() {
+            // pre-allocate thread pool processing results buffer
+            self.thread_pool_results = Vec::with_capacity(SubMixerThreadPool::MAX_MIXERS_HINT);
+        } else {
+            self.thread_pool_results = Vec::new();
+        }
     }
 
     /// remove all entries from self.playing_sources which match the given filter function.
@@ -391,15 +413,21 @@ impl MixedSource {
                     });
                 }
                 // Mixers
-                MixerMessage::AddMixer { mixer_id, mixer } => {
-                    self.mixers.push((mixer_id, SubMixerProcessor::new(mixer)));
+                MixerMessage::AddMixer {
+                    mixer_id,
+                    mixer_processor: mixer_proessor,
+                } => {
+                    self.mixers.push((mixer_id, mixer_proessor));
                 }
                 MixerMessage::RemoveMixer { mixer_id } => {
                     self.mixers.retain(|(id, _)| *id != mixer_id);
                 }
                 // Effects
-                MixerMessage::AddEffect { effect_id, effect } => {
-                    self.effects.push((effect_id, EffectProcessor::new(effect)));
+                MixerMessage::AddEffect {
+                    effect_id,
+                    effect_processor,
+                } => {
+                    self.effects.push((effect_id, effect_processor));
                     self.effects_bypassed = false;
                 }
                 MixerMessage::RemoveEffect { effect_id } => {
@@ -470,22 +498,59 @@ impl MixedSource {
         }
     }
 
-    // Process all sub-mixers and add their output to the given output buffer.
+    // Process all sub-mixers. This is using the thread pool if enabled, else processes
+    // all sub mixers sequentially in this thread.
+    //
     // Returns true if any sub-mixer produced audible output.
     fn process_sub_mixers(&mut self, output: &mut [f32], time: &SourceTime) -> bool {
-        let mut produced_output = false;
-        for (_, sub_mixer) in &mut self.mixers {
-            let mix_buffer = &mut self.temp_out[..output.len()];
-            let is_audible = sub_mixer.process(
-                output,
-                mix_buffer,
+        if let Some(thread_pool) = self.thread_pool.as_mut().and_then(|pool| {
+            if pool.should_use_concurrent_processing(self.mixers.len()) {
+                Some(pool)
+            } else {
+                None
+            }
+        }) {
+            // Process all mixers in the thread pool's workers
+            thread_pool.process(
+                &mut self.mixers,
                 self.channel_count,
                 self.sample_rate,
+                output.len(),
                 time,
+                &mut self.thread_pool_results,
             );
-            produced_output |= is_audible;
+            // Combine outputs from all processed audible mixers
+            let mut produced_output = false;
+            for process_result in &self.thread_pool_results {
+                if process_result.is_audible {
+                    // Find the mixer and read from its temp_output_buffer
+                    if let Some((_, mixer)) = self
+                        .mixers
+                        .iter()
+                        .find(|(id, _)| *id == process_result.mixer_id)
+                    {
+                        add_buffers(output, &mixer.output_buffer[..output.len()]);
+                        produced_output = true;
+                    }
+                }
+            }
+            produced_output
+        } else {
+            // Process all mixers sequentially
+            let mut produced_output = false;
+            for (_, sub_mixer) in &mut self.mixers {
+                let mix_buffer = &mut self.mix_buffer[..output.len()];
+                let is_audible = sub_mixer.process(
+                    output,
+                    mix_buffer,
+                    self.channel_count,
+                    self.sample_rate,
+                    time,
+                );
+                produced_output |= is_audible;
+            }
+            produced_output
         }
-        produced_output
     }
 
     // Write and mix down all playing sources into the given output buffer.
@@ -534,12 +599,12 @@ impl MixedSource {
 
                 // run source on temp_out until we've filled up the whole slice
                 let remaining = (output.len() - total_written).min(samples_until_stop as usize);
-                let to_write = remaining.min(self.temp_out.len());
-                let written = source.write(&mut self.temp_out[..to_write], &source_time);
+                let to_write = remaining.min(self.mix_buffer.len());
+                let written = source.write(&mut self.mix_buffer[..to_write], &source_time);
 
                 // add output of the source to the final output slice
                 let remaining_out = &mut output[total_written..total_written + written];
-                let written_out = &self.temp_out[..written];
+                let written_out = &self.mix_buffer[..written];
                 add_buffers(remaining_out, written_out);
                 total_written += written;
                 produced_output |= written > 0;
@@ -620,7 +685,7 @@ impl Source for MixedSource {
             // determine how many frames to process until the next event is due
             let frames_to_process = {
                 let frames_remaining = output_frame_count - total_frames_written;
-                let frames_in_temp_out = self.temp_out.len() / self.channel_count;
+                let frames_in_temp_out = self.mix_buffer.len() / self.channel_count;
                 let frames_until_next_event = self.time_until_next_event(current_time_in_frames);
                 frames_remaining
                     .min(frames_in_temp_out)
@@ -674,11 +739,11 @@ impl Source for MixedSource {
         let effect_weight = self
             .effects
             .iter() //
-            .fold(0, |acc, (_, e)| acc + e.effect().weight());
+            .fold(0, |acc, (_, e)| acc + e.weight());
         let sub_mixer_weight = self
             .mixers
             .iter() //
-            .fold(0, |acc, (_, s)| acc + s.mixer().weight());
+            .fold(0, |acc, (_, s)| acc + s.weight());
         source_weight + effect_weight + sub_mixer_weight
     }
 }

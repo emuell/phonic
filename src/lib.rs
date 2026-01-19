@@ -143,8 +143,8 @@ pub use output::OutputDevice;
 
 pub use player::{
     EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle,
-    MixerHandle, MixerId, NotePlaybackId, PanicHandler, PlaybackId, Player, SourcePlaybackHandle,
-    SynthPlaybackHandle,
+    MixerHandle, MixerId, NotePlaybackId, PanicHandler, PlaybackId, Player, PlayerConfig,
+    SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
