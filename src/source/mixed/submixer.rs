@@ -9,13 +9,23 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+mod thread_pool;
+
+pub(crate) use thread_pool::{SubMixerProcessingResult, SubMixerThreadPool};
+
+// -------------------------------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------------------------------
+
 /// Wraps a sub-mixer with silence detection for auto-bypass optimization.
 ///
 /// Tracks silence duration to determine if the sub-mixer is producing audible output,
 /// allowing the parent mixer to optimize effect processing.
-pub(super) struct SubMixerProcessor {
+pub(crate) struct SubMixerProcessor {
     mixer: Box<MeasuredSource<MixedSource>>,
     silence_counter: usize,
+    /// Temporary output buffer for parallel processing.
+    pub(super) output_buffer: Vec<f32>,
 }
 
 impl SubMixerProcessor {
@@ -23,20 +33,14 @@ impl SubMixerProcessor {
         Self {
             mixer,
             silence_counter: 0,
+            output_buffer: vec![0.0; MixedSource::MAX_MIX_BUFFER_SAMPLES],
         }
     }
 
-    /// Access to our mixer source.
+    /// Mixers's weight.
     #[inline]
-    pub fn mixer(&self) -> &MeasuredSource<MixedSource> {
-        self.mixer.as_ref()
-    }
-
-    /// Mut access to our mixer source.
-    #[inline]
-    #[allow(unused)]
-    pub fn mixer_mut(&mut self) -> &mut MeasuredSource<MixedSource> {
-        self.mixer.as_mut()
+    pub fn weight(&self) -> usize {
+        self.mixer.weight()
     }
 
     /// Process the sub-mixer and check if it produced audible output.

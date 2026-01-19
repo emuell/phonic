@@ -1,5 +1,3 @@
-use basedrop::Owned;
-
 use crate::{utils::buffer::max_abs_sample, Effect, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
@@ -9,8 +7,8 @@ use crate::{utils::buffer::max_abs_sample, Effect, SourceTime};
 /// Automatically bypasses effects when effect input is silent and the effect's tail has expired,
 /// calling `process_started` and `process_stopped` on state transitions. Tracks tail duration using
 /// `process_tail` or silence detection for effects that don't implement it.
-pub(super) struct EffectProcessor {
-    effect: Owned<Box<dyn Effect>>,
+pub(crate) struct EffectProcessor {
+    effect: Box<dyn Effect>,
     bypassed: bool,
     tail_counter: usize,
     silence_counter: usize,
@@ -22,7 +20,7 @@ impl EffectProcessor {
     /// Number of seconds that we should let an effect running before treating it as bypassed
     pub const SILENCE_SECONDS: usize = 2;
 
-    pub fn new(effect: Owned<Box<dyn Effect>>) -> Self {
+    pub fn new(effect: Box<dyn Effect>) -> Self {
         Self {
             effect,
             bypassed: true,
@@ -33,6 +31,7 @@ impl EffectProcessor {
 
     /// Access to the processor's effect.
     #[inline]
+    #[allow(unused)]
     pub fn effect(&self) -> &dyn Effect {
         self.effect.as_ref()
     }
@@ -41,6 +40,15 @@ impl EffectProcessor {
     #[inline]
     pub fn effect_mut(&mut self) -> &mut dyn Effect {
         self.effect.as_mut()
+    }
+
+    /// Mixers's weight, taking auto suspending into account.
+    pub fn weight(&self) -> usize {
+        if !self.bypassed {
+            self.effect.weight()
+        } else {
+            1 // suspended
+        }
     }
 
     /// Process this effect with full bypass logic and tail management.
