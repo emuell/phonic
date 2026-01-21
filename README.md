@@ -35,16 +35,16 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
   - Play custom-built **synthesizers** or one-shot synth sounds using the optional [fundsp](https://github.com/SamiPerttu/fundsp) feature.
   - Apply custom-built or use built-in **DSP effects**: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
   - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
-  - Sub-mixers are automatically processed in parallel across worker threads for improved performance.
+  - Sub-mixers are automatically processed concurrently across worker threads for improved performance.
   - DSP effects are automatically bypassed to save CPU cycles when they receive no audible input.
 
 - **Performance Monitoring**:
   - Measure the CPU load of the main mixer and individual audio sources in real-time.
   - Access average and peak load metrics to identify performance bottlenecks.
 
-- **Parallel Processing**:
+- **Concurrent Processing**:
   - Automatically distribute the main mixer's sub-mixers across multiple audio worker threads.
-  - Enabled by default with a smart fallback to sequential processing for simple graphs.
+  - Enabled by default with a runtime fallback to sequential processing for simple graphs.
   - Configure via `PlayerConfig` to disable or use custom thread counts.
 
 ### Documentation
