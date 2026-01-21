@@ -234,7 +234,7 @@ impl Player {
     pub fn new_with_config<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
         output_device: impl OutputDevice + 'static,
         playback_status_sender: S,
-        #[allow(unused)] config: PlayerConfig,
+        config: PlayerConfig,
     ) -> Self {
         log::info!("Creating a new player...");
 
@@ -332,7 +332,12 @@ impl Player {
     }
     /// Our actual playhead pos in sample frames
     pub fn output_sample_frame_position(&self) -> u64 {
-        self.output_sample_position() / self.output_channel_count() as u64
+        let channel_count = self.output_channel_count();
+        if channel_count > 0 {
+            self.output_sample_position() / channel_count as u64
+        } else {
+            0
+        }
     }
 
     /// Our output's global volume factor
@@ -367,7 +372,7 @@ impl Player {
     /// Sets or replaces a panic handler for the player's main mixer.
     ///
     /// The provided handler will be called once when the main mixer panics during audio processing.
-    /// Should be used for diagnositic and logging purposes only.
+    /// Should be used for diagnostic and logging purposes only.
     ///
     /// Setting `None` will disable panic handling and just log panics instead.
     ///
@@ -515,7 +520,7 @@ impl Player {
         let playback_id = synth_source.playback_id();
         let playback_message_queue = synth_source.playback_message_queue();
         let source_name = format!("Synth: '{}'", synth_source.synth_name());
-        // convert file to mixer's rate and channel layout
+        // convert synth to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             synth_source,
             self.output_device.channel_count(),
@@ -884,13 +889,25 @@ impl Player {
 
     /// Immediately stop all playing and possibly scheduled sources.
     pub fn stop_all_sources(&mut self) -> Result<(), Error> {
-        // stop everything that is playing now
-        for playing_source in self.playing_sources.iter() {
-            if playing_source.is_transient {
-                let _ = playing_source.playback_message_queue.send_stop();
+        // Collect IDs of transient sources to stop (avoids holding iterator across modifications)
+        let transient_source_ids: Vec<PlaybackId> = self
+            .playing_sources
+            .iter()
+            .filter_map(|entry| {
+                if entry.value().is_transient {
+                    Some(*entry.key())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Stop all transient sources
+        for playback_id in transient_source_ids {
+            if let Some((_, source)) = self.playing_sources.remove(&playback_id) {
+                let _ = source.playback_message_queue.send_stop();
             }
         }
-        self.playing_sources.retain(|_, p| !p.is_transient);
 
         // remove all upcoming, scheduled sources in all mixers too (force push stop events!)
         for entry in self.mixers.iter() {
