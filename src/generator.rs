@@ -18,9 +18,9 @@ use crate::{
 // -------------------------------------------------------------------------------------------------
 
 pub mod empty;
-pub mod sampler;
 #[cfg(feature = "fundsp")]
 pub mod fundsp;
+pub mod sampler;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -196,7 +196,7 @@ pub enum GeneratorPlaybackMessage {
 
 /// A [`Source`] that is driven by note events.
 ///
-/// Generators extend the *static* `Source` trait to support event-driven playback of e.g. musical 
+/// Generators extend the *static* `Source` trait to support event-driven playback of e.g. musical
 /// instruments or sample players. They respond to note-on/note-off events, velocity, pitch changes,
 /// and custom parameters, while also supporting standard volume and panning controls via the playback
 /// message queue.
