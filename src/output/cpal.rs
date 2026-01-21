@@ -497,7 +497,11 @@ impl StreamCallback {
                     self.source = src;
                 }
                 CallbackMessage::SetVolume(volume) => {
-                    self.volume.set_target(volume);
+                    if self.state == CallbackState::Paused {
+                        self.volume.init(volume);
+                    } else {
+                        self.volume.set_target(volume);
+                    }
                 }
                 CallbackMessage::Pause => {
                     self.state = CallbackState::Paused;

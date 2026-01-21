@@ -179,7 +179,6 @@ js! {
 /// impls are broken and no longer maintained.
 #[derive(Debug)]
 pub struct WebOutput {
-    volume: f32,
     is_running: bool,
     playback_pos: Arc<AtomicU64>,
     callback_sender: SyncSender<CallbackMessage>,
@@ -187,6 +186,7 @@ pub struct WebOutput {
     context_ref: Arc<WebContextRef>,
     channel_count: usize,
     sample_rate: u32,
+    volume: f32,
 }
 
 impl WebOutput {
@@ -224,7 +224,7 @@ impl WebOutput {
             playback_pos: Arc::clone(&playback_pos),
             playback_pos_instant: Instant::now(),
             state: CallbackState::Paused,
-            smoothed_volume: ExponentialSmoothedValue::new(volume, sample_rate),
+            volume: ExponentialSmoothedValue::new(volume, sample_rate),
             buffer: vec![0.0; frame_count * channel_count],
             num_channels: channel_count,
         });
@@ -237,13 +237,13 @@ impl WebOutput {
         let context_ref = Arc::new(WebContextRef { context_ptr });
 
         Ok(Self {
-            volume,
             is_running,
             playback_pos,
             callback_sender,
             context_ref,
             channel_count,
             sample_rate,
+            volume,
         })
     }
 
@@ -367,7 +367,11 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
                     state.state = CallbackState::Playing;
                 }
                 CallbackMessage::SetVolume(volume) => {
-                    state.smoothed_volume.set_target(volume);
+                    if state.state == CallbackState::Paused {
+                        state.volume.init(volume);
+                    } else {
+                        state.volume.set_target(volume);
+                    }
                 }
             }
         }
@@ -393,7 +397,7 @@ extern "C" fn phonic_pull(num_frames: ffi::c_int) -> *const f32 {
         };
 
         // Apply volume if needed
-        apply_smoothed_gain(&mut output[..samples_written], &mut state.smoothed_volume);
+        apply_smoothed_gain(&mut output[..samples_written], &mut state.volume);
 
         // Mute remaining samples, if any.
         clear_buffer(&mut output[samples_written..]);
@@ -415,7 +419,7 @@ struct WebContext {
     state: CallbackState,
     playback_pos: Arc<AtomicU64>,
     playback_pos_instant: Instant,
-    smoothed_volume: ExponentialSmoothedValue,
+    volume: ExponentialSmoothedValue,
     buffer: Vec<f32>,
     num_channels: usize,
 }
