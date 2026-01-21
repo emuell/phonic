@@ -272,7 +272,7 @@ fn main() -> Result<(), Error> {
     player.stop();
 
     // Lower master volume to avoid clipping
-    player.set_output_volume(1.0 / submixer_count as f32 * 2.0);
+    player.set_output_volume(1.0 / submixer_count as f32 * 4.0);
 
     // Create submixers with sources and effects
     let mut submixers = Vec::new();

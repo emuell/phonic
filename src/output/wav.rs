@@ -108,6 +108,7 @@ impl WavOutput {
                 }
 
                 // Finalize the WAV file when done
+                log::info!("Finalizing wav file...");
                 if let Ok(mut stream) = stream.lock() {
                     if let Some(writer) = stream.writer.take() {
                         if let Err(e) = writer.finalize() {
@@ -145,7 +146,11 @@ impl OutputDevice for WavOutput {
 
     fn set_volume(&mut self, volume: f32) {
         let mut inner = self.stream.lock().unwrap();
-        inner.smoothed_volume.set_target(volume);
+        if inner.started {
+            inner.smoothed_volume.set_target(volume);
+        } else {
+            inner.smoothed_volume.init(volume);
+        }
     }
 
     fn is_suspended(&self) -> bool {
@@ -248,6 +253,7 @@ impl WavStream {
 impl Drop for WavStream {
     fn drop(&mut self) {
         if let Some(writer) = self.writer.take() {
+            log::info!("Finalizing wave file...");
             if let Err(err) = writer.finalize() {
                 panic!("Failed to finalize WAV file: {err}");
             }
