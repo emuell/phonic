@@ -327,6 +327,7 @@ enum CallbackMessage {
     SetVolume(f32),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum CallbackState {
     Playing,
     Paused,
