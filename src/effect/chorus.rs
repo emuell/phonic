@@ -404,8 +404,8 @@ impl Effect for ChorusEffect {
             let delay_in_samples = delay_ms * self.sample_rate as f32 * 0.001;
             let depth_in_samples = self.lfo_range * depth;
 
-            let left_lfo = self.left_osc.next();
-            let right_lfo = self.right_osc.next();
+            let left_lfo = self.left_osc.run();
+            let right_lfo = self.right_osc.run();
 
             let left_delay_pos =
                 2.0 + delay_in_samples + (1.0 + left_lfo) as f32 * depth_in_samples;

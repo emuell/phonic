@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 assume = { version = "^0.5" }
 byteorder = { version = "^1.5", default-features = false }
-rand = { version = "^0.9", default-features = false, features = ["thread_rng"] }
+rand = { version = "^0.9", default-features = false, features = ["thread_rng", "small_rng"] }
 log = { version = "^0.4", features = [
     "max_level_debug",
     "release_max_level_info",
