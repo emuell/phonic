@@ -10,7 +10,6 @@ use crate::{
         SmoothedParameterValue,
     },
     utils::{
-        buffer::InterleavedBufferMut,
         dsp::{
             delay::InterpolatedDelayLine,
             filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
@@ -94,6 +93,15 @@ pub struct ChorusEffect {
     filter_coefficients: BiquadFilterCoefficients,
     filter_left: BiquadFilter,
     filter_right: BiquadFilter,
+    // Block processing buffers (persistent across calls)
+    delay_block: Vec<f32>,
+    depth_block: Vec<f32>,
+    feedback_block: Vec<f32>,
+    wet_mix_block: Vec<f32>,
+    filter_freq_block: Vec<f32>,
+    filter_resonance_block: Vec<f32>,
+    block_position: usize,
+    current_block_size: usize,
 }
 
 impl ChorusEffect {
@@ -218,6 +226,16 @@ impl ChorusEffect {
             filter_coefficients: BiquadFilterCoefficients::default(),
             filter_left: BiquadFilter::default(),
             filter_right: BiquadFilter::default(),
+
+            // Initialize block buffers (max 64 samples per block)
+            delay_block: vec![0.0; 64],
+            depth_block: vec![0.0; 64],
+            feedback_block: vec![0.0; 64],
+            wet_mix_block: vec![0.0; 64],
+            filter_freq_block: vec![0.0; 64],
+            filter_resonance_block: vec![0.0; 64],
+            block_position: 0,
+            current_block_size: 0,
         }
     }
 
@@ -234,7 +252,7 @@ impl ChorusEffect {
         filter_freq: f32,
         filter_resonance: f32,
     ) -> Self {
-        let mut chorus = Self::default();
+        let mut chorus = Self::new(); // Use new() instead of default() to ensure proper initialization
         chorus.rate.init_value(rate);
         chorus.phase.init_value(phase);
         chorus.depth.init_value(depth);
@@ -353,29 +371,58 @@ impl Effect for ChorusEffect {
         Ok(())
     }
 
-    fn process(&mut self, mut output: &mut [f32], _time: &EffectTime) {
+    fn process(&mut self, output: &mut [f32], _time: &EffectTime) {
         assert!(self.channel_count == 2);
-        for frame in output.as_frames_mut::<2>() {
+
+        const BLOCK_SIZE: usize = 64;
+        let frame_count = output.len() / self.channel_count;
+        let mut frame_idx = 0;
+
+        while frame_idx < frame_count {
+            // Check if we need to compute new parameter block
+            if self.block_position >= self.current_block_size {
+                let remaining = frame_count - frame_idx;
+                let chunk_size = remaining.min(BLOCK_SIZE);
+
+                // Process parameter smoothing for this chunk
+                self.delay.process_block(&mut self.delay_block, chunk_size);
+                self.depth.process_block(&mut self.depth_block, chunk_size);
+                self.feedback.process_block(&mut self.feedback_block, chunk_size);
+                self.wet_mix.process_block(&mut self.wet_mix_block, chunk_size);
+                self.filter_freq.process_block(&mut self.filter_freq_block, chunk_size);
+                self.filter_resonance.process_block(&mut self.filter_resonance_block, chunk_size);
+
+                self.block_position = 0;
+                self.current_block_size = chunk_size;
+            }
+
+            // Process single frame with pre-computed block values
+            let frame_start = frame_idx * 2;
+            let frame = &mut output[frame_start..frame_start + 2];
+
             let left_input = frame[0];
             let right_input = frame[1];
 
-            let delay_ms = self.delay.next_value();
-            let depth = self.depth.next_value();
-            let feedback = self.feedback.next_value().clamp(-0.999, 0.999);
-            let wet_mix = self.wet_mix.next_value();
+            // Read from block buffers (fast array access)
+            let delay_ms = self.delay_block[self.block_position];
+            let depth = self.depth_block[self.block_position];
+            let feedback = self.feedback_block[self.block_position].clamp(-0.999, 0.999);
+            let wet_mix = self.wet_mix_block[self.block_position];
             let wet_amount = wet_mix;
             let dry_amount = 1.0 - wet_mix;
 
-            // ramp and update lfos, if needed
-            if self.rate.value_need_ramp() || self.phase.value_need_ramp() {
+            // Update LFOs if rate/phase changed (check once per block)
+            if self.block_position == 0 && (self.rate.value_need_ramp() || self.phase.value_need_ramp()) {
                 self.update_lfos();
             }
 
             // Filter the inputs
-            let (filtered_left, filtered_right) =
-                if self.filter_freq.value_need_ramp() || self.filter_resonance.value_need_ramp() {
-                    let cutoff = self.filter_freq.next_value();
-                    let q = self.filter_resonance.next_value() + 0.707;
+            let (filtered_left, filtered_right) = {
+                let cutoff = self.filter_freq_block[self.block_position];
+                let q = self.filter_resonance_block[self.block_position] + 0.707;
+
+                // Update filter coefficients if parameters changed
+                if self.block_position == 0 && (self.filter_freq.value_need_ramp() || self.filter_resonance.value_need_ramp()) {
                     self.filter_coefficients
                         .set(
                             self.filter_type.value().into(),
@@ -385,22 +432,16 @@ impl Effect for ChorusEffect {
                             0.0,
                         )
                         .expect("Failed to set chorus filter parameters");
-                    let filtered_left = self
-                        .filter_left
-                        .process_sample(&self.filter_coefficients, left_input as f64);
-                    let filtered_right = self
-                        .filter_right
-                        .process_sample(&self.filter_coefficients, right_input as f64);
-                    (filtered_left, filtered_right)
-                } else {
-                    let filtered_left = self
-                        .filter_left
-                        .process_sample(&self.filter_coefficients, left_input as f64);
-                    let filtered_right = self
-                        .filter_right
-                        .process_sample(&self.filter_coefficients, right_input as f64);
-                    (filtered_left, filtered_right)
-                };
+                }
+
+                let filtered_left = self
+                    .filter_left
+                    .process_sample(&self.filter_coefficients, left_input as f64);
+                let filtered_right = self
+                    .filter_right
+                    .process_sample(&self.filter_coefficients, right_input as f64);
+                (filtered_left, filtered_right)
+            };
 
             // Run the LFOs
             let delay_in_samples = delay_ms * self.sample_rate as f32 * 0.001;
@@ -426,11 +467,14 @@ impl Effect for ChorusEffect {
 
             frame[0] = out_l;
             frame[1] = out_r;
+
+            self.block_position += 1;
+            frame_idx += 1;
         }
 
         // Move our LFO offset to keep our oscillators updated when changing the rate or phase
         let phase_inc = 2.0 * PI * self.rate.current_value() as f64 / self.sample_rate as f64;
-        self.current_phase += output.len() as f64 / self.channel_count as f64 * phase_inc;
+        self.current_phase += frame_count as f64 * phase_inc;
         while self.current_phase >= 2.0 * PI {
             self.current_phase -= 2.0 * PI;
         }

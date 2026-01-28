@@ -80,6 +80,7 @@ impl<Value: SmoothedValue> SmoothedParameterValue<Value> {
     }
 
     /// Set a new smoothed target value.
+    #[inline]
     pub fn set_target_value(&mut self, value: f32) {
         assert!(
             self.description.range().contains(&value),
@@ -90,11 +91,31 @@ impl<Value: SmoothedValue> SmoothedParameterValue<Value> {
 
     /// Set a new smoothed target value, clamping the given value into the
     /// parameter's value bounds if necessary.
+    #[inline]
     pub fn set_target_value_clamped(&mut self, value: f32) {
         self.value.set_target(self.description.clamp_value(value));
     }
 
+    /// Write smoothed parameter values to output buffer.
+    /// This is more efficient than calling `next_value()` repeatedly.
+    ///
+    /// returns true when value ramped, else false
+    pub fn write(&mut self, output: &mut [f32]) -> bool {
+        if !self.value_need_ramp() {
+            // If not ramping, simply fill with target
+            output.fill(self.value.target());
+            false
+        } else {
+            // Else process ramped for each sample in block
+            for value in output {
+                *value = self.value.next();
+            }
+            true
+        }
+    }
+
     /// Initialize the smoothed value so that no smoothing is performed.
+    #[inline]
     pub fn init_value(&mut self, value: f32) {
         assert!(
             self.description.range().contains(&value),
@@ -105,6 +126,7 @@ impl<Value: SmoothedValue> SmoothedParameterValue<Value> {
 
     /// Initialize the smoothed value so that no smoothing is performed, clamping the
     /// given value into the parameter's value bounds if necessary.
+    #[inline]
     pub fn init_value_clamped(&mut self, value: f32) {
         self.value.init(self.description.clamp_value(value));
     }
