@@ -77,21 +77,31 @@ impl PreloadedFileBuffer {
     }
 
     /// Access to the shared sample buffer's raw interleaved sample data.
+    #[inline]
     pub fn buffer(&self) -> &[f32] {
         &self.buffer
     }
 
-    /// Access to the shared sample buffer's channel layout.
+    /// Shared sample buffer's channel layout.
+    #[inline]
     pub fn channel_count(&self) -> usize {
         self.channel_count
     }
 
-    /// Access to the shared sample buffer's sampling rate.
+    /// Shared sample buffer's number of frames.
+    #[inline]
+    pub fn frame_count(&self) -> usize {
+        self.buffer.len() / self.channel_count
+    }
+
+    /// Shared sample buffer's sampling rate.
+    #[inline]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    /// Access to the shared sample embedded loop points, if any.
+    /// Shared sample embedded loop points, if any.
+    #[inline]
     pub fn loop_range(&self) -> Option<Range<usize>> {
         self.loop_range.clone()
     }
@@ -332,6 +342,16 @@ impl PreloadedFileSource {
                 .send_playback_stopped_status(self.playback_pos_eof);
             self.file_source.playback_finished = true;
         }
+    }
+
+    /// access to the file source impl
+    #[allow(unused)]
+    pub(crate) fn file_source_impl(&self) -> &FileSourceImpl {
+        &self.file_source
+    }
+    /// Mut access to the file source impl
+    pub(crate) fn file_source_impl_mut(&mut self) -> &mut FileSourceImpl {
+        &mut self.file_source
     }
 
     fn process_messages(&mut self) {
