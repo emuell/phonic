@@ -207,8 +207,17 @@ pub mod sources {
 pub mod generators {
     //! Set of basic, common [`Generator`](crate::Generator) source implementations.
 
+    pub use crate::utils::{
+        ahdsr::AhdsrParameters, // used by sampler
+        dsp::lfo::LfoWaveform,
+    };
+
     pub use super::generator::{
-        empty::EmptyGenerator, sampler::Sampler, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        empty::EmptyGenerator,
+        sampler::{
+            GrainPlaybackDirection, GrainPlayheadMode, GrainWindowMode, GranularParameters, Sampler,
+        },
+        GeneratorPlaybackEvent, GeneratorPlaybackMessage,
     };
 
     #[cfg(feature = "fundsp")]
