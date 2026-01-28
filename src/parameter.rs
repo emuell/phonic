@@ -67,6 +67,14 @@ pub enum ParameterType {
 /// Parameters can be `Send` and `Sync`ed across threads, allowing UIs to safely access parameter
 /// metadata from any thread.
 pub trait Parameter: Debug + Send + Sync + Any {
+    /// Convert the Parameter impl into a boxed `dyn Parameter`.
+    fn into_box(self) -> Box<dyn Parameter>
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+
     /// The unique id of the parameter.
     fn id(&self) -> FourCC;
 
