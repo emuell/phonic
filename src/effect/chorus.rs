@@ -263,8 +263,9 @@ impl ChorusEffect {
         self.left_osc = Lfo::new(self.sample_rate, rate, LfoWaveform::Sine);
         self.right_osc = Lfo::new(self.sample_rate, rate, LfoWaveform::Sine);
         let phase_offset = self.phase.current_value() as f64;
-        self.left_osc.set_phase(self.current_phase);
-        self.right_osc.set_phase(self.current_phase + phase_offset);
+        self.left_osc.set_phase_degrees(self.current_phase as f32);
+        self.right_osc
+            .set_phase_degrees((self.current_phase + phase_offset) as f32);
     }
 
     fn update_lfos(&mut self) {
@@ -272,8 +273,9 @@ impl ChorusEffect {
         self.left_osc.set_rate(self.sample_rate, rate);
         self.right_osc.set_rate(self.sample_rate, rate);
         let phase_offset = self.phase.next_value() as f64;
-        self.left_osc.set_phase(self.current_phase);
-        self.right_osc.set_phase(self.current_phase + phase_offset);
+        self.left_osc.set_phase_degrees(self.current_phase as f32);
+        self.right_osc
+            .set_phase_degrees((self.current_phase + phase_offset) as f32);
     }
 }
 
@@ -404,13 +406,11 @@ impl Effect for ChorusEffect {
             let delay_in_samples = delay_ms * self.sample_rate as f32 * 0.001;
             let depth_in_samples = self.lfo_range * depth;
 
-            let left_lfo = self.left_osc.next();
-            let right_lfo = self.right_osc.next();
+            let left_lfo = self.left_osc.run();
+            let right_lfo = self.right_osc.run();
 
-            let left_delay_pos =
-                2.0 + delay_in_samples + (1.0 + left_lfo) as f32 * depth_in_samples;
-            let right_delay_pos =
-                2.0 + delay_in_samples + (1.0 + right_lfo) as f32 * depth_in_samples;
+            let left_delay_pos = 2.0 + delay_in_samples + (1.0 + left_lfo) * depth_in_samples;
+            let right_delay_pos = 2.0 + delay_in_samples + (1.0 + right_lfo) * depth_in_samples;
 
             // Feed the delays
             let left_output =
