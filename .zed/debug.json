@@ -37,10 +37,27 @@
 		"adapter": "CodeLLDB"
 	},
 	{
+		"label": "Build & Debug play-grains",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-grains"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-grains",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+	{
 		"label": "Build & Debug play-multi-threaded",
 		"build": {
 			"command": "cargo",
-			"args": ["build", "--example", "play-multi-threaded", "--features", "fundsp"]
+			"args": [
+				"build",
+				"--example",
+				"play-multi-threaded",
+				"--features",
+				"fundsp"
+			]
 		},
 		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-multi-threaded",
 		"args": ["--submixers", "10"],

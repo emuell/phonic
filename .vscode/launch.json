@@ -65,6 +65,15 @@
 		{
 			"type": "lldb",
 			"request": "launch",
+			"name": "Debug example 'play-grains'",
+			"cargo": {
+				"args": ["build", "--example=play-grains"]
+			},
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
 			"name": "Debug example 'play-multi-threaded'",
 			"cargo": {
 				"args": ["build", "--example=play-multi-threaded", "--features=fundsp"]
