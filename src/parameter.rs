@@ -7,9 +7,10 @@ use four_cc::FourCC;
 // -------------------------------------------------------------------------------------------------
 
 /// Describes polarity of a [`Parameter`] for visual representations in a UI.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum ParameterPolarity {
     /// A continuous, ranged value.
+    #[default]
     Unipolar,
     /// A continuous, symmetrically ranged value, centered around 0.
     Bipolar,
