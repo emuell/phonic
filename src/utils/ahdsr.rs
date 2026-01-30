@@ -445,7 +445,7 @@ impl AhdsrEnvelope {
     /// Compute and return one output sample. Will return 0.0 and do nothing
     /// at all in Idle stage.
     #[inline]
-    pub fn process(&mut self, parameters: &AhdsrParameters) -> f32 {
+    pub fn run(&mut self, parameters: &AhdsrParameters) -> f32 {
         debug_assert!(
             parameters.sample_rate != AhdsrParameters::UNINITIALIZED_SAMPLE_RATE,
             "Set a valid sample rate in ahdsr parameters before processing!"
@@ -555,7 +555,7 @@ impl AhdsrEnvelope {
     /// This can be more efficient than calling `process()` per sample, especially
     /// in idle and sustain stages.
     #[inline]
-    pub fn process_buffer(&mut self, parameters: &AhdsrParameters, output: &mut [f32]) {
+    pub fn process(&mut self, parameters: &AhdsrParameters, output: &mut [f32]) {
         debug_assert!(
             parameters.sample_rate != AhdsrParameters::UNINITIALIZED_SAMPLE_RATE,
             "Set a valid sample rate in ahdsr parameters before processing!"
@@ -572,7 +572,7 @@ impl AhdsrEnvelope {
             _ => {
                 // General case: process sample by sample
                 for sample in output.iter_mut() {
-                    *sample = self.process(parameters);
+                    *sample = self.run(parameters);
                 }
             }
         }
@@ -626,7 +626,7 @@ mod tests {
         )?;
         let mut env = AhdsrEnvelope::new();
         env.note_on(&parameters, 1.0);
-        let _ = env.process(&parameters);
+        let _ = env.run(&parameters);
         env.note_off(&parameters);
         assert_eq!(env.stage(), AhdsrStage::Release);
         Ok(())
@@ -637,7 +637,7 @@ mod tests {
     fn test_process_no_sample_rate() {
         let parameters = AhdsrParameters::default();
         let mut env = AhdsrEnvelope::new();
-        env.process(&parameters); // no valid SR set
+        env.run(&parameters); // no valid SR set
     }
 
     #[test]

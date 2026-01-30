@@ -279,7 +279,7 @@ impl Effect for CompressorEffect {
             };
 
             // Process envelope
-            let envelope = self.envelope_follower.process(input_db);
+            let envelope = self.envelope_follower.run(input_db);
 
             // Gain reduction calculation
             let t = self.threshold.value();

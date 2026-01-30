@@ -174,7 +174,7 @@ impl SamplerVoice {
                 scale_buffer(output, self.envelope.output());
             } else {
                 for frame in output.frames_mut(channel_count) {
-                    let envelope_value = self.envelope.process(envelope_parameters);
+                    let envelope_value = self.envelope.run(envelope_parameters);
                     for sample in frame {
                         *sample *= envelope_value;
                     }

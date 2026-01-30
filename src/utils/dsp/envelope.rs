@@ -48,7 +48,7 @@ impl EnvelopeFollower {
     ///
     /// # Returns
     /// The current envelope value
-    pub fn process(&mut self, input: f32) -> f32 {
+    pub fn run(&mut self, input: f32) -> f32 {
         if input > self.current_value {
             // Attack phase
             self.current_value = input + self.attack_coeff * (self.current_value - input);

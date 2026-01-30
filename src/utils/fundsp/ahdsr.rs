@@ -99,7 +99,7 @@ impl AudioNode for SharedAhdsrNode {
         self.last_gate = gate;
 
         // Process envelope and return output
-        let output = self.envelope.process(&self.params);
+        let output = self.envelope.run(&self.params);
         [output].into()
     }
 
@@ -137,7 +137,7 @@ impl AudioNode for SharedAhdsrNode {
         // Process the envelope in the output
         let output_buffer = output.channel_f32_mut(0);
         self.envelope
-            .process_buffer(&self.params, &mut output_buffer[0..size]);
+            .process(&self.params, &mut output_buffer[0..size]);
     }
 
     fn reset(&mut self) {
