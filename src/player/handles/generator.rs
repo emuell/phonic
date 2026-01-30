@@ -374,6 +374,60 @@ impl GeneratorPlaybackHandle {
         )
     }
 
+    /// Set or update a modulation routing at the given sample time or immediately.
+    ///
+    /// # Arguments
+    /// * `source` - Modulation source ID (e.g., Sampler::MOD_SOURCE_LFO1.id)
+    /// * `target` - Target parameter ID (e.g., Sampler::GRAIN_POSITION.id())
+    /// * `amount` - Modulation amount (-1.0..=1.0)
+    /// * `bipolar` - If true, transforms unipolar sources (0.0-1.0) to bipolar (-1.0..1.0)
+    ///   centered at 0.5. Use for sources like keytracking when you want
+    ///   middle values to be neutral (no modulation).
+    /// * `sample_time` - When to apply (None = immediate, Some = scheduled)
+    pub fn set_modulation<T: Into<Option<u64>>>(
+        &self,
+        source: FourCC,
+        target: FourCC,
+        amount: f32,
+        bipolar: bool,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into();
+        if !self.is_playing() {
+            return Err(Error::SourceNotPlaying);
+        }
+
+        self.send_generator_event(
+            sample_time,
+            GeneratorPlaybackEvent::SetModulation {
+                source,
+                target,
+                amount,
+                bipolar,
+            },
+            "set_modulation",
+        )
+    }
+
+    /// Remove a modulation routing at the given sample time or immediately.
+    pub fn clear_modulation<T: Into<Option<u64>>>(
+        &self,
+        source: FourCC,
+        target: FourCC,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into();
+        if !self.is_playing() {
+            return Err(Error::SourceNotPlaying);
+        }
+
+        self.send_generator_event(
+            sample_time,
+            GeneratorPlaybackEvent::ClearModulation { source, target },
+            "clear_modulation",
+        )
+    }
+
     fn send_generator_event(
         &self,
         sample_time: Option<u64>,

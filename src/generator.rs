@@ -8,7 +8,7 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
-    parameter::{Parameter, ParameterValueUpdate},
+    parameter::{Parameter, ParameterPolarity, ParameterValueUpdate},
     source::{unique_source_id, Source},
     utils::db_to_linear,
     Error, MixerId, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
@@ -177,6 +177,16 @@ pub enum GeneratorPlaybackEvent {
     SetParameters {
         values: Owned<Vec<(FourCC, ParameterValueUpdate)>>,
     },
+
+    /// Set or update a modulation routing.
+    SetModulation {
+        source: FourCC,
+        target: FourCC,
+        amount: f32,
+        bipolar: bool,
+    },
+    /// Remove a modulation routing.
+    ClearModulation { source: FourCC, target: FourCC },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -190,6 +200,69 @@ pub enum GeneratorPlaybackMessage {
     Stop,
     /// Trigger a playback event. All playback events keep the generator running in the mixer.
     Trigger { event: GeneratorPlaybackEvent },
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Describes a modulation source (e.g. a LFO or AHDSR envelope) in a generator.
+#[derive(Debug, Copy, Clone)]
+pub struct ModulationSource {
+    id: FourCC,
+    name: &'static str,
+    polarity: ParameterPolarity,
+    parameters: &'static [&'static dyn Parameter],
+}
+
+impl ModulationSource {
+    /// Create a new modulation source descriptor.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier for this source
+    /// * `name` - Human-readable name for display
+    /// * `polarity` - Whether this source outputs bipolar or unipolar values
+    /// * `parameters` - Parameter IDs in parent generator that configure this source
+    ///   (e.g., LFO rate, waveform)
+    pub const fn new(
+        id: FourCC,
+        name: &'static str,
+        polarity: ParameterPolarity,
+        parameters: &'static [&'static dyn Parameter],
+    ) -> Self {
+        Self {
+            id,
+            name,
+            polarity,
+            parameters,
+        }
+    }
+
+    /// Unique identifier for this modulation source.
+    #[inline]
+    pub const fn id(&self) -> FourCC {
+        self.id
+    }
+
+    /// Human-readable name for display.
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Whether this source outputs bipolar or unipolar values.
+    #[inline]
+    pub const fn polarity(&self) -> ParameterPolarity {
+        self.polarity
+    }
+
+    /// Parameter IDs that configure this modulation source.
+    ///
+    /// Returns the parameters that control this source's behavior
+    /// (e.g., LFO rate and waveform for LFO sources).
+    /// Returns empty slice for sources without configuration (velocity, keytracking).
+    #[inline]
+    pub const fn parameters(&self) -> &'static [&'static dyn Parameter] {
+        self.parameters
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -253,7 +326,7 @@ pub trait Generator: Source {
     ///
     /// When returning parameters here, implement `process_parameter_update` too.
     fn parameters(&self) -> Vec<&dyn Parameter> {
-        vec![]
+        Vec::new()
     }
 
     /// Process a parameter update for this generator in the audio thread.
@@ -281,6 +354,52 @@ pub trait Generator: Source {
             self.process_parameter_update(*id, value)?
         }
         Ok(())
+    }
+
+    /// Optional modulation sources for this generator. By default none.
+    ///
+    /// When returning sources here, implement the rest of the modulation interface as well!
+    fn modulation_sources(&self) -> Vec<ModulationSource> {
+        Vec::new()
+    }
+
+    /// Returns IDs of parameters that can receive modulation. By default none.
+    ///
+    /// When returning parameters here, implement the rest of the modulation interface as well!
+    fn modulatable_parameters(&self) -> Vec<FourCC> {
+        Vec::new()
+    }
+
+    /// Set or update a modulation routing.
+    ///
+    /// # Arguments
+    /// * `source` - Modulation source ID (must be one in `Self::modulation_sources()``)
+    /// * `target` - Target parameter ID (must be one in `Self::modulatable_parameters()`)
+    /// * `amount` - Modulation amount (-1.0..=1.0)
+    /// * `bipolar` - If true, transforms unipolar sources (0.0-1.0) to bipolar (-1.0..1.0)
+    ///   centered at 0.5. Use for sources like keytracking when you want
+    ///   middle values to be neutral (no modulation).
+    ///
+    /// Returns error if source or target is invalid.
+    fn set_modulation(
+        &mut self,
+        _source: FourCC,
+        _target: FourCC,
+        _amount: f32,
+        _bipolar: bool,
+    ) -> Result<(), Error> {
+        // Default: not supported
+        Err(Error::ParameterError(
+            "Modulation routing not supported by this generator".to_string(),
+        ))
+    }
+
+    /// Remove a modulation routing.
+    fn clear_modulation(&mut self, _source: FourCC, _target: FourCC) -> Result<(), Error> {
+        // Default: not supported
+        Err(Error::ParameterError(
+            "Modulation routing not supported by this generator".to_string(),
+        ))
     }
 }
 
@@ -363,5 +482,27 @@ impl Generator for Box<dyn Generator> {
         values: &[(FourCC, ParameterValueUpdate)],
     ) -> Result<(), Error> {
         (**self).process_parameter_updates(values)
+    }
+
+    fn modulation_sources(&self) -> Vec<ModulationSource> {
+        (**self).modulation_sources()
+    }
+
+    fn modulatable_parameters(&self) -> Vec<FourCC> {
+        (**self).modulatable_parameters()
+    }
+
+    fn set_modulation(
+        &mut self,
+        source: FourCC,
+        target: FourCC,
+        amount: f32,
+        bipolar: bool,
+    ) -> Result<(), Error> {
+        (**self).set_modulation(source, target, amount, bipolar)
+    }
+
+    fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
+        (**self).clear_modulation(source, target)
     }
 }

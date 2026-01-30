@@ -465,6 +465,16 @@ impl FunDspGenerator {
                                     log::warn!("Failed to process parameter updates: {err}");
                                 }
                             }
+                            GeneratorPlaybackEvent::SetModulation { .. } => {
+                                log::warn!(
+                                    "Modulation routing is not supported for FunDSP generators"
+                                );
+                            }
+                            GeneratorPlaybackEvent::ClearModulation { .. } => {
+                                log::warn!(
+                                    "Modulation routing is not supported for FunDSP generators"
+                                );
+                            }
                         }
                     }
                 }
