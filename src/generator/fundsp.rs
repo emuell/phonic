@@ -11,18 +11,24 @@ use fundsp::{audiounit::AudioUnit, shared::Shared};
 
 use crate::{
     generator::{GeneratorPlaybackEvent, GeneratorPlaybackMessage},
+    modulation::{
+        processor::MODULATION_PROCESSOR_BLOCK_SIZE, ModulationConfig, ModulationSource,
+        ModulationTarget,
+    },
     parameter::{Parameter, ParameterValueUpdate},
     source::{unique_source_id, Source, SourceTime},
-    utils::buffer::clear_buffer,
+    utils::{buffer::clear_buffer, fundsp::SharedBuffer},
     Error, Generator, GeneratorPlaybackOptions, NotePlaybackId, PlaybackId, PlaybackStatusContext,
     PlaybackStatusEvent,
 };
 
 // -------------------------------------------------------------------------------------------------
 
+mod modulation;
 mod parameter;
 mod voice;
 
+use modulation::FunDspModulationState;
 use parameter::SharedParameterValue;
 use voice::FunDspVoice;
 
@@ -60,6 +66,7 @@ pub struct FunDspGenerator {
     voices: Vec<FunDspVoice>,
     active_voices: usize,
     shared_parameters: HashMap<FourCC, SharedParameterValue>,
+    modulation_state: Option<FunDspModulationState>,
     transient: bool, // True if the generator can exhaust
     stopping: bool,  // True if stop has been called and we are waiting for voices to decay
     stopped: bool,   // True if all voices have decayed after a stop call
@@ -137,6 +144,7 @@ impl FunDspGenerator {
         let active_voices = 0;
 
         let shared_parameters = HashMap::new();
+        let modulation_state = None;
 
         let transient = false;
         let stopping = false;
@@ -150,6 +158,7 @@ impl FunDspGenerator {
             voices,
             active_voices,
             shared_parameters,
+            modulation_state,
             transient,
             stopping,
             stopped,
@@ -159,33 +168,34 @@ impl FunDspGenerator {
         })
     }
 
-    /// Create a new FunDSP-based generator with the given voice count and shared parameters.
+    /// Create a new FunDSP-based generator with shared parameters and optional modulation.
     ///
     /// # Arguments
     /// * `synth_name` - A name for the synth (for playback status tracking and debugging).
-    /// * `parameters` - A slice of parameters which will be passed to the factory
-    ///   in order automate vars within the factory.
+    /// * `parameters` - A slice of parameters which will be passed to the factory.
     /// * `parameter_state` - Optional parameter values that should be applied initially.
-    ///   When None, the parameters will be initialized with their default values.
-    /// * `voice_factory` - Function that creates a voice unit with given
-    ///   (frequency, volume, gate, panning) shared variables.
+    /// * `modulation_config` - Configuration for modulation sources and targets.
+    /// * `voice_factory` - Function that creates a voice unit with given shared variables,
+    ///   parameter accessor, and modulation buffer accessor.
     /// * `options` - Generic generator playback options.
     /// * `sample_rate` - Output sample rate.
     pub fn with_parameters<S: AsRef<str>, F>(
         synth_name: S,
         parameters: &[&dyn Parameter],
         parameter_state: Option<&[(FourCC, ParameterValueUpdate)]>,
+        modulation_config: ModulationConfig,
         voice_factory: F,
         options: GeneratorPlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error>
     where
         F: Fn(
-            Shared,
-            Shared,
-            Shared,
-            Shared,
-            &mut dyn FnMut(FourCC) -> Shared,
+            Shared,                                 // gate
+            Shared,                                 // frequency
+            Shared,                                 // volume
+            Shared,                                 // panning
+            &mut dyn FnMut(FourCC) -> Shared,       // parameter accessor
+            &mut dyn FnMut(FourCC) -> SharedBuffer, // modulation buffer accessor
         ) -> Box<dyn AudioUnit>,
     {
         let synth_name = Arc::new(synth_name.as_ref().to_owned());
@@ -193,13 +203,18 @@ impl FunDspGenerator {
         let playback_id = unique_source_id();
         let playback_status_send = None;
 
-        // Create playback message queue to hold automation for all params at once + a bit more
-        let playback_message_queue_size: usize = parameters.len() * 2 + 16;
-        let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
+        // Create modulation state
+        let modulation_state = FunDspModulationState::new(modulation_config.clone());
 
-        // Create parameter map and ensure that all parameter IDs are unique
-        let mut shared_parameters = HashMap::with_capacity(parameters.len());
-        for p in parameters {
+        // Collect all parameters: user params + modulation source params
+        let mut all_parameters = parameters.to_vec();
+        for source in &modulation_config.sources {
+            all_parameters.extend(source.parameters());
+        }
+
+        // Create parameter map and ensure all parameter IDs are unique
+        let mut shared_parameters = HashMap::with_capacity(all_parameters.len());
+        for p in &all_parameters {
             if shared_parameters
                 .insert(p.id(), SharedParameterValue::from_description(*p))
                 .is_some()
@@ -210,6 +225,10 @@ impl FunDspGenerator {
                 )));
             }
         }
+
+        // Create playback message queue
+        let playback_message_queue_size: usize = all_parameters.len() * 2 + 16;
+        let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
 
         // Apply initial parameter state, if any
         if let Some(parameter_state) = parameter_state {
@@ -234,6 +253,18 @@ impl FunDspGenerator {
             let volume = Shared::new(1.0);
             let panning = Shared::new(0.0);
 
+            // Create SharedBuffers for each modulation target
+            let mut modulation_buffers = HashMap::new();
+            for target in &modulation_config.targets {
+                modulation_buffers.insert(
+                    target.id(),
+                    SharedBuffer::new(MODULATION_PROCESSOR_BLOCK_SIZE),
+                );
+            }
+
+            // Clone for the closure
+            let modulation_buffers_for_factory = modulation_buffers.clone();
+
             // Create the voice node using the factory
             let mut audio_unit = voice_factory(
                 gate.clone(),
@@ -249,6 +280,14 @@ impl FunDspGenerator {
                         .shared()
                         .clone()
                 },
+                &mut |id: FourCC| -> SharedBuffer {
+                    modulation_buffers_for_factory
+                        .get(&id)
+                        .unwrap_or_else(|| {
+                            panic!("Modulation buffer for parameter '{id}' not found")
+                        })
+                        .clone()
+                },
             );
             audio_unit.set_sample_rate(output_sample_rate as f64);
             audio_unit.allocate();
@@ -260,8 +299,11 @@ impl FunDspGenerator {
             );
             output_channel_count = audio_unit.outputs();
 
-            // Create voice
-            voices.push(FunDspVoice::new(
+            // Create modulation matrix for this voice
+            let modulation_matrix = modulation_state.create_matrix(output_sample_rate);
+
+            // Create voice with modulation
+            voices.push(FunDspVoice::with_modulation(
                 Arc::clone(&synth_name),
                 audio_unit,
                 frequency,
@@ -269,9 +311,14 @@ impl FunDspGenerator {
                 panning,
                 gate,
                 options.playback_pos_emit_rate,
+                modulation_matrix,
+                modulation_buffers,
                 output_sample_rate,
             ));
         }
+
+        let modulation_state = Some(modulation_state);
+
         let active_voices = 0;
 
         let transient = false;
@@ -286,6 +333,7 @@ impl FunDspGenerator {
             voices,
             active_voices,
             shared_parameters,
+            modulation_state,
             transient,
             stopping,
             stopped,
@@ -465,15 +513,48 @@ impl FunDspGenerator {
                                     log::warn!("Failed to process parameter updates: {err}");
                                 }
                             }
-                            GeneratorPlaybackEvent::SetModulation { .. } => {
-                                log::warn!(
-                                    "Modulation routing is not supported for FunDSP generators"
-                                );
+                            GeneratorPlaybackEvent::SetModulation {
+                                source,
+                                target,
+                                amount,
+                                bipolar,
+                            } => {
+                                if let Some(ref modulation_state) = self.modulation_state {
+                                    for voice in &mut self.voices {
+                                        if let Some(matrix) = voice.modulation_matrix_mut() {
+                                            if let Err(err) = modulation_state.set_modulation(
+                                                matrix, source, target, amount, bipolar,
+                                            ) {
+                                                log::warn!(
+                                                    "Failed to set modulation routing: {err}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    log::warn!(
+                                        "Modulation routing is not enabled for this FunDSP generator"
+                                    );
+                                }
                             }
-                            GeneratorPlaybackEvent::ClearModulation { .. } => {
-                                log::warn!(
-                                    "Modulation routing is not supported for FunDSP generators"
-                                );
+                            GeneratorPlaybackEvent::ClearModulation { source, target } => {
+                                if let Some(ref modulation_state) = self.modulation_state {
+                                    for voice in &mut self.voices {
+                                        if let Some(matrix) = voice.modulation_matrix_mut() {
+                                            if let Err(err) = modulation_state
+                                                .clear_modulation(matrix, source, target)
+                                            {
+                                                log::warn!(
+                                                    "Failed to clear modulation routing: {err}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    log::warn!(
+                                        "Modulation routing is not enabled for this FunDSP generator"
+                                    );
+                                }
                             }
                         }
                     }
@@ -489,6 +570,22 @@ impl FunDspGenerator {
     ) -> Result<(), Error> {
         if let Some(parameter) = self.shared_parameters.get_mut(&id) {
             parameter.apply_update(value);
+
+            // Propagate to modulation matrices if this is a modulation source parameter
+            if let Some(modulation_state) = &self.modulation_state {
+                if modulation_state.is_source_parameter(id) {
+                    for voice in &mut self.voices {
+                        if let Some(matrix) = voice.modulation_matrix_mut() {
+                            modulation_state.apply_parameter_to_matrix(
+                                matrix,
+                                id,
+                                &self.shared_parameters,
+                            );
+                        }
+                    }
+                }
+            }
+
             Ok(())
         } else {
             Err(Error::ParameterError(format!("Unknown parameter '{id}'")))
@@ -607,5 +704,55 @@ impl Generator for FunDspGenerator {
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
         self.process_parameter_update(id, value)
+    }
+
+    fn modulation_sources(&self) -> Vec<ModulationSource> {
+        self.modulation_state
+            .as_ref()
+            .map(|s| s.modulation_sources())
+            .unwrap_or_default()
+    }
+
+    fn modulation_targets(&self) -> Vec<ModulationTarget> {
+        self.modulation_state
+            .as_ref()
+            .map(|s| s.modulation_targets())
+            .unwrap_or_default()
+    }
+
+    fn set_modulation(
+        &mut self,
+        source: FourCC,
+        target: FourCC,
+        amount: f32,
+        bipolar: bool,
+    ) -> Result<(), Error> {
+        if let Some(modulation_state) = &self.modulation_state {
+            for voice in &mut self.voices {
+                if let Some(matrix) = voice.modulation_matrix_mut() {
+                    modulation_state.set_modulation(matrix, source, target, amount, bipolar)?;
+                }
+            }
+            Ok(())
+        } else {
+            Err(Error::ParameterError(
+                "Modulation routing not supported by this generator".to_string(),
+            ))
+        }
+    }
+
+    fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
+        if let Some(ref modulation_state) = self.modulation_state {
+            for voice in &mut self.voices {
+                if let Some(matrix) = voice.modulation_matrix_mut() {
+                    modulation_state.clear_modulation(matrix, source, target)?;
+                }
+            }
+            Ok(())
+        } else {
+            Err(Error::ParameterError(
+                "Modulation routing not supported by this generator".to_string(),
+            ))
+        }
     }
 }

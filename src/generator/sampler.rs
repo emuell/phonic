@@ -11,11 +11,11 @@ use strum::VariantNames;
 use crate::{
     generator::{
         Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
-        ModulationSource,
     },
+    modulation::{ModulationConfig, ModulationSource, ModulationTarget},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, Parameter, ParameterPolarity,
-        ParameterScaling, ParameterValueUpdate,
+        EnumParameter, EnumParameterValue, FloatParameter, Parameter, ParameterScaling,
+        ParameterValueUpdate,
     },
     source::{
         file::preloaded::PreloadedFileSource, mixed::MixedSource, unique_source_id, Source,
@@ -59,13 +59,15 @@ pub struct Sampler {
     active_voices: usize,
     envelope_parameters: Option<AhdsrParameters>,
     granular_parameters: Option<GranularParameters>,
+    modulation_state: SamplerModulationState,
+    modulation_source_parameters: Vec<Box<dyn Parameter>>,
+    modulation_target_parameters: Vec<FourCC>,
     active_parameters: Vec<Box<dyn Parameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     transient: bool, // True if the generator can exhaust
     stopping: bool,  // True if stop has been called and we are waiting for voices to decay
     stopped: bool,   // True if all voices have decayed after a stop call
     options: GeneratorPlaybackOptions,
-    modulation_state: SamplerModulationState,
     output_sample_rate: u32,
     output_channel_count: usize,
     temp_buffer: Vec<f32>,
@@ -205,6 +207,12 @@ impl Sampler {
         &Self::GRAIN_SPEED,
     ];
 
+    // Modulation source descriptors
+    pub const MOD_SOURCE_LFO1: FourCC = FourCC(*b"LFO1");
+    pub const MOD_SOURCE_LFO2: FourCC = FourCC(*b"LFO2");
+    pub const MOD_SOURCE_VELOCITY: FourCC = FourCC(*b"VELM");
+    pub const MOD_SOURCE_KEYTRACK: FourCC = FourCC(*b"KEYM");
+
     // Modulation parameters - LFO 1
     pub const MOD_LFO1_RATE: FloatParameter =
         FloatParameter::new(FourCC(*b"ML1R"), "LFO 1 Rate", 0.01..=20.0, 1.0)
@@ -229,67 +237,83 @@ impl Sampler {
         LfoWaveform::Triangle as usize,
     );
 
-    // All modulation source parameters
-    pub const GRAIN_MODULATION_SOURCE_PARAMETERS: [&dyn Parameter; 4] = [
-        // LFO 1 configuration
-        &Self::MOD_LFO1_RATE,
-        &Self::MOD_LFO1_WAVEFORM,
-        // LFO 2 configuration
-        &Self::MOD_LFO2_RATE,
-        &Self::MOD_LFO2_WAVEFORM,
-        // Velocity and Keytracking have no parameters
-    ];
+    // complete Modulation source setup
+    pub fn modulation_sources() -> Vec<ModulationSource> {
+        vec![
+            ModulationSource::Lfo {
+                id: Self::MOD_SOURCE_LFO1,
+                name: "LFO 1",
+                rate_param: Self::MOD_LFO1_RATE,
+                waveform_param: Self::MOD_LFO1_WAVEFORM,
+            },
+            ModulationSource::Lfo {
+                id: Self::MOD_SOURCE_LFO2,
+                name: "LFO 2",
+                rate_param: Self::MOD_LFO2_RATE,
+                waveform_param: Self::MOD_LFO2_WAVEFORM,
+            },
+            ModulationSource::Velocity {
+                id: Self::MOD_SOURCE_VELOCITY,
+                name: "Velocity",
+            },
+            ModulationSource::Keytracking {
+                id: Self::MOD_SOURCE_KEYTRACK,
+                name: "Keytracking",
+            },
+        ]
+    }
 
     // All modulatable grain target parameters
-    pub const GRAIN_MODULATION_TARGET_PARAMETERS: [&dyn Parameter; 7] = [
-        &Self::GRAIN_SIZE,
-        &Self::GRAIN_DENSITY,
-        &Self::GRAIN_VARIATION,
-        &Self::GRAIN_SPRAY,
-        &Self::GRAIN_PAN_SPREAD,
-        &Self::GRAIN_POSITION,
-        &Self::GRAIN_SPEED,
-    ];
+    pub fn modulation_targets() -> Vec<Box<dyn Parameter>> {
+        vec![
+            Self::GRAIN_SIZE.into_box(),
+            Self::GRAIN_DENSITY.into_box(),
+            Self::GRAIN_VARIATION.into_box(),
+            Self::GRAIN_SPRAY.into_box(),
+            Self::GRAIN_PAN_SPREAD.into_box(),
+            Self::GRAIN_POSITION.into_box(),
+            Self::GRAIN_SPEED.into_box(),
+        ]
+    }
 
-    // Modulation source descriptors
-    const MOD_SOURCE_LFO1_PARAMETERS: [&dyn Parameter; 2] =
-        [&Self::MOD_LFO1_WAVEFORM, &Self::MOD_LFO1_RATE];
+    /// Default modulation configuration for the sampler.
+    fn default_modulation_config() -> ModulationConfig {
+        use crate::modulation::ModulationTarget;
 
-    pub const MOD_SOURCE_LFO1: ModulationSource = ModulationSource::new(
-        FourCC(*b"LFO1"),
-        "LFO 1",
-        ParameterPolarity::Bipolar,
-        &Self::MOD_SOURCE_LFO1_PARAMETERS,
-    );
-
-    const MOD_SOURCE_LFO2_PARAMETERS: [&dyn Parameter; 2] =
-        [&Self::MOD_LFO2_WAVEFORM, &Self::MOD_LFO2_RATE];
-
-    pub const MOD_SOURCE_LFO2: ModulationSource = ModulationSource::new(
-        FourCC(*b"LFO2"),
-        "LFO 2",
-        ParameterPolarity::Bipolar,
-        &Self::MOD_SOURCE_LFO2_PARAMETERS,
-    );
-    pub const MOD_SOURCE_VELOCITY: ModulationSource = ModulationSource::new(
-        FourCC(*b"VELM"),
-        "Velocity",
-        ParameterPolarity::Unipolar,
-        &[],
-    );
-    pub const MOD_SOURCE_KEYTRACK: ModulationSource = ModulationSource::new(
-        FourCC(*b"KEYM"),
-        "Keytracking",
-        ParameterPolarity::Unipolar,
-        &[],
-    );
-
-    pub const MODULATION_SOURCES: [ModulationSource; 4] = [
-        Self::MOD_SOURCE_LFO1,
-        Self::MOD_SOURCE_LFO2,
-        Self::MOD_SOURCE_VELOCITY,
-        Self::MOD_SOURCE_KEYTRACK,
-    ];
+        ModulationConfig {
+            sources: vec![
+                ModulationSource::Lfo {
+                    id: Self::MOD_SOURCE_LFO1,
+                    name: "LFO 1",
+                    rate_param: Self::MOD_LFO1_RATE,
+                    waveform_param: Self::MOD_LFO1_WAVEFORM,
+                },
+                ModulationSource::Lfo {
+                    id: Self::MOD_SOURCE_LFO2,
+                    name: "LFO 2",
+                    rate_param: Self::MOD_LFO2_RATE,
+                    waveform_param: Self::MOD_LFO2_WAVEFORM,
+                },
+                ModulationSource::Velocity {
+                    id: Self::MOD_SOURCE_VELOCITY,
+                    name: "Velocity",
+                },
+                ModulationSource::Keytracking {
+                    id: Self::MOD_SOURCE_KEYTRACK,
+                    name: "Keytracking",
+                },
+            ],
+            targets: vec![
+                ModulationTarget::new(Self::GRAIN_SIZE.id(), Self::GRAIN_SIZE.name()),
+                ModulationTarget::new(Self::GRAIN_DENSITY.id(), Self::GRAIN_DENSITY.name()),
+                ModulationTarget::new(Self::GRAIN_VARIATION.id(), Self::GRAIN_VARIATION.name()),
+                ModulationTarget::new(Self::GRAIN_SPRAY.id(), Self::GRAIN_SPRAY.name()),
+                ModulationTarget::new(Self::GRAIN_PAN_SPREAD.id(), Self::GRAIN_PAN_SPREAD.name()),
+                ModulationTarget::new(Self::GRAIN_POSITION.id(), Self::GRAIN_POSITION.name()),
+                ModulationTarget::new(Self::GRAIN_SPEED.id(), Self::GRAIN_SPEED.name()),
+            ],
+        }
+    }
 
     /// Create a new sampler with the given sample file
     ///
@@ -408,27 +432,34 @@ impl Sampler {
 
         let granular_parameters = None;
 
+        // Modulation state (with empty config - will be initialized in with_granular_playback)
+        let empty_config = crate::modulation::ModulationConfig {
+            sources: Vec::new(),
+            targets: Vec::new(),
+        };
+        let modulation_state = SamplerModulationState::new(empty_config);
+        let modulation_source_parameters = Vec::new();
+        let modulation_target_parameters = Vec::new();
+
         let active_voices = 0;
 
         // Collect active parameters
-        let mut active_parameters = Vec::new();
-        if envelope_parameters.is_some() {
-            active_parameters.extend([
+        let active_parameters = if envelope_parameters.is_some() {
+            vec![
                 Self::AMP_ATTACK.into_box(),
                 Self::AMP_HOLD.into_box(),
                 Self::AMP_DECAY.into_box(),
                 Self::AMP_SUSTAIN.into_box(),
                 Self::AMP_RELEASE.into_box(),
-            ]);
-        }
+            ]
+        } else {
+            vec![]
+        };
 
         // Initial playback state
         let transient = false;
         let stopping = false;
         let stopped = false;
-
-        // Modulation state
-        let modulation_state = SamplerModulationState::new();
 
         // Pre-allocate temp buffer for mixing, using mixer's max sample buffer size
         let temp_buffer = vec![0.0; MixedSource::MAX_MIX_BUFFER_SAMPLES];
@@ -442,11 +473,13 @@ impl Sampler {
             active_voices,
             envelope_parameters,
             granular_parameters,
+            modulation_state,
+            modulation_source_parameters,
+            modulation_target_parameters,
             active_parameters,
             transient,
             stopping,
             stopped,
-            modulation_state,
             options,
             output_sample_rate,
             output_channel_count,
@@ -465,7 +498,7 @@ impl Sampler {
 
         // Add AHDSR parameters to the active parameters list
         self.active_parameters
-            .extend(Self::ENVELOPE_PARAMETERS.iter().map(|p| p.dyn_clone()));
+            .extend(Self::ENVELOPE_PARAMETERS.into_iter().map(|p| p.dyn_clone()));
 
         self.envelope_parameters = Some(parameters);
         Ok(self)
@@ -480,14 +513,22 @@ impl Sampler {
 
         // Add granular parameters to the active parameters list
         self.active_parameters
-            .extend(Self::GRAIN_PARAMETERS.iter().map(|p| p.dyn_clone()));
+            .extend(Self::GRAIN_PARAMETERS.into_iter().map(|p| p.dyn_clone()));
+
+        // Create modulation config
+        let modulation_config = Self::default_modulation_config();
+
+        // Cache modulation parameters for lookups
+        self.modulation_source_parameters = modulation_config.source_parameters();
+        self.modulation_target_parameters = modulation_config
+            .targets
+            .iter()
+            .map(|target| target.id())
+            .collect();
 
         // Add modulation parameters to the active parameters list
-        self.active_parameters.extend(
-            Self::GRAIN_MODULATION_SOURCE_PARAMETERS
-                .iter()
-                .map(|p| p.dyn_clone()),
-        );
+        self.active_parameters
+            .extend(modulation_config.source_parameters());
 
         // Resample file source, if needed and mix down to mono
         let sample_buffer = Self::create_granular_sample_buffer(
@@ -495,9 +536,17 @@ impl Sampler {
             self.output_sample_rate,
         )?;
 
+        // Initialize modulation state
+        self.modulation_state = SamplerModulationState::new(modulation_config);
+
         // Initialize granular playback on all voices
         for voice in &mut self.voices {
-            voice.enable_granular_playback(self.output_sample_rate, sample_buffer.clone());
+            let modulation_matrix = self.modulation_state.create_matrix(self.output_sample_rate);
+            voice.enable_granular_playback(
+                self.output_sample_rate,
+                sample_buffer.clone(),
+                modulation_matrix,
+            );
         }
 
         self.granular_parameters = Some(parameters);
@@ -839,59 +888,34 @@ impl Sampler {
         id: FourCC,
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
-        if id == Self::MOD_LFO1_RATE.id() {
-            // Apply update in modulation state
-            let rate = Self::parameter_update_value(value, &Self::MOD_LFO1_RATE)?;
-            self.modulation_state.update_lfo1_rate(rate);
-            // Update all active voices
-            for voice in &mut self.voices {
-                if voice.is_active() {
-                    voice.modulation_matrix().update_lfo_rate(0, rate as f64);
-                }
-            }
-        } else if id == Self::MOD_LFO1_WAVEFORM.id() {
-            // Apply update in modulation state
+        // Check if this is an LFO rate parameter
+        let rate = if id == Self::MOD_LFO1_RATE.id() {
+            Some(Self::parameter_update_value(value, &Self::MOD_LFO1_RATE)?)
+        } else if id == Self::MOD_LFO2_RATE.id() {
+            Some(Self::parameter_update_value(value, &Self::MOD_LFO2_RATE)?)
+        } else {
+            None
+        };
+
+        // Check if this is an LFO waveform parameter
+        let waveform = if id == Self::MOD_LFO1_WAVEFORM.id() {
             let mut waveform_value = EnumParameterValue::from_description(Self::MOD_LFO1_WAVEFORM);
             waveform_value.apply_update(value);
-            let waveform = waveform_value.value();
-            self.modulation_state.update_lfo1_waveform(waveform);
-            // Update all active voices
-            for voice in &mut self.voices {
-                if voice.is_active() {
-                    voice.modulation_matrix().update_lfo_waveform(0, waveform);
-                }
-            }
-        } else if id == Self::MOD_LFO2_RATE.id() {
-            // Apply update in modulation state
-            let rate = Self::parameter_update_value(value, &Self::MOD_LFO2_RATE)?;
-            self.modulation_state.update_lfo2_rate(rate);
-            // Update all active voices
-            for voice in &mut self.voices {
-                if voice.is_active() {
-                    voice.modulation_matrix().update_lfo_rate(1, rate as f64);
-                }
-            }
+            Some(waveform_value.value())
         } else if id == Self::MOD_LFO2_WAVEFORM.id() {
-            // Apply update in modulation state
             let mut waveform_value = EnumParameterValue::from_description(Self::MOD_LFO2_WAVEFORM);
             waveform_value.apply_update(value);
-            let waveform = waveform_value.value();
-            self.modulation_state.update_lfo2_waveform(waveform);
-            // Update all active voices
-            for voice in &mut self.voices {
-                if voice.is_active() {
-                    voice.modulation_matrix().update_lfo_waveform(1, waveform);
-                }
-            }
+            Some(waveform_value.value())
         } else {
-            return Err(Error::ParameterError(format!(
-                "Invalid/unknown modulation parameter {id}"
-            )));
-        }
-        Ok(())
+            None
+        };
+
+        // Delegate to modulation state
+        self.modulation_state
+            .apply_parameter_update(id, rate, waveform, &mut self.voices)
     }
 
-    /// Update modulation routing in all active voices.
+    /// Update modulation routing in all voices.
     fn update_modulation_routing(
         &mut self,
         source_id: FourCC,
@@ -899,17 +923,14 @@ impl Sampler {
         amount: f32,
         bipolar: bool,
     ) -> Result<(), Error> {
-        // Update active voices only. Newly started one will get a fresh modulation state.
         for voice in &mut self.voices {
-            if voice.is_active() {
-                self.modulation_state.update_voice_modulation(
-                    voice.modulation_matrix(),
-                    source_id,
-                    target_id,
-                    amount,
-                    bipolar,
-                )?;
-            }
+            self.modulation_state.update_voice_modulation(
+                voice.modulation_matrix(),
+                source_id,
+                target_id,
+                amount,
+                bipolar,
+            )?;
         }
 
         Ok(())
@@ -1073,10 +1094,7 @@ impl Generator for Sampler {
     }
 
     fn parameters(&self) -> Vec<&dyn Parameter> {
-        self.active_parameters
-            .iter()
-            .map(|p| p.as_ref() as &dyn Parameter)
-            .collect()
+        self.active_parameters.iter().map(|p| p.as_ref()).collect()
     }
 
     fn process_parameter_update(
@@ -1099,7 +1117,8 @@ impl Generator for Sampler {
             }
         }
         // Handle modulation parameters
-        if Self::GRAIN_MODULATION_SOURCE_PARAMETERS
+        if self
+            .modulation_source_parameters
             .iter()
             .any(|p| p.id() == id)
         {
@@ -1114,18 +1133,15 @@ impl Generator for Sampler {
 
     fn modulation_sources(&self) -> Vec<ModulationSource> {
         if self.granular_parameters.is_some() {
-            Self::MODULATION_SOURCES.to_vec()
+            self.modulation_state.config().sources.clone()
         } else {
             Vec::new()
         }
     }
 
-    fn modulatable_parameters(&self) -> Vec<FourCC> {
+    fn modulation_targets(&self) -> Vec<ModulationTarget> {
         if self.granular_parameters.is_some() {
-            Self::GRAIN_MODULATION_TARGET_PARAMETERS
-                .into_iter()
-                .map(|p| p.id())
-                .collect()
+            self.modulation_state.config().targets.clone()
         } else {
             Vec::new()
         }
@@ -1138,31 +1154,37 @@ impl Generator for Sampler {
         amount: f32,
         bipolar: bool,
     ) -> Result<(), Error> {
-        // Only supported if granular mode is enabled
-        if self.granular_parameters.is_none() {
-            return Err(Error::ParameterError(
-                "Modulation not available without granular playback".to_string(),
-            ));
+        // Validate source id
+        if !self
+            .modulation_state
+            .config()
+            .sources
+            .iter()
+            .any(|config| config.id() == source)
+        {
+            return Err(Error::ParameterError(format!(
+                "Invalid modulation source: {}",
+                source
+            )));
         }
-
-        // Validate source and target
-        SamplerModulationState::validate_routing(source, target)?;
+        // Validate target parameter
+        if !self.modulation_target_parameters.contains(&target) {
+            return Err(Error::ParameterError(format!(
+                "Parameter {} is not modulatable",
+                target
+            )));
+        }
 
         // Clamp amount to standard modulation range
         let clamped_amount = amount.clamp(-1.0, 1.0);
 
-        // Update modulation state
-        self.modulation_state
-            .set_routing(source, target, clamped_amount, bipolar);
-
-        // Update all active voices
+        // Update all voices
         self.update_modulation_routing(source, target, clamped_amount, bipolar)?;
 
         Ok(())
     }
 
     fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
-        self.modulation_state.clear_routing(source, target);
         self.update_modulation_routing(source, target, 0.0, false)?;
         Ok(())
     }

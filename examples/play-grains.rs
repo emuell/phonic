@@ -127,7 +127,7 @@ fn main() -> Result<(), Error> {
     )?;
     // Route LFO 1 to Grain Position (unipolar application - adds to position)
     generator.set_modulation(
-        Sampler::MOD_SOURCE_LFO1.id(),
+        Sampler::MOD_SOURCE_LFO1,
         Sampler::GRAIN_POSITION.id(),
         MOD_LFO1_TO_GRAIN_POS,
         false, // unipolar: LFO output used as-is
@@ -142,7 +142,7 @@ fn main() -> Result<(), Error> {
     )?;
     // Route LFO 2 to Grain Size (unipolar - only increases size)
     generator.set_modulation(
-        Sampler::MOD_SOURCE_LFO2.id(),
+        Sampler::MOD_SOURCE_LFO2,
         Sampler::GRAIN_SIZE.id(),
         MOD_LFO2_TO_GRAIN_SIZE,
         false, // unipolar
@@ -152,7 +152,7 @@ fn main() -> Result<(), Error> {
     // Route Velocity to Grain Density (unipolar - higher velocity = higher density)
     // Velocity and Keytracking sources are automatically available - no configuration needed
     generator.set_modulation(
-        Sampler::MOD_SOURCE_VELOCITY.id(),
+        Sampler::MOD_SOURCE_VELOCITY,
         Sampler::GRAIN_DENSITY.id(),
         MOD_VEL_TO_GRAIN_DENSITY,
         false, // unipolar
@@ -161,7 +161,7 @@ fn main() -> Result<(), Error> {
 
     // Route Keytracking to Grain Size (BIPOLAR - middle key neutral, upper/lower keys +/-)
     generator.set_modulation(
-        Sampler::MOD_SOURCE_KEYTRACK.id(),
+        Sampler::MOD_SOURCE_KEYTRACK,
         Sampler::GRAIN_SIZE.id(),
         MOD_KEY_TO_GRAIN_SIZE,
         true, // BIPOLAR: center key = no change, higher = +, lower = -

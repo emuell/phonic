@@ -20,10 +20,15 @@ use arg::{parse_args, Args};
 use phonic::{
     effects::{CompressorEffect, GainEffect, ReverbEffect},
     four_cc::FourCC,
-    generators::{FunDspGenerator, Sampler},
+    fundsp::shared::Shared,
+    generators::{FunDspGenerator, ModulationConfig, Sampler},
     outputs::WavOutput,
     parameters::FloatParameter,
-    utils::{ahdsr::AhdsrParameters, fundsp::shared_ahdsr, pitch_from_note, speed_from_note},
+    utils::{
+        ahdsr::AhdsrParameters,
+        fundsp::{shared_ahdsr, SharedBuffer},
+        pitch_from_note, speed_from_note,
+    },
     DefaultOutputDevice, Error, FilePlaybackOptions, GeneratorPlaybackOptions, Parameter, Player,
     PlayerConfig, SynthPlaybackOptions,
 };
@@ -115,11 +120,12 @@ const BRIGHTNESS: FloatParameter =
 /// Voice factory for a simple polyphonic synth with FunDSP.
 /// Creates a detuned oscillator voice with a simple filter.
 fn simple_synth_voice_factory(
-    gate: fundsp::prelude32::Shared,
-    freq: fundsp::prelude32::Shared,
-    volume: fundsp::prelude32::Shared,
-    _panning: fundsp::prelude32::Shared,
-    parameter: &mut dyn FnMut(FourCC) -> fundsp::prelude32::Shared,
+    gate: Shared,
+    freq: Shared,
+    volume: Shared,
+    _panning: Shared,
+    parameter: &mut dyn FnMut(FourCC) -> Shared,
+    _modulation: &mut dyn FnMut(FourCC) -> SharedBuffer,
 ) -> Box<dyn fundsp::prelude32::AudioUnit> {
     use fundsp::prelude32::*;
 
@@ -364,9 +370,10 @@ fn main() -> Result<(), Error> {
                 _ => {
                     // FunDSP generator (polyphonic synth)
                     let fundsp_gen = FunDspGenerator::with_parameters(
-                        &format!("poly_synth_{}_{}", mixer_idx, source_idx),
+                        format!("poly_synth_{mixer_idx}_{source_idx}"),
                         SIMPLE_SYNTH_PARAMS,
                         None,
+                        ModulationConfig::default(),
                         simple_synth_voice_factory,
                         GeneratorPlaybackOptions::default()
                             .voices(4)

@@ -34,13 +34,17 @@ fn main() {
             "_synth_parameter_string_to_value",
             "_synth_note_on",
             "_synth_note_off",
+            "_randomize_synth",
+            "_get_modulation_sources",
+            "_get_modulation_targets",
+            "_set_modulation",
+            "_clear_modulation",
             "_get_available_effects",
             "_add_effect",
             "_remove_effect",
             "_effect_parameter_value_to_string",
             "_effect_parameter_string_to_value",
             "_set_effect_parameter_value",
-            "_randomize_synth",
         ];
         println!(
             "cargo::rustc-link-arg=-sEXPORTED_FUNCTIONS={}",

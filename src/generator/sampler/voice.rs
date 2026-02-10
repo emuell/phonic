@@ -1,6 +1,7 @@
 use std::sync::{mpsc::SyncSender, Arc};
 
 use crate::{
+    modulation::{matrix::ModulationMatrix, processor::MODULATION_PROCESSOR_BLOCK_SIZE},
     source::{
         amplified::AmplifiedSource, file::preloaded::PreloadedFileSource,
         mapped::ChannelMappedSource, panned::PannedSource, Source, SourceTime,
@@ -8,10 +9,6 @@ use crate::{
     utils::{
         ahdsr::{AhdsrEnvelope, AhdsrParameters, AhdsrStage},
         buffer::{scale_buffer, InterleavedBufferMut},
-        dsp::modulation::{
-            KeytrackingModulationSource, LfoModulationSource, ModulationMatrix, ModulationSlot,
-            VelocityModulationSource, MAX_MODULATION_BLOCK_SIZE,
-        },
         speed_from_note,
     },
     FileSource, NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
@@ -38,13 +35,13 @@ pub struct SamplerVoice {
     grain_pool_started: bool,
     grain_pool: Option<Box<GrainPool<GRAIN_POOL_SIZE>>>,
     modulation_matrix: ModulationMatrix,
-    modulated_size: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_density: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_variation: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_spray: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_pan_spread: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_position: [f32; MAX_MODULATION_BLOCK_SIZE],
-    modulated_speed: [f32; MAX_MODULATION_BLOCK_SIZE],
+    modulated_size: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_density: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_variation: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_spray: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_pan_spread: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_position: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    modulated_speed: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
     sample_rate: u32,
 }
 
@@ -72,13 +69,13 @@ impl SamplerVoice {
 
         // Initialize modulation matrix (empty for now, will be configured later)
         let modulation_matrix = ModulationMatrix::new();
-        let modulated_size = [1.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_density = [1.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_variation = [0.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_spray = [0.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_pan_spread = [0.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_position = [0.0; MAX_MODULATION_BLOCK_SIZE];
-        let modulated_speed = [0.0; MAX_MODULATION_BLOCK_SIZE];
+        let modulated_size = [1.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_density = [1.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_variation = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_spray = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_pan_spread = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_position = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulated_speed = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
 
         Self {
             note_id,
@@ -230,7 +227,12 @@ impl SamplerVoice {
     }
 
     /// Initialize granular playback for this voice at the given sample rate.
-    pub fn enable_granular_playback(&mut self, sample_rate: u32, sample_buffer: Arc<Box<[f32]>>) {
+    pub fn enable_granular_playback(
+        &mut self,
+        sample_rate: u32,
+        sample_buffer: Arc<Box<[f32]>>,
+        modulation_matrix: ModulationMatrix,
+    ) {
         assert!(
             !sample_buffer.is_empty(),
             "Expecting a non empty mono sample buffer here - resampled!"
@@ -252,24 +254,8 @@ impl SamplerVoice {
             sample_loop_range,
         )));
 
-        // Pre-allocate modulation matrix slots (avoid allocating them later in the audio thread)
-        let modulation_matrix = &mut self.modulation_matrix;
-
-        while modulation_matrix.lfo_slots.len() < 2 {
-            let source = LfoModulationSource::new(self.sample_rate, 1.0, Default::default());
-            let slot = ModulationSlot::new(source);
-            modulation_matrix.add_lfo_slot(slot);
-        }
-        if modulation_matrix.velocity_slot.is_none() {
-            let source = VelocityModulationSource::new(1.0);
-            let slot = ModulationSlot::new(source);
-            modulation_matrix.set_velocity_slot(slot);
-        }
-        if modulation_matrix.keytracking_slot.is_none() {
-            let source = KeytrackingModulationSource::new(60.0);
-            let slot = ModulationSlot::new(source);
-            modulation_matrix.set_keytracking_slot(slot);
-        }
+        // Set the pre-built modulation matrix
+        self.modulation_matrix = modulation_matrix;
     }
 
     /// Mut access to the voice modulation matrix.
@@ -293,8 +279,8 @@ impl SamplerVoice {
         let written = if let Some(granular_parameters) =
             self.grain_pool.as_ref().and(granular_parameters.as_ref())
         {
-            // Process in chunks of MAX_MODULATION_BLOCK_SIZE
-            for chunk in output.chunks_mut(MAX_MODULATION_BLOCK_SIZE * channel_count) {
+            // Process in chunks of MODULATION_PROCESSOR_BLOCK_SIZE
+            for chunk in output.chunks_mut(MODULATION_PROCESSOR_BLOCK_SIZE * channel_count) {
                 let chunk_frame_count = chunk.len() / channel_count;
 
                 // Process modulation for this chunk
@@ -415,16 +401,15 @@ impl SamplerVoice {
     }
 
     /// Process modulation block and fill modulation buffers.
-    /// Called once per chunk of up to MODULATION_BLOCK_SIZE samples.
     ///
     /// # Arguments
     /// * `base_params` - Base granular parameters to modulate
-    /// * `chunk_frames` - Number of frames to process (up to MODULATION_BLOCK_SIZE)
+    /// * `chunk_frames` - Number of frames to process (up to MODULATION_PROCESSOR_BLOCK_SIZE)
     fn process_modulation(&mut self, chunk_frames: usize) {
         use super::Sampler;
 
         debug_assert!(
-            chunk_frames <= MAX_MODULATION_BLOCK_SIZE,
+            chunk_frames <= MODULATION_PROCESSOR_BLOCK_SIZE,
             "Chunk frames exceeds maximum block size"
         );
 
