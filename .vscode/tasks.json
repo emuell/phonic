@@ -1,13 +1,13 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "type": "cargo",
-      "command": "build",
-      "args": ["--features", "fundsp", "--example", "*"],
-      "problemMatcher": ["$rustc"],
-      "group": "build",
-      "label": "rust: build examples"
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cargo",
+			"command": "build",
+			"args": ["--features", "fundsp", "--example", "*"],
+			"problemMatcher": ["$rustc"],
+			"group": "build",
+			"label": "rust: build examples"
+		}
+	]
 }

@@ -2,7 +2,9 @@ use std::{path::PathBuf, sync::mpsc::SyncSender};
 
 use arg::{parse_args, Args};
 
-use phonic::{outputs::WavOutput, DefaultOutputDevice, Error, PlaybackStatusEvent, Player};
+use phonic::{
+    outputs::WavOutput, DefaultOutputDevice, Error, PlaybackStatusEvent, Player, PlayerConfig,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -68,5 +70,27 @@ pub fn new_player<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
         Ok(Player::new(WavOutput::open(output_path)?, status_sender))
     } else {
         Ok(Player::new(DefaultOutputDevice::open()?, status_sender))
+    }
+}
+
+// Create a new player instance using the given argument options.
+#[allow(unused)]
+pub fn new_player_with_config<S: Into<Option<SyncSender<PlaybackStatusEvent>>>>(
+    args: &Arguments,
+    status_sender: S,
+    config: PlayerConfig,
+) -> Result<Player, Error> {
+    if let Some(output_path) = &args.output_path {
+        Ok(Player::new_with_config(
+            WavOutput::open(output_path)?,
+            status_sender,
+            config,
+        ))
+    } else {
+        Ok(Player::new_with_config(
+            DefaultOutputDevice::open()?,
+            status_sender,
+            config,
+        ))
     }
 }

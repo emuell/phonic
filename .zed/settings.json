@@ -6,6 +6,10 @@
 	"lsp": {
 		"rust-analyzer": {
 			"initialization_options": {
+				"cargo": {
+				    "autoreload": true,
+					"features": ["cpal-output", "wav-output", "fundsp"],
+				},
 				"check": {
 					"command": "clippy"
 				}

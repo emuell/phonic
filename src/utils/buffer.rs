@@ -497,7 +497,7 @@ impl<'a> InterleavedBufferMut<'a> for Vec<f32> {
 /// A preallocated buffer slice with persistent start/end positions and helper functions.
 #[derive(Clone, Debug)]
 pub struct TempBuffer {
-    buffer: Vec<f32>,
+    buffer: Box<[f32]>,
     start: usize,
     end: usize,
 }
@@ -506,58 +506,75 @@ impl TempBuffer {
     /// Create a new empty buffer with the given capacity.
     pub fn new(capacity: usize) -> Self {
         Self {
-            buffer: vec![0.0; capacity],
+            buffer: vec![0.0; capacity].into_boxed_slice(),
             start: 0,
             end: 0,
         }
     }
 
-    /// Is there anything stored in the buffer?
+    /// Returns `true` if the buffer is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.start >= self.end
     }
-    /// Get temporary buffer's currently used length.
+
+    /// Returns the currently used length.
     #[inline]
     pub fn len(&self) -> usize {
         self.end - self.start
     }
-    /// Get temporary buffers' total available capacity.
+
+    /// Returns the total available capacity.
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.buffer.capacity()
+        self.buffer.len()
     }
 
-    /// Read-only access to the currently filled region.
+    /// Returns read-only access to the currently filled region.
     #[inline]
     pub fn get(&self) -> &'_ [f32] {
         &self.buffer[self.start..self.end]
     }
-    /// Mutable access to the currently filled region.
+
+    /// Returns mutable access to the currently filled region.
     #[inline]
     pub fn get_mut(&mut self) -> &'_ mut [f32] {
         &mut self.buffer[self.start..self.end]
     }
 
-    /// Set new filled range: usually will be done after writing to it via "get_mut".
+    /// Sets the valid filled range. Call this before writing via `get_mut()`.
     pub fn set_range(&mut self, start: usize, end: usize) {
-        debug_assert!(start <= end);
-        debug_assert!(end <= self.capacity());
+        assert!(
+            start <= end,
+            "Invalid temp buffer range: start {}, end {}",
+            start,
+            end
+        );
+        assert!(
+            end <= self.capacity(),
+            "Invalid temp buffer range: got a capacity of {}, requested {}",
+            self.buffer.len(),
+            end
+        );
         self.start = start;
         self.end = end;
     }
-    /// Set range to cover the entire available capacity.
+    /// Resets the range to cover the entire available capacity.
+    #[inline]
     pub fn reset_range(&mut self) {
-        self.set_range(0, self.capacity());
+        self.start = 0;
+        self.end = self.buffer.len();
     }
-    /// Set range to cover an empty buffer.
+
+    /// Clears the range to mark the buffer as empty.
     #[inline]
     pub fn clear_range(&mut self) {
         self.start = 0;
         self.end = 0;
     }
 
-    /// Copy up to self.len().min(other.len()) to other. returns the sample len that got copied.
+    /// Copies data to `other`, up to `min(self.len(), other.len())` samples.
+    /// Returns the number of samples copied.
     pub fn copy_to(&self, other: &mut [f32]) -> usize {
         let copy_len = other.len().min(self.len());
 
@@ -567,7 +584,9 @@ impl TempBuffer {
 
         copy_len
     }
-    /// Copy up to self.len().min(other.len()) from other. returns the sample len that got copied.
+
+    /// Copies data from `other`, up to `min(self.len(), other.len())` samples.
+    /// Returns the number of samples copied.
     pub fn copy_from(&mut self, other: &[f32]) -> usize {
         let copy_len = other.len().min(self.len());
 
@@ -578,10 +597,15 @@ impl TempBuffer {
         copy_len
     }
 
-    /// Mark the given amount in samples as used and remove it from the currently filled region.
+    /// Advances the start position by `samples`, consuming that data.
     pub fn consume(&mut self, samples: usize) {
+        assert!(
+            self.start + samples <= self.end,
+            "Invalid temp buffer consume: current length is {}, requested {}",
+            self.len(),
+            samples
+        );
         self.start += samples;
-        debug_assert!(self.start <= self.end);
     }
 }
 

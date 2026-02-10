@@ -1,176 +1,109 @@
-use std::{collections::HashMap, str::FromStr};
-
 use four_cc::FourCC;
 
 use crate::{
-    utils::dsp::{lfo::LfoWaveform, modulation::ModulationMatrix},
+    modulation::{
+        matrix::ModulationMatrix,
+        state::{ModulationSlotType, ModulationState},
+        ModulationConfig, ModulationSource,
+    },
+    utils::dsp::lfo::LfoWaveform,
     Error,
 };
 
-use super::Sampler;
-
 // -------------------------------------------------------------------------------------------------
 
-/// Slot type for modulation sources in the modulation matrix
-#[derive(Debug, Clone, Copy)]
-enum ModulationSlotType {
-    Lfo(usize),
-    Velocity,
-    Keytracking,
-}
-
-impl TryFrom<FourCC> for ModulationSlotType {
-    type Error = Error;
-
-    fn try_from(value: FourCC) -> Result<Self, Self::Error> {
-        match value {
-            id if id == Sampler::MOD_SOURCE_LFO1.id() => Ok(ModulationSlotType::Lfo(0)),
-            id if id == Sampler::MOD_SOURCE_LFO2.id() => Ok(ModulationSlotType::Lfo(1)),
-            id if id == Sampler::MOD_SOURCE_VELOCITY.id() => Ok(ModulationSlotType::Velocity),
-            id if id == Sampler::MOD_SOURCE_KEYTRACK.id() => Ok(ModulationSlotType::Keytracking),
-            _ => Err(Error::ParameterError(format!(
-                "Unknown modulation source: {}",
-                value
-            ))),
-        }
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
-/// Modulation state containing all LFO parameters and routing configuration for the sampler
+/// Modulation state for the sampler generator.
+///
+/// Wraps shared `ModulationState`.
 #[derive(Debug)]
 pub struct SamplerModulationState {
-    lfo1_rate: f32,
-    lfo1_waveform: LfoWaveform,
-    lfo2_rate: f32,
-    lfo2_waveform: LfoWaveform,
-    routing: HashMap<(FourCC, FourCC), (f32, bool)>, // (source, target) -> (amount, bipolar)
+    inner: ModulationState,
 }
 
 impl SamplerModulationState {
-    pub fn new() -> Self {
-        Self {
-            lfo1_rate: Sampler::MOD_LFO1_RATE.default_value(),
-            lfo1_waveform: LfoWaveform::from_str(Sampler::MOD_LFO1_WAVEFORM.default_value())
-                .expect("Failed to parse default LFO waveform string"),
-            lfo2_rate: Sampler::MOD_LFO2_RATE.default_value(),
-            lfo2_waveform: LfoWaveform::from_str(Sampler::MOD_LFO2_WAVEFORM.default_value())
-                .expect("Failed to parse default LFO waveform string"),
-            routing: HashMap::with_capacity(
-                Sampler::MODULATION_SOURCES.len()
-                    * Sampler::GRAIN_MODULATION_TARGET_PARAMETERS.len(),
-            ),
+    pub fn new(config: ModulationConfig) -> Self {
+        let inner = ModulationState::new(config);
+        Self { inner }
+    }
+
+    /// Create a new modulation matrix from this configuration.
+    pub fn create_matrix(&self, sample_rate: u32) -> ModulationMatrix {
+        self.inner.create_matrix(sample_rate)
+    }
+
+    /// Apply a parameter update to all voice modulation matrices.
+    pub fn apply_parameter_update(
+        &mut self,
+        id: FourCC,
+        rate: Option<f32>,
+        waveform: Option<LfoWaveform>,
+        voices: &mut [super::voice::SamplerVoice],
+    ) -> Result<(), Error> {
+        // Find which source this parameter belongs to
+        for source_config in self.inner.config().sources.iter() {
+            match source_config {
+                ModulationSource::Lfo {
+                    rate_param,
+                    waveform_param,
+                    ..
+                } => {
+                    let source_id = source_config.id();
+                    let lfo_index = if let Some(ModulationSlotType::Lfo(index)) =
+                        self.inner.source_slot_map().get(&source_id)
+                    {
+                        *index
+                    } else {
+                        continue;
+                    };
+
+                    if id == rate_param.id() {
+                        if let Some(rate) = rate {
+                            // Update all voices
+                            for voice in voices {
+                                voice
+                                    .modulation_matrix()
+                                    .update_lfo_rate(lfo_index, rate as f64);
+                            }
+                        }
+                        return Ok(());
+                    } else if id == waveform_param.id() {
+                        if let Some(waveform) = waveform {
+                            // Update all voices
+                            for voice in voices {
+                                voice
+                                    .modulation_matrix()
+                                    .update_lfo_waveform(lfo_index, waveform);
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+                ModulationSource::Envelope { .. } => {
+                    panic!("Not expecting envelope modulation source for a sampler");
+                }
+                ModulationSource::Velocity { .. } | ModulationSource::Keytracking { .. } => {
+                    // No parameters to update
+                }
+            }
         }
+
+        Err(Error::ParameterError(format!(
+            "Invalid/unknown modulation parameter {id}"
+        )))
     }
 
-    /// Validate that a modulation source and target are compatible
-    pub fn validate_routing(source: FourCC, target: FourCC) -> Result<(), Error> {
-        // Check if source exists
-        if !Sampler::MODULATION_SOURCES.iter().any(|s| s.id == source) {
-            return Err(Error::ParameterError(format!(
-                "Invalid modulation source: {}",
-                source
-            )));
-        }
-
-        // Check if target is modulatable
-        if !Sampler::GRAIN_MODULATION_TARGET_PARAMETERS
-            .iter()
-            .any(|&p| p.id() == target)
-        {
-            return Err(Error::ParameterError(format!(
-                "Parameter {} is not modulatable",
-                target
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Upate raw modulation values. Applied next time a voice is started or in `update_voice_modulation`
-    pub fn update_lfo1_rate(&mut self, rate: f32) {
-        self.lfo1_rate = rate;
-    }
-    pub fn update_lfo1_waveform(&mut self, waveform: LfoWaveform) {
-        self.lfo1_waveform = waveform;
-    }
-    pub fn update_lfo2_rate(&mut self, rate: f32) {
-        self.lfo2_rate = rate;
-    }
-    pub fn update_lfo2_waveform(&mut self, waveform: LfoWaveform) {
-        self.lfo2_waveform = waveform;
-    }
-
-    /// Set or update a modulation routing
-    pub fn set_routing(&mut self, source: FourCC, target: FourCC, amount: f32, bipolar: bool) {
-        if amount.abs() < 0.001 {
-            // Remove if effectively zero
-            self.routing.remove(&(source, target));
-        } else {
-            self.routing.insert((source, target), (amount, bipolar));
-        }
-    }
-
-    /// Clear a modulation routing
-    pub fn clear_routing(&mut self, source: FourCC, target: FourCC) {
-        self.routing.remove(&(source, target));
-    }
-
-    /// Initialize a voice's modulation matrix with current modulation state
+    /// Initialize a voice's modulation matrix with per-note values
     pub fn start_voice_modulation(
         &self,
         modulation_matrix: &mut ModulationMatrix,
         note: u8,
         velocity: f32,
     ) {
-        // Update LFO 1 configuration and clear targets
-        if let Some(slot) = modulation_matrix.lfo_slots.get_mut(0) {
-            slot.source.set_rate(self.lfo1_rate as f64);
-            slot.source.set_waveform(self.lfo1_waveform);
-            slot.clear_targets();
-        }
-
-        // Update LFO 2 configuration and clear targets
-        if let Some(slot) = modulation_matrix.lfo_slots.get_mut(1) {
-            slot.source.set_rate(self.lfo2_rate as f64);
-            slot.source.set_waveform(self.lfo2_waveform);
-            slot.clear_targets();
-        }
-
-        // Update Velocity source and clear targets
         if let Some(ref mut slot) = modulation_matrix.velocity_slot {
-            slot.source.set_velocity(velocity);
-            slot.clear_targets();
+            slot.processor.set_velocity(velocity);
         }
-
-        // Update Keytracking source and clear targets
         if let Some(ref mut slot) = modulation_matrix.keytracking_slot {
-            slot.source.set_midi_note(note as f32);
-            slot.clear_targets();
-        }
-
-        // Apply/update all enabled targets
-        for ((source_id, target_id), (amount, bipolar)) in &self.routing {
-            if let Ok(slot_type) = ModulationSlotType::try_from(*source_id) {
-                match slot_type {
-                    ModulationSlotType::Lfo(lfo_index) => {
-                        if let Some(slot) = modulation_matrix.lfo_slots.get_mut(lfo_index) {
-                            slot.update_target(*target_id, *amount, *bipolar);
-                        }
-                    }
-                    ModulationSlotType::Velocity => {
-                        if let Some(ref mut slot) = modulation_matrix.velocity_slot {
-                            slot.update_target(*target_id, *amount, *bipolar);
-                        }
-                    }
-                    ModulationSlotType::Keytracking => {
-                        if let Some(ref mut slot) = modulation_matrix.keytracking_slot {
-                            slot.update_target(*target_id, *amount, *bipolar);
-                        }
-                    }
-                }
-            }
+            slot.processor.set_midi_note(note as f32);
         }
     }
 
@@ -183,18 +116,32 @@ impl SamplerModulationState {
         amount: f32,
         bipolar: bool,
     ) -> Result<(), Error> {
-        match ModulationSlotType::try_from(source_id)? {
-            ModulationSlotType::Lfo(lfo_index) => {
-                modulation_matrix.update_lfo_target(lfo_index, target_id, amount, bipolar);
+        match self.inner.source_slot_map().get(&source_id) {
+            Some(ModulationSlotType::Lfo(lfo_index)) => {
+                modulation_matrix.update_lfo_target(*lfo_index, target_id, amount, bipolar);
             }
-            ModulationSlotType::Velocity => {
+            Some(ModulationSlotType::Envelope(_)) => {
+                panic!("Not expecting envelope modulation source for a sampler");
+            }
+            Some(ModulationSlotType::Velocity) => {
                 modulation_matrix.update_velocity_target(target_id, amount, bipolar);
             }
-            ModulationSlotType::Keytracking => {
+            Some(ModulationSlotType::Keytracking) => {
                 modulation_matrix.update_keytracking_target(target_id, amount, bipolar);
+            }
+            None => {
+                return Err(Error::ParameterError(format!(
+                    "Unknown modulation source: {}",
+                    source_id
+                )));
             }
         }
 
         Ok(())
+    }
+
+    /// Get the modulation configuration.
+    pub fn config(&self) -> &ModulationConfig {
+        self.inner.config()
     }
 }

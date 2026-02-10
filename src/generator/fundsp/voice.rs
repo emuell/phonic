@@ -1,13 +1,17 @@
 use std::{
+    collections::HashMap,
     sync::{mpsc::SyncSender, Arc},
     time::Duration,
 };
 
+use four_cc::FourCC;
 use fundsp::prelude32::*;
 
 use crate::{
+    modulation::{matrix::ModulationMatrix, processor::MODULATION_PROCESSOR_BLOCK_SIZE},
     utils::{
         buffer::{add_buffers, max_abs_sample},
+        fundsp::SharedBuffer,
         pitch_from_note,
         time::{SampleTime, SampleTimeClock},
     },
@@ -58,6 +62,13 @@ pub struct FunDspVoice {
     playback_pos: u64,
     playback_pos_emit_rate: Option<SampleTime>,
     playback_pos_sample_time_clock: SampleTimeClock,
+    /// Optional modulation matrix (per-voice, independent envelope state)
+    modulation_matrix: Option<ModulationMatrix>,
+    /// SharedBuffers keyed by target parameter FourCC
+    /// Voice factory connects these to the audio graph via var_buffer()
+    modulation_buffers: HashMap<FourCC, SharedBuffer>,
+    /// Temp buffer for modulation_output() calls, avoids per-block allocation
+    modulation_temp_buffer: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
     /// Output sample rate
     sample_rate: u32,
 }
@@ -82,17 +93,24 @@ impl FunDspVoice {
         let note_id = None;
         let current_note = None;
         let glide_state = None;
+
         let is_releasing = false;
         let release_start_frame = None;
         let silence_samples_count = 0;
+
         let exhaustion_threshold_samples =
             SampleTimeClock::duration_to_sample_time(EXHAUSTION_DURATION, sample_rate) as usize;
+
         let playback_status_send = None;
         let playback_context = None;
         let playback_pos = 0;
         let playback_pos_sample_time_clock = SampleTimeClock::new(sample_rate);
         let playback_pos_emit_rate = playback_pos_emit_rate
             .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
+
+        let modulation_matrix = None;
+        let modulation_buffers = HashMap::new();
+        let modulation_temp_buffer = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
 
         Self {
             synth_name,
@@ -113,6 +131,75 @@ impl FunDspVoice {
             playback_pos,
             playback_pos_emit_rate,
             playback_pos_sample_time_clock,
+            modulation_matrix,
+            modulation_buffers,
+            modulation_temp_buffer,
+            sample_rate,
+        }
+    }
+
+    /// Create a new voice with modulation support.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_modulation(
+        synth_name: Arc<String>,
+        audio_unit: Box<dyn AudioUnit>,
+        frequency: Shared,
+        volume: Shared,
+        panning: Shared,
+        gate: Shared,
+        playback_pos_emit_rate: Option<Duration>,
+        modulation_matrix: ModulationMatrix,
+        modulation_buffers: HashMap<FourCC, SharedBuffer>,
+        sample_rate: u32,
+    ) -> Self {
+        assert!(
+            [1, 2].contains(&audio_unit.outputs()),
+            "Only mono or stereo voice units are supported"
+        );
+
+        let note_id = None;
+        let current_note = None;
+        let glide_state = None;
+
+        let is_releasing = false;
+        let release_start_frame = None;
+
+        let silence_samples_count = 0;
+        let exhaustion_threshold_samples =
+            SampleTimeClock::duration_to_sample_time(EXHAUSTION_DURATION, sample_rate) as usize;
+
+        let playback_status_send = None;
+        let playback_context = None;
+        let playback_pos = 0;
+        let playback_pos_sample_time_clock = SampleTimeClock::new(sample_rate);
+        let playback_pos_emit_rate = playback_pos_emit_rate
+            .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
+
+        let modulation_matrix = Some(modulation_matrix);
+        let modulation_temp_buffer = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+
+        Self {
+            synth_name,
+            audio_unit,
+            frequency,
+            volume,
+            panning,
+            gate,
+            note_id,
+            current_note,
+            glide_state,
+            is_releasing,
+            release_start_frame,
+            silence_samples_count,
+            exhaustion_threshold_samples,
+            playback_status_send,
+            playback_context,
+            playback_pos,
+            playback_pos_emit_rate,
+            playback_pos_sample_time_clock,
+            modulation_matrix,
+            modulation_buffers,
+            modulation_temp_buffer,
             sample_rate,
         }
     }
@@ -152,6 +239,11 @@ impl FunDspVoice {
         self.playback_status_send = sender;
     }
 
+    /// Get mutable access to the modulation matrix.
+    pub fn modulation_matrix_mut(&mut self) -> Option<&mut ModulationMatrix> {
+        self.modulation_matrix.as_mut()
+    }
+
     /// Start playback on the voice.
     pub fn start(
         &mut self,
@@ -175,6 +267,22 @@ impl FunDspVoice {
         self.audio_unit.reset(); // Reset envelope and oscillator phase
         self.playback_pos = 0; // Reset position and context
         self.playback_context = context;
+
+        // Reset and trigger modulation matrix
+        if let Some(matrix) = &mut self.modulation_matrix {
+            matrix.reset(self.sample_rate);
+            matrix.note_on(volume);
+
+            // Set velocity for the modulation matrix
+            if let Some(slot) = &mut matrix.velocity_slot {
+                slot.processor.set_velocity(volume);
+            }
+
+            // Set keytracking for the modulation matrix
+            if let Some(slot) = &mut matrix.keytracking_slot {
+                slot.processor.set_midi_note(note as f32);
+            }
+        }
     }
 
     /// Stop voice, starting fadeout.
@@ -184,6 +292,11 @@ impl FunDspVoice {
             self.is_releasing = true; // Mark as releasing
             self.silence_samples_count = 0; // Reset silence counter
             self.release_start_frame = Some(current_sample_frame); // Record when release started
+
+            // Trigger note off for modulation matrix envelopes
+            if let Some(matrix) = &mut self.modulation_matrix {
+                matrix.note_off();
+            }
         }
     }
 
@@ -201,6 +314,13 @@ impl FunDspVoice {
         self.release_start_frame = None; // Clear release start time
         self.playback_context = None; // Reset position and context
         self.playback_pos = 0;
+
+        // Clear modulation buffers
+        if !self.modulation_buffers.is_empty() {
+            for buffer in self.modulation_buffers.values_mut() {
+                buffer.clear();
+            }
+        }
     }
 
     pub fn set_speed(&mut self, speed: f64, glide: Option<f32>, sample_rate: u32) {
@@ -263,6 +383,20 @@ impl FunDspVoice {
             if self.glide_state.is_some() {
                 self.update_glide(block_len);
             }
+
+            // Process modulation matrix for this block
+            if let Some(matrix) = &mut self.modulation_matrix {
+                matrix.process(block_len);
+                // Write modulation outputs to shared buffers
+                for (param_id, buffer) in &mut self.modulation_buffers {
+                    matrix.modulation_output(
+                        *param_id,
+                        &mut self.modulation_temp_buffer[..block_len],
+                    );
+                    buffer.write(&self.modulation_temp_buffer[..block_len]);
+                }
+            }
+
             match self.audio_unit.outputs() {
                 1 => {
                     // Mono processing

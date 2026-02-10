@@ -8,7 +8,8 @@ use crossbeam_queue::ArrayQueue;
 use four_cc::FourCC;
 
 use crate::{
-    parameter::{Parameter, ParameterPolarity, ParameterValueUpdate},
+    modulation::{ModulationSource, ModulationTarget},
+    parameter::{Parameter, ParameterValueUpdate},
     source::{unique_source_id, Source},
     utils::db_to_linear,
     Error, MixerId, NotePlaybackId, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
@@ -204,75 +205,14 @@ pub enum GeneratorPlaybackMessage {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Describes a modulation source (e.g. a LFO or AHDSR envelope) in a generator.
-#[derive(Debug, Copy, Clone)]
-pub struct ModulationSource {
-    id: FourCC,
-    name: &'static str,
-    polarity: ParameterPolarity,
-    parameters: &'static [&'static dyn Parameter],
-}
-
-impl ModulationSource {
-    /// Create a new modulation source descriptor.
-    ///
-    /// # Arguments
-    /// * `id` - Unique identifier for this source
-    /// * `name` - Human-readable name for display
-    /// * `polarity` - Whether this source outputs bipolar or unipolar values
-    /// * `parameters` - Parameter IDs in parent generator that configure this source
-    ///   (e.g., LFO rate, waveform)
-    pub const fn new(
-        id: FourCC,
-        name: &'static str,
-        polarity: ParameterPolarity,
-        parameters: &'static [&'static dyn Parameter],
-    ) -> Self {
-        Self {
-            id,
-            name,
-            polarity,
-            parameters,
-        }
-    }
-
-    /// Unique identifier for this modulation source.
-    #[inline]
-    pub const fn id(&self) -> FourCC {
-        self.id
-    }
-
-    /// Human-readable name for display.
-    #[inline]
-    pub const fn name(&self) -> &'static str {
-        self.name
-    }
-
-    /// Whether this source outputs bipolar or unipolar values.
-    #[inline]
-    pub const fn polarity(&self) -> ParameterPolarity {
-        self.polarity
-    }
-
-    /// Parameter IDs that configure this modulation source.
-    ///
-    /// Returns the parameters that control this source's behavior
-    /// (e.g., LFO rate and waveform for LFO sources).
-    /// Returns empty slice for sources without configuration (velocity, keytracking).
-    #[inline]
-    pub const fn parameters(&self) -> &'static [&'static dyn Parameter] {
-        self.parameters
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// A [`Source`] that is driven by note events.
 ///
 /// Generators extend the *static* `Source` trait to support event-driven playback of e.g. musical
 /// instruments or sample players. They respond to note-on/note-off events, velocity, pitch changes,
 /// and custom parameters, while also supporting standard volume and panning controls via the playback
 /// message queue.
+///
+/// ## Playback
 ///
 /// Generators can be used in two ways:
 /// 1. **Played** via [`Player::play_generator`](crate::Player::play_generator):
@@ -286,8 +226,31 @@ impl ModulationSource {
 ///    It must be explicitly removed via [`Player::remove_generator`](crate::Player::remove_generator).
 ///    This is useful for instruments that should persist throughout the application's lifetime.
 ///
+/// ## Parameters
+///
 /// Generator parameters work similarly to [`Effect`](crate::Effect) parameters: they provide
 /// automation capabilities and can be queried via [`parameters()`](Self::parameters).
+///
+/// To enable parameters in custom generators:
+/// - Implement [`parameters()`](Self::parameters) to return parameter descriptors
+/// - Implement [`process_parameter_update()`](Self::process_parameter_update) to handle parameter
+///   changes in the audio thread
+/// - Optionally override [`process_parameter_updates()`](Self::process_parameter_updates) for
+///   more efficient batch processing
+///
+/// ## Modulation
+///
+/// Generators also can optionally provide a modulation system where a custom set of modulation sources
+/// (LFOs, envelopes, velocity, keytracking) can be routed to modulatable target parameters with an
+/// user-configurable depth.
+///
+/// To enable modulation in custom generators:
+/// - Implement [`modulation_sources()`](Self::modulation_sources) to define available modulation sources
+/// - Implement [`modulation_targets()`](Self::modulation_targets) to define parameters that can be modulated
+/// - Implement [`set_modulation()`](Self::set_modulation) and [`clear_modulation()`](Self::clear_modulation)
+///   to configure modulation routings
+///
+/// See [`ModulationSource`] and [`ModulationTarget`] for more details.
 pub trait Generator: Source {
     /// Convert the Generator impl into a boxed `dyn Generator`.
     ///
@@ -326,7 +289,7 @@ pub trait Generator: Source {
     ///
     /// When returning parameters here, implement `process_parameter_update` too.
     fn parameters(&self) -> Vec<&dyn Parameter> {
-        Vec::new()
+        vec![]
     }
 
     /// Process a parameter update for this generator in the audio thread.
@@ -360,14 +323,14 @@ pub trait Generator: Source {
     ///
     /// When returning sources here, implement the rest of the modulation interface as well!
     fn modulation_sources(&self) -> Vec<ModulationSource> {
-        Vec::new()
+        vec![]
     }
 
-    /// Returns IDs of parameters that can receive modulation. By default none.
+    /// Returns parameters that can receive modulation. By default none.
     ///
-    /// When returning parameters here, implement the rest of the modulation interface as well!
-    fn modulatable_parameters(&self) -> Vec<FourCC> {
-        Vec::new()
+    /// When returning targets here, implement the rest of the modulation interface as well!
+    fn modulation_targets(&self) -> Vec<ModulationTarget> {
+        vec![]
     }
 
     /// Set or update a modulation routing.
@@ -488,8 +451,8 @@ impl Generator for Box<dyn Generator> {
         (**self).modulation_sources()
     }
 
-    fn modulatable_parameters(&self) -> Vec<FourCC> {
-        (**self).modulatable_parameters()
+    fn modulation_targets(&self) -> Vec<ModulationTarget> {
+        (**self).modulation_targets()
     }
 
     fn set_modulation(

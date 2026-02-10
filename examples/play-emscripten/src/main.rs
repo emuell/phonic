@@ -239,25 +239,134 @@ pub extern "C" fn synth_note_off(note: ffi::c_int) {
 
 /// Randomize synth parameters. Exported as `_randomize_synth` function in the WASM.
 ///
-/// Returns a pointer to a JSON string containing the updated parameter values, or null on error.
+/// Returns a pointer to a JSON string containing the updated parameter values and modulation routings, or null on error.
 /// The return pointer must be freed with `_free_cstring` after getting consumed!
 #[no_mangle]
 pub extern "C" fn randomize_synth() -> *const ffi::c_char {
     APP.with_borrow(|app| {
         if let Some(app) = app.as_ref() {
-            let updates = app.randomize_synth();
-            match serde_json::to_string(&updates) {
+            let (param_updates, mod_updates) = app.randomize_synth();
+            let result = serde_json::json!({
+                "parameters": param_updates,
+                "modulation": mod_updates,
+            });
+            match serde_json::to_string(&result) {
                 Ok(json) => {
                     let c_str = ffi::CString::new(json).unwrap_or_default();
                     c_str.into_raw()
                 }
                 Err(err) => {
-                    eprintln!("Failed to serialize param updates: {}", err);
+                    eprintln!("Failed to serialize updates: {}", err);
                     std::ptr::null()
                 }
             }
         } else {
             std::ptr::null()
+        }
+    })
+}
+
+/// Get modulation sources for the active synth. Exported as `_get_modulation_sources` function in the WASM.
+///
+/// Returns a pointer to a JSON array of modulation source info, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn get_modulation_sources() -> *const ffi::c_char {
+    APP.with_borrow(|app| {
+        if let Some(app) = app.as_ref() {
+            let sources = app.get_modulation_sources();
+            match serde_json::to_string(&sources) {
+                Ok(json) => {
+                    let c_str = ffi::CString::new(json).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!("Failed to serialize modulation sources: {}", err);
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Get modulation targets for the active synth. Exported as `_get_modulation_targets` function in the WASM.
+///
+/// Returns a pointer to a JSON array of modulation target info, or null on error.
+/// The return pointer must be freed with `_free_cstring` after getting consumed!
+#[no_mangle]
+pub extern "C" fn get_modulation_targets() -> *const ffi::c_char {
+    APP.with_borrow(|app| {
+        if let Some(app) = app.as_ref() {
+            let targets = app.get_modulation_targets();
+            match serde_json::to_string(&targets) {
+                Ok(json) => {
+                    let c_str = ffi::CString::new(json).unwrap_or_default();
+                    c_str.into_raw()
+                }
+                Err(err) => {
+                    eprintln!("Failed to serialize modulation targets: {}", err);
+                    std::ptr::null()
+                }
+            }
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+/// Set a modulation routing. Exported as `_set_modulation` function in the WASM.
+///
+/// Returns 0 on success or -1 on error.
+#[no_mangle]
+pub extern "C" fn set_modulation(
+    source_id: ffi::c_uint,
+    target_id: ffi::c_uint,
+    amount: ffi::c_float,
+    bipolar: bool,
+) -> ffi::c_int {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let source = FourCC::from(source_id);
+            let target = FourCC::from(target_id);
+            match app.set_modulation(source, target, amount, bipolar) {
+                Ok(_) => 0,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to set modulation {:?} -> {:?}: {}",
+                        source, target, err
+                    );
+                    -1
+                }
+            }
+        } else {
+            -1
+        }
+    })
+}
+
+/// Clear a modulation routing. Exported as `_clear_modulation` function in the WASM.
+///
+/// Returns 0 on success or -1 on error.
+#[no_mangle]
+pub extern "C" fn clear_modulation(source_id: ffi::c_uint, target_id: ffi::c_uint) -> ffi::c_int {
+    APP.with_borrow_mut(|app| {
+        if let Some(app) = app {
+            let source = FourCC::from(source_id);
+            let target = FourCC::from(target_id);
+            match app.clear_modulation(source, target) {
+                Ok(_) => 0,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to clear modulation {:?} -> {:?}: {}",
+                        source, target, err
+                    );
+                    -1
+                }
+            }
+        } else {
+            -1
         }
     })
 }

@@ -10,10 +10,13 @@
 use phonic::{
     four_cc::FourCC,
     fundsp::prelude32::*,
+    generators::{LfoWaveform, ModulationConfig, ModulationSource, ModulationTarget},
     parameters::{EnumParameter, FloatParameter},
-    utils::fundsp::{fast_sine, shared_ahdsr},
+    utils::fundsp::{shared_ahdsr, var_buffer, SharedBuffer},
     Parameter, ParameterScaling,
 };
+
+use strum::VariantNames;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -45,17 +48,31 @@ pub const DEPTH_C_TO_A: FloatParameter =
 pub const DEPTH_C_TO_B: FloatParameter =
     FloatParameter::new(FourCC(*b"dpCB"), "Depth C→B", 0.0..=10.0, 0.5);
 
-// LFO Parameters
-pub const LFO_FREQ: FloatParameter =
-    FloatParameter::new(FourCC(*b"lfoF"), "LFO Freq", 0.1..=20.0, 5.0)
+// LFO 1 Parameters
+pub const LFO1_FREQ: FloatParameter =
+    FloatParameter::new(FourCC(*b"lf1F"), "LFO1 Freq", 0.01..=20.0, 5.0)
         .with_unit("Hz")
         .with_scaling(ParameterScaling::Exponential(2.0));
 
-pub const MOD_LFO_PITCH: FloatParameter =
-    FloatParameter::new(FourCC(*b"mlPt"), "LFO→Pitch", 0.0..=1.0, 0.0);
+pub const LFO1_WAVEFORM: EnumParameter = EnumParameter::new(
+    FourCC(*b"lf1W"),
+    "LFO1 Waveform",
+    LfoWaveform::VARIANTS,
+    LfoWaveform::Sine as usize,
+);
 
-pub const MOD_LFO_CUTOFF: FloatParameter =
-    FloatParameter::new(FourCC(*b"mlCt"), "LFO→Cutoff", -1.0..=1.0, 0.0);
+// LFO 2 Parameters
+pub const LFO2_FREQ: FloatParameter =
+    FloatParameter::new(FourCC(*b"lf2F"), "LFO2 Freq", 0.01..=20.0, 3.0)
+        .with_unit("Hz")
+        .with_scaling(ParameterScaling::Exponential(2.0));
+
+pub const LFO2_WAVEFORM: EnumParameter = EnumParameter::new(
+    FourCC(*b"lf2W"),
+    "LFO2 Waveform",
+    LfoWaveform::VARIANTS,
+    LfoWaveform::Triangle as usize,
+);
 
 // Aux Envelope Parameters
 pub const AUX_ATTACK: FloatParameter =
@@ -74,12 +91,6 @@ pub const AUX_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"axRl"), "Aux Release", 0.001..=5.0, 0.5)
         .with_unit("s")
         .with_scaling(ParameterScaling::Exponential(2.0));
-
-pub const MOD_ENV_CUTOFF: FloatParameter =
-    FloatParameter::new(FourCC(*b"meCt"), "Env→Cutoff", -1.0..=1.0, 0.0);
-
-pub const MOD_ENV_DEPTH_BA: FloatParameter =
-    FloatParameter::new(FourCC(*b"meBA"), "Env→Depth B-A", -1.0..=1.0, 0.0);
 
 // Filter parameters
 pub const FILTER_CUTOFF: FloatParameter =
@@ -154,9 +165,24 @@ pub const RELEASE_C: FloatParameter =
 
 // -------------------------------------------------------------------------------------------------
 
-/// Exposes all automateable parameters.
+// Modulation Source IDs
+pub const MOD_SRC_LFO1: FourCC = FourCC(*b"LFO1");
+pub const MOD_SRC_LFO2: FourCC = FourCC(*b"LFO2");
+pub const MOD_SRC_AUX_ENV: FourCC = FourCC(*b"AENV");
+pub const MOD_SRC_VELOCITY: FourCC = FourCC(*b"MVEL");
+pub const MOD_SRC_KEYTRACK: FourCC = FourCC(*b"MKEY");
+
+// Modulation Target IDs (virtual parameters for modulation)
+pub const MOD_TARGET_PITCH: FourCC = FourCC(*b"mPit");
+pub const MOD_TARGET_DEPTH_BA: FourCC = FourCC(*b"mDBA");
+pub const MOD_TARGET_DEPTH_CA: FourCC = FourCC(*b"mDCA");
+pub const MOD_TARGET_DEPTH_CB: FourCC = FourCC(*b"mDCB");
+
+// -------------------------------------------------------------------------------------------------
+
+/// Exposes all automateable parameters. *excluding* modulation source parameters.
 pub fn parameters() -> &'static [&'static dyn Parameter] {
-    const ALL_PARAMETERS: [&dyn Parameter; 35] = [
+    const ALL_PARAMETERS: [&dyn Parameter; 25] = [
         &FREQ_A,
         &FREQ_B,
         &FREQ_C,
@@ -164,16 +190,6 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
         &DEPTH_B_TO_A,
         &DEPTH_C_TO_A,
         &DEPTH_C_TO_B,
-        &LFO_FREQ,
-        &MOD_LFO_PITCH,
-        &MOD_LFO_CUTOFF,
-        &AUX_ATTACK,
-        &AUX_HOLD,
-        &AUX_DECAY,
-        &AUX_SUSTAIN,
-        &AUX_RELEASE,
-        &MOD_ENV_CUTOFF,
-        &MOD_ENV_DEPTH_BA,
         &FILTER_CUTOFF,
         &FILTER_RES,
         &FILTER_TYPE,
@@ -198,12 +214,64 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns the modulation configuration for the FM3 synth.
+pub fn modulation_config() -> ModulationConfig {
+    ModulationConfig {
+        sources: vec![
+            // LFO 1 for pitch and filter modulation
+            ModulationSource::Lfo {
+                id: MOD_SRC_LFO1,
+                name: "LFO 1",
+                rate_param: LFO1_FREQ,
+                waveform_param: LFO1_WAVEFORM,
+            },
+            // LFO 2 for filter and FM depth modulation
+            ModulationSource::Lfo {
+                id: MOD_SRC_LFO2,
+                name: "LFO 2",
+                rate_param: LFO2_FREQ,
+                waveform_param: LFO2_WAVEFORM,
+            },
+            // Aux envelope for filter cutoff and FM depth modulation
+            ModulationSource::Envelope {
+                id: MOD_SRC_AUX_ENV,
+                name: "Aux Envelope",
+                attack_param: AUX_ATTACK,
+                hold_param: AUX_HOLD,
+                decay_param: AUX_DECAY,
+                sustain_param: AUX_SUSTAIN,
+                release_param: AUX_RELEASE,
+            },
+            // Velocity
+            ModulationSource::Velocity {
+                id: MOD_SRC_VELOCITY,
+                name: "Velocity",
+            },
+            // Keytracking
+            ModulationSource::Keytracking {
+                id: MOD_SRC_KEYTRACK,
+                name: "Keytracking",
+            },
+        ],
+        targets: vec![
+            ModulationTarget::new(FILTER_CUTOFF.id(), FILTER_CUTOFF.name()),
+            ModulationTarget::new(FILTER_RES.id(), FILTER_RES.name()),
+            ModulationTarget::new(MOD_TARGET_PITCH, "Pitch"),
+            ModulationTarget::new(MOD_TARGET_DEPTH_BA, "Depth B→A"),
+            ModulationTarget::new(MOD_TARGET_DEPTH_CA, "Depth C→A"),
+            ModulationTarget::new(MOD_TARGET_DEPTH_CB, "Depth C→B"),
+        ],
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Randomize all parameters.
 #[allow(unused)]
 pub fn randomize() -> Vec<(FourCC, f32)> {
     let mut updates = Vec::new();
     // Pre-select filter type: 0=Lowpass, 1=Highpass, 2=Bandpass
-    let filter_type_idx = rand::random_range(0..3);
+    let filter_type_index = rand::random_range(0..3);
 
     for param in parameters() {
         let id = param.id();
@@ -219,12 +287,6 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
             let ratio = ratios[rand::random_range(0..ratios.len())];
             let detune = rand::random_range(0.99..=1.01);
             FREQ_C.normalize_value(440.0 * ratio * detune)
-        } else if id == MOD_LFO_PITCH.id() {
-            if rand::random_range(0.0..1.0) < 0.2 {
-                rand::random_range(0.0..=1.0)
-            } else {
-                0.0
-            }
         } else if id == ATTACK_A.id() {
             if rand::random_range(0.0..1.0) < 0.5 {
                 0.0
@@ -234,14 +296,11 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
         } else if id == DEPTH_B_TO_A.id() || id == DEPTH_C_TO_A.id() || id == DEPTH_C_TO_B.id() {
             // Limit FM depth to 40% (0.0 to 4.0) to avoid extreme aliasing
             rand::random_range(0.0..=0.4)
-        } else if id == MOD_ENV_DEPTH_BA.id() {
-            // Limit Env->Depth modulation to +/- 0.5 (normalized 0.25 to 0.75)
-            rand::random_range(0.25..=0.75)
         } else if id == FILTER_TYPE.id() {
-            FILTER_TYPE.normalize_value(FILTER_TYPE.values()[filter_type_idx])
+            FILTER_TYPE.normalize_value(FILTER_TYPE.values()[filter_type_index])
         } else if id == FILTER_CUTOFF.id() {
             // Set cutoff based on selected filter type
-            match filter_type_idx {
+            match filter_type_index {
                 0 => rand::random_range(0.5..=1.0),
                 1 => rand::random_range(0.0..=0.5),
                 _ => rand::random_range(0.15..=0.35),
@@ -252,7 +311,172 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
 
         updates.push((id, value));
     }
+
+    for param in modulation_config().source_parameters() {
+        let id = param.id();
+        let value = if id == LFO1_FREQ.id() || id == LFO2_FREQ.id() {
+            let val = rand::random_range(0.5..10.0);
+            LFO1_FREQ.normalize_value(val)
+        } else if id == LFO1_WAVEFORM.id() || id == LFO2_WAVEFORM.id() {
+            // Random waveform selection
+            let idx = rand::random_range(0..LfoWaveform::VARIANTS.len());
+            idx as f32 / (LfoWaveform::VARIANTS.len() - 1) as f32
+        } else if id == AUX_ATTACK.id() {
+            let val = rand::random_range(0.001..0.5);
+            AUX_ATTACK.normalize_value(val)
+        } else if id == AUX_DECAY.id() || id == AUX_RELEASE.id() {
+            let val = rand::random_range(0.05..1.5);
+            AUX_DECAY.normalize_value(val)
+        } else if id == AUX_SUSTAIN.id() {
+            rand::random_range(0.3..1.0)
+        } else {
+            rand::random_range(0.0..=1.0)
+        };
+        updates.push((id, value));
+    }
+
     updates
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Returns random modulation routing connections.
+/// Returns Vec of (source_id, target_id, amount, bipolar).
+#[allow(unused)]
+pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
+    let mut routes = Vec::new();
+
+    // LFO1 -> Pitch (vibrato): 15% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.15 {
+        routes.push((
+            MOD_SRC_LFO1,
+            MOD_TARGET_PITCH,
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // LFO1 -> Filter Cutoff: 40% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_LFO1,
+            FILTER_CUTOFF.id(),
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // LFO2 -> Filter Cutoff: 40% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_LFO2,
+            FILTER_CUTOFF.id(),
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // LFO2 -> Filter Res: 25% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.25 {
+        routes.push((
+            MOD_SRC_LFO2,
+            FILTER_RES.id(),
+            rand::random_range(0.3..0.6),
+            true, // bipolar
+        ));
+    }
+
+    // LFO2 -> FM Depth B→A: 20% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.2 {
+        routes.push((
+            MOD_SRC_LFO2,
+            MOD_TARGET_DEPTH_BA,
+            rand::random_range(0.3..0.6),
+            true, // bipolar
+        ));
+    }
+
+    // Aux Env -> Filter Cutoff: 60% chance, unipolar (classic filter sweep)
+    if rand::random_range(0.0..1.0) < 0.6 {
+        routes.push((
+            MOD_SRC_AUX_ENV,
+            FILTER_CUTOFF.id(),
+            rand::random_range(0.4..0.9),
+            false, // unipolar
+        ));
+    }
+
+    // Aux Env -> FM Depth B→A: 40% chance, bipolar (evolving timbre)
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_AUX_ENV,
+            MOD_TARGET_DEPTH_BA,
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // Aux Env -> FM Depth C→A: 40% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_AUX_ENV,
+            MOD_TARGET_DEPTH_CA,
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // Aux Env -> FM Depth C→B: 40% chance, bipolar
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_AUX_ENV,
+            MOD_TARGET_DEPTH_CB,
+            rand::random_range(0.3..0.7),
+            true, // bipolar
+        ));
+    }
+
+    // Velocity -> Filter Cutoff: 35% chance (velocity-sensitive brightness)
+    if rand::random_range(0.0..1.0) < 0.35 {
+        routes.push((
+            MOD_SRC_VELOCITY,
+            FILTER_CUTOFF.id(),
+            rand::random_range(0.4..0.7),
+            false, // unipolar
+        ));
+    }
+
+    // Velocity -> FM Depth B→A: 30% chance (velocity-sensitive complexity)
+    if rand::random_range(0.0..1.0) < 0.3 {
+        routes.push((
+            MOD_SRC_VELOCITY,
+            MOD_TARGET_DEPTH_BA,
+            rand::random_range(0.3..0.6),
+            false, // unipolar
+        ));
+    }
+
+    // Keytracking -> Filter Cutoff: 40% chance (brighter for higher notes)
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_KEYTRACK,
+            FILTER_CUTOFF.id(),
+            rand::random_range(0.3..0.6),
+            false, // unipolar
+        ));
+    }
+
+    // Keytracking -> Filter Res: 20% chance (more resonance on high notes)
+    if rand::random_range(0.0..1.0) < 0.2 {
+        routes.push((
+            MOD_SRC_KEYTRACK,
+            FILTER_RES.id(),
+            rand::random_range(0.3..0.5),
+            false, // unipolar
+        ));
+    }
+
+    routes
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -264,27 +488,19 @@ pub fn voice_factory(
     volume: Shared,
     panning: Shared,
     parameter: &mut dyn FnMut(FourCC) -> Shared,
+    modulation: &mut dyn FnMut(FourCC) -> SharedBuffer,
 ) -> Box<dyn AudioUnit> {
-    // --- Modulators ---
-
-    // LFO
-    let lfo_freq = var(&parameter(LFO_FREQ.id()));
-    let lfo = lfo_freq >> fast_sine();
-
-    // Aux Envelope
-    let aux_env = shared_ahdsr(
-        gate.clone(),
-        parameter(AUX_ATTACK.id()),
-        parameter(AUX_HOLD.id()),
-        parameter(AUX_DECAY.id()),
-        parameter(AUX_SUSTAIN.id()),
-        parameter(AUX_RELEASE.id()),
-    );
+    // --- Get modulation buffers ---
+    let pitch_mod_buffer = modulation(MOD_TARGET_PITCH);
+    let cutoff_mod_buffer = modulation(FILTER_CUTOFF.id());
+    let filter_res_mod_buffer = modulation(FILTER_RES.id());
+    let depth_ba_mod_buffer = modulation(MOD_TARGET_DEPTH_BA);
+    let depth_ca_mod_buffer = modulation(MOD_TARGET_DEPTH_CA);
+    let depth_cb_mod_buffer = modulation(MOD_TARGET_DEPTH_CB);
 
     // --- Pitch Modulation ---
-    // LFO -> Pitch (Global)
-    // Simple linear FM for vibrato: freq * (1 + lfo * amt * 0.06) approx +/- 1 semitone at max
-    let pitch_mod = 1.0 + lfo.clone() * var(&parameter(MOD_LFO_PITCH.id())) * 0.06;
+    // Modulation from matrix: ±0.06 (approx ±1 semitone range)
+    let pitch_mod = 1.0 + var_buffer(&pitch_mod_buffer) * 0.06;
 
     // Get base frequencies from parameters (scaled by note frequency and pitch mod)
     let freq_a = var(&parameter(FREQ_A.id())) * var(&freq) * (1.0 / 440.0) * pitch_mod.clone();
@@ -330,39 +546,47 @@ pub fn voice_factory(
     let blend = var(&parameter(BLEND.id()));
 
     // Operator B: frequency-modulated by C with envelope
+    // Modulation: Matrix -> Depth C->B (±5.0 range)
+    let depth_cb_base = var(&parameter(DEPTH_C_TO_B.id()));
+    let depth_cb_mod = var_buffer(&depth_cb_mod_buffer) * 5.0;
+    let depth_cb = depth_cb_base + depth_cb_mod;
+
     let op_b = ((freq_b.clone()
-        + (op_c.clone()
-            * var(&parameter(DEPTH_C_TO_B.id()))
-            * (1.0 - blend.clone())
-            * freq_b.clone()))
+        + (op_c.clone() * depth_cb * (1.0 - blend.clone()) * freq_b.clone()))
         >> sine())
         * env_b;
 
-    // Operator A: frequency-modulated by both B and C with envelope
-    // Modulation: Aux Env -> Depth B->A
+    // Operator A: frequency-modulated by both B and C with modulation
+    // Modulation: Matrix -> Depth B->A (±5.0 range)
     let depth_ba_base = var(&parameter(DEPTH_B_TO_A.id()));
-    let depth_ba_mod = aux_env.clone() * var(&parameter(MOD_ENV_DEPTH_BA.id())) * 5.0;
+    let depth_ba_mod = var_buffer(&depth_ba_mod_buffer) * 5.0;
     let depth_ba = depth_ba_base + depth_ba_mod;
+
+    // Modulation: Matrix -> Depth C->A (±5.0 range)
+    let depth_ca_base = var(&parameter(DEPTH_C_TO_A.id()));
+    let depth_ca_mod = var_buffer(&depth_ca_mod_buffer) * 5.0;
+    let depth_ca = depth_ca_base + depth_ca_mod;
 
     let op_a = ((freq_a.clone()
         + (op_b * depth_ba * freq_a.clone())
-        + (op_c * var(&parameter(DEPTH_C_TO_A.id())) * blend * freq_a.clone()))
+        + (op_c * depth_ca * blend * freq_a.clone()))
         >> sine())
         * env_a;
 
     // --- Filter ---
 
     let cutoff_base = var(&parameter(FILTER_CUTOFF.id()));
-    let q = var(&parameter(FILTER_RES.id()));
     let filter_type = var(&parameter(FILTER_TYPE.id()));
 
-    // Filter Modulation
-    // LFO -> Cutoff (+/- 1000 Hz range)
-    // Aux Env -> Cutoff (+/- 5000 Hz range)
-    let cutoff_mod = cutoff_base
-        + (lfo.clone() * var(&parameter(MOD_LFO_CUTOFF.id())) * 1000.0)
-        + (aux_env.clone() * var(&parameter(MOD_ENV_CUTOFF.id())) * 5000.0);
+    // Filter Cutoff Modulation from matrix (±5000 Hz range)
+    let cutoff_mod = cutoff_base + var_buffer(&cutoff_mod_buffer) * 5000.0;
     let cutoff = cutoff_mod >> clip_to(20.0, 20000.0);
+
+    // Filter Resonance Modulation (unipolar 0..1, modulates ±5.0 around base)
+    let q_base = var(&parameter(FILTER_RES.id()));
+    let q_mod = var_buffer(&filter_res_mod_buffer) * 5.0;
+    let q = (q_base + q_mod) >> clip_to(0.1, 10.0);
+
     let filtered_op_a = (op_a | cutoff | q | filter_type) >> An(MultiFilter::new());
 
     // Apply Volume and Panning

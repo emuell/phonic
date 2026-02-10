@@ -16,7 +16,7 @@ use phonic::{
     generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
     Error, FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, NotePlaybackId,
-    ParameterValueUpdate, ResamplingQuality,
+    ParameterValueUpdate, PlayerConfig, ResamplingQuality,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -49,7 +49,11 @@ fn main() -> Result<(), Error> {
     }
 
     // Create a player instance with the output device as configured via program arguments
-    let mut player = arguments::new_player(&args, None)?;
+    let mut player = arguments::new_player_with_config(
+        &args,
+        None,
+        PlayerConfig::default().concurrent_processing(false),
+    )?;
 
     let loop_mixer;
     let loop_filter_effect;
@@ -99,12 +103,13 @@ fn main() -> Result<(), Error> {
             .target_mixer(loop_mixer.id()),
     )?;
 
-    // Create FunDSP synth generator with FM synthesis
+    // Create FunDSP synth generator with FM synthesis and modulation matrix
     let synth_generator = player.play_generator(
         FunDspGenerator::with_parameters(
             "fm_synth",
             fm3_synth::parameters(),
             None,
+            fm3_synth::modulation_config(),
             fm3_synth::voice_factory,
             GeneratorPlaybackOptions::default()
                 .voices(4)
@@ -265,12 +270,27 @@ fn main() -> Result<(), Error> {
                     println!("Seeked loop to pos: {pos} sec", pos = current.as_secs_f32())
                 }
                 Keycode::R if alt_key => {
+                    // Randomize parameters
                     let values = fm3_synth::randomize()
                         .into_iter()
                         .map(|(id, value)| (id, ParameterValueUpdate::Normalized(value)))
                         .collect();
                     synth_generator.set_parameters(values, None).unwrap();
-                    println!("Randomized FM synth params");
+
+                    // Randomize modulation routing
+                    let routing = fm3_synth::randomize_modulation();
+                    // Clear all existing modulation first
+                    for (source, target, _, _) in &routing {
+                        let _ = synth_generator.clear_modulation(*source, *target, None);
+                    }
+                    // Apply new random routing
+                    for (source, target, amount, bipolar) in routing {
+                        synth_generator
+                            .set_modulation(source, target, amount, bipolar, None)
+                            .unwrap();
+                    }
+
+                    println!("Randomized FM synth params and modulation routing");
                 }
                 _ => {
                     if let Some(relative_note) = key_to_note(key) {

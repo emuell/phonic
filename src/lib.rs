@@ -129,6 +129,7 @@
 mod effect;
 mod error;
 mod generator;
+mod modulation;
 mod output;
 mod parameter;
 mod player;
@@ -148,6 +149,7 @@ pub use player::{
 };
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
+
 pub use parameter::{
     Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate,
 };
@@ -163,7 +165,6 @@ pub use source::{
 
 pub use generator::{
     Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
-    ModulationSource,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -212,6 +213,8 @@ pub mod generators {
         ahdsr::AhdsrParameters, // used by sampler
         dsp::lfo::LfoWaveform,
     };
+
+    pub use super::modulation::{ModulationConfig, ModulationSource, ModulationTarget};
 
     pub use super::generator::{
         empty::EmptyGenerator,

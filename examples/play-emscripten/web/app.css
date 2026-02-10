@@ -64,6 +64,12 @@
 	--eff-eq5: #e91e63;
 	--eff-compressor: #00bcd4;
 	--eff-dcfilter: #9e9e9e;
+
+	/* Modulation Source Colors */
+	--mod-lfo: #2196f3;
+	--mod-envelope: #ff9800;
+	--mod-velocity: #4caf50;
+	--mod-keytracking: #9c27b0;
 }
 
 /* Scrollbar Styling */
@@ -606,4 +612,199 @@ select:disabled {
 	color: var(--text-main);
 	padding: 4px 8px;
 	font-size: 12px;
+}
+
+/* Modulation Matrix Styles */
+.modulation-section {
+	margin: 20px 0;
+	padding: 10px;
+	background-color: var(--bg-panel);
+	border-radius: 8px;
+	border: 1px solid var(--border-main);
+}
+
+.modulation-section.hidden {
+	display: none;
+}
+
+.modulation-sources {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 15px;
+}
+
+.mod-source-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border-input);
+	border-radius: 6px;
+	padding: 12px;
+	box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+	transition:
+		transform 0.2s,
+		box-shadow 0.2s;
+}
+
+.mod-source-card:hover {
+	box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
+	border-color: var(--border-hover);
+}
+
+.mod-source-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border-main);
+}
+
+.mod-source-name {
+	font-weight: bold;
+	font-size: 13px;
+	color: var(--text-main);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.mod-polarity-badge {
+	font-size: 12px;
+	color: var(--primary);
+	font-weight: bold;
+}
+
+.mod-source-params {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.mod-add-target {
+	margin-bottom: 10px;
+}
+
+.mod-add-target select {
+	width: 100%;
+	background-color: var(--primary);
+	color: white;
+	border: 1px solid var(--primary);
+	padding: 6px 10px;
+	border-radius: 4px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.mod-add-target select:hover:not(:disabled) {
+	background-color: var(--primary-hover);
+	border-color: var(--primary-hover);
+}
+
+.mod-connections {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.mod-connection {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px;
+	background-color: var(--bg-input);
+	border-radius: 4px;
+	border: 1px solid var(--border-input);
+}
+
+.mod-connection-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+}
+
+.mod-connection-name {
+	font-size: 11px;
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+}
+
+.mod-connection-remove {
+	background: transparent;
+	color: var(--btn-remove);
+	border: none;
+	width: 18px;
+	height: 18px;
+	cursor: pointer;
+	font-size: 16px;
+	line-height: 1;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	opacity: 0.6;
+	transition: opacity 0.15s;
+}
+
+.mod-connection-remove:hover {
+	opacity: 1;
+	color: var(--btn-remove-hover);
+}
+
+.mod-connection-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.mod-connection input[type="range"] {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 100%;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--border-input);
+	outline: none;
+	margin: 4px 0;
+}
+
+.mod-connection input[type="range"]::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--primary);
+	cursor: pointer;
+	transition: background 0.15s;
+}
+
+.mod-connection input[type="range"]::-webkit-slider-thumb:hover {
+	background: #fff;
+	transform: scale(1.1);
+}
+
+.mod-connection input[type="range"]::-moz-range-thumb {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--primary);
+	cursor: pointer;
+	border: none;
+	transition: background 0.15s;
+}
+
+.mod-connection input[type="range"]::-moz-range-thumb:hover {
+	background: #fff;
+	transform: scale(1.1);
+}
+
+.mod-connection-value {
+	font-size: 11px;
+	color: var(--primary);
+	font-family: monospace;
+	text-align: center;
 }

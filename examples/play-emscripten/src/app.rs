@@ -6,12 +6,12 @@ use serde::Serialize;
 
 use phonic::{
     effects,
-    generators::FunDspGenerator,
+    generators::{FunDspGenerator, ModulationConfig, ModulationSource, ModulationTarget},
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
-    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions,
+    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions, Generator,
     GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
-    ParameterType, ParameterValueUpdate, Player,
+    ParameterPolarity, ParameterType, ParameterValueUpdate, Player,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -94,6 +94,28 @@ pub struct ParamUpdate {
     value: f32,
 }
 
+#[derive(Serialize)]
+pub struct ModulationSourceInfo {
+    id: u32,
+    name: String,
+    polarity: String,
+    parameters: Vec<ParameterInfo>,
+}
+
+#[derive(Serialize)]
+pub struct ModulationTargetInfo {
+    id: u32,
+    name: String,
+}
+
+#[derive(Serialize)]
+pub struct ModulationRoutingUpdate {
+    source_id: u32,
+    target_id: u32,
+    amount: f32,
+    bipolar: bool,
+}
+
 // -------------------------------------------------------------------------------------------------
 
 // FunDSP synth impls
@@ -131,48 +153,65 @@ impl SynthType {
         voice_count: usize,
     ) -> Result<FunDspGenerator, Error> {
         let volume_db = -3.0;
+        let options = GeneratorPlaybackOptions::default()
+            .voices(voice_count)
+            .volume_db(volume_db);
 
         match self {
             Self::Sub3 => FunDspGenerator::with_parameters(
                 "sub3_synth",
                 sub3::parameters(),
                 None,
+                sub3::modulation_config(),
                 sub3::voice_factory,
-                GeneratorPlaybackOptions::default()
-                    .voices(voice_count)
-                    .volume_db(volume_db),
+                options,
                 sample_rate,
             ),
             Self::Fm3 => FunDspGenerator::with_parameters(
                 "fm3_synth",
                 fm3::parameters(),
                 None,
+                fm3::modulation_config(),
                 fm3::voice_factory,
-                GeneratorPlaybackOptions::default()
-                    .voices(voice_count)
-                    .volume_db(volume_db),
+                options,
                 sample_rate,
             ),
             Self::Organ => FunDspGenerator::with_parameters(
                 "organ_synth",
                 organ::parameters(),
                 None,
+                organ::modulation_config(),
                 organ::voice_factory,
-                GeneratorPlaybackOptions::default()
-                    .voices(voice_count)
-                    .volume_db(volume_db),
+                options,
                 sample_rate,
             ),
             Self::Dx7 => FunDspGenerator::with_parameters(
                 "dx7_synth",
                 dx7::parameters(),
                 None,
+                ModulationConfig::default(), // no modulation
                 dx7::voice_factory,
-                GeneratorPlaybackOptions::default()
-                    .voices(voice_count)
-                    .volume_db(volume_db),
+                options,
                 sample_rate,
             ),
+        }
+    }
+
+    fn modulation_config(&self) -> Option<ModulationConfig> {
+        match self {
+            Self::Sub3 => Some(sub3::modulation_config()),
+            Self::Fm3 => Some(fm3::modulation_config()),
+            Self::Organ => Some(organ::modulation_config()),
+            Self::Dx7 => None,
+        }
+    }
+
+    fn randomize_modulation(&self) -> Vec<(FourCC, FourCC, f32, bool)> {
+        match self {
+            Self::Sub3 => sub3::randomize_modulation(),
+            Self::Fm3 => fm3::randomize_modulation(),
+            Self::Organ => organ::randomize_modulation(),
+            Self::Dx7 => Vec::new(),
         }
     }
 
@@ -212,6 +251,8 @@ pub struct App {
     voice_count: usize,
     active_synth: SynthType,
     synth_handle: GeneratorPlaybackHandle,
+    synth_modulation_sources: Vec<ModulationSource>,
+    synth_modulation_targets: Vec<ModulationTarget>,
     playing_notes: HashMap<u8, NotePlaybackId>,
     samples: Vec<PreloadedFileSource>,
     synth_mixer: MixerHandle,
@@ -243,10 +284,11 @@ impl App {
         // create and add the initial synth (Sub3)
         let voice_count = 8;
         let active_synth = SynthType::Sub3;
-        let synth_handle = player.add_generator(
-            active_synth.create_generator(sample_rate, voice_count)?,
-            synth_mixer.id(),
-        )?;
+        let synth_generator = active_synth.create_generator(sample_rate, voice_count)?;
+        // Extract modulation info before adding to player
+        let synth_modulation_sources = synth_generator.modulation_sources();
+        let synth_modulation_targets = synth_generator.modulation_targets();
+        let synth_handle = player.add_generator(synth_generator, synth_mixer.id())?;
         let active_effects = HashMap::new();
 
         println!("Preloading sample files...");
@@ -278,6 +320,8 @@ impl App {
             synth_mixer,
             active_synth,
             synth_handle,
+            synth_modulation_sources,
+            synth_modulation_targets,
             playing_notes,
             samples,
             active_effects,
@@ -305,10 +349,13 @@ impl App {
             self.player.remove_generator(self.synth_handle.id())?;
             // Create and add the new synth
             let sample_rate = self.player.output_sample_rate();
-            self.synth_handle = self.player.add_generator(
-                new_synth_type.create_generator(sample_rate, self.voice_count)?,
-                self.synth_mixer.id(),
-            )?;
+            let synth_generator = new_synth_type.create_generator(sample_rate, self.voice_count)?;
+            // Extract modulation info before adding to player
+            self.synth_modulation_sources = synth_generator.modulation_sources();
+            self.synth_modulation_targets = synth_generator.modulation_targets();
+            self.synth_handle = self
+                .player
+                .add_generator(synth_generator, self.synth_mixer.id())?;
         }
         Ok(())
     }
@@ -323,11 +370,15 @@ impl App {
             self.player.remove_generator(self.synth_handle.id())?;
             // Recreate the active synth with the new voice count
             let sample_rate = self.player.output_sample_rate();
-            self.synth_handle = self.player.add_generator(
-                self.active_synth
-                    .create_generator(sample_rate, voice_count)?,
-                self.synth_mixer.id(),
-            )?;
+            let synth_generator = self
+                .active_synth
+                .create_generator(sample_rate, voice_count)?;
+            // Extract modulation info before adding to player
+            self.synth_modulation_sources = synth_generator.modulation_sources();
+            self.synth_modulation_targets = synth_generator.modulation_targets();
+            self.synth_handle = self
+                .player
+                .add_generator(synth_generator, self.synth_mixer.id())?;
         }
         Ok(())
     }
@@ -348,16 +399,26 @@ impl App {
         param_id: FourCC,
         normalized_value: f32,
     ) -> Result<String, Error> {
-        let parameter = self
+        if let Some(parameter) = self
             .active_synth
             .parameters()
             .iter()
             .find(|p| p.id() == param_id)
-            .ok_or(Error::ParameterError(format!(
-                "Parameter {param_id} not found in active synth",
-            )))?;
-
-        Ok(parameter.value_to_string(normalized_value, true))
+        {
+            return Ok(parameter.value_to_string(normalized_value, true));
+        }
+        if let Some(config) = self.active_synth.modulation_config() {
+            if let Some(parameter) = config
+                .source_parameters()
+                .iter()
+                .find(|p| p.id() == param_id)
+            {
+                return Ok(parameter.value_to_string(normalized_value, true));
+            }
+        }
+        Err(Error::ParameterError(format!(
+            "Parameter {param_id} not found in active synth",
+        )))
     }
 
     // Convert a synth parameter's string to a value
@@ -366,16 +427,26 @@ impl App {
         param_id: FourCC,
         string: String,
     ) -> Result<Option<f32>, Error> {
-        let parameter = self
+        if let Some(parameter) = self
             .active_synth
             .parameters()
             .iter()
             .find(|p| p.id() == param_id)
-            .ok_or(Error::ParameterError(format!(
-                "Parameter {param_id} not found in active synth",
-            )))?;
-
-        Ok(parameter.string_to_value(string))
+        {
+            return Ok(parameter.string_to_value(string));
+        }
+        if let Some(config) = self.active_synth.modulation_config() {
+            if let Some(parameter) = config
+                .source_parameters()
+                .iter()
+                .find(|p| p.id() == param_id)
+            {
+                return Ok(parameter.string_to_value(string));
+            }
+        }
+        Err(Error::ParameterError(format!(
+            "Parameter {param_id} not found in active synth",
+        )))
     }
 
     // Set a parameter value for the active synth
@@ -407,9 +478,9 @@ impl App {
         }
     }
 
-    // Randomize synth parameters
-    pub fn randomize_synth(&self) -> Vec<ParamUpdate> {
-        let mut result = Vec::new();
+    // Randomize synth parameters and modulation
+    pub fn randomize_synth(&self) -> (Vec<ParamUpdate>, Vec<ModulationRoutingUpdate>) {
+        let mut param_updates = Vec::new();
         for (id, value) in self.active_synth.randomize() {
             use ParameterValueUpdate::Normalized;
             if self
@@ -417,13 +488,86 @@ impl App {
                 .set_parameter((id, Normalized(value)), None)
                 .is_ok()
             {
-                result.push(ParamUpdate {
+                param_updates.push(ParamUpdate {
                     id: id.into(),
                     value,
                 });
             }
         }
-        result
+
+        let mut mod_updates = Vec::new();
+        for (source, target, amount, bipolar) in self.active_synth.randomize_modulation() {
+            if self
+                .synth_handle
+                .set_modulation(source, target, amount, bipolar, None)
+                .is_ok()
+            {
+                mod_updates.push(ModulationRoutingUpdate {
+                    source_id: source.into(),
+                    target_id: target.into(),
+                    amount,
+                    bipolar,
+                });
+            }
+        }
+
+        (param_updates, mod_updates)
+    }
+
+    // Get modulation sources for the active synth
+    pub fn get_modulation_sources(&self) -> Vec<ModulationSourceInfo> {
+        let sources: Vec<ModulationSourceInfo> = self
+            .synth_modulation_sources
+            .iter()
+            .map(|source| {
+                let params: Vec<ParameterInfo> = source
+                    .parameters()
+                    .iter()
+                    .map(|&p| ParameterInfo::from(p))
+                    .collect();
+                ModulationSourceInfo {
+                    id: source.id().into(),
+                    name: source.name().to_string(),
+                    polarity: match source.polarity() {
+                        ParameterPolarity::Unipolar => "unipolar".to_string(),
+                        ParameterPolarity::Bipolar => "bipolar".to_string(),
+                    },
+                    parameters: params,
+                }
+            })
+            .collect();
+        sources
+    }
+
+    // Get modulation targets for the active synth
+    pub fn get_modulation_targets(&self) -> Vec<ModulationTargetInfo> {
+        let targets: Vec<ModulationTargetInfo> = self
+            .synth_modulation_targets
+            .iter()
+            .map(|target| ModulationTargetInfo {
+                id: target.id().into(),
+                name: target.name().into(),
+            })
+            .collect();
+        targets
+    }
+
+    // Set modulation routing
+    pub fn set_modulation(
+        &mut self,
+        source_id: FourCC,
+        target_id: FourCC,
+        amount: f32,
+        bipolar: bool,
+    ) -> Result<(), Error> {
+        self.synth_handle
+            .set_modulation(source_id, target_id, amount, bipolar, None)
+    }
+
+    // Clear modulation routing
+    pub fn clear_modulation(&mut self, source_id: FourCC, target_id: FourCC) -> Result<(), Error> {
+        self.synth_handle
+            .clear_modulation(source_id, target_id, None)
     }
 
     // Get list of available effects

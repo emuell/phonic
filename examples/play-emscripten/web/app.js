@@ -78,6 +78,42 @@ const backend = {
 		}
 		return null;
 	},
+	getModulationSources() {
+		const sourcesPtr = ccall("get_modulation_sources", "number", [], []);
+		if (sourcesPtr !== 0) {
+			const sourcesJson = UTF8ToString(sourcesPtr);
+			const sources = JSON.parse(sourcesJson);
+			ccall("free_cstring", null, ["number"], [sourcesPtr]);
+			return sources;
+		}
+		return null;
+	},
+	getModulationTargets() {
+		const targetsPtr = ccall("get_modulation_targets", "number", [], []);
+		if (targetsPtr !== 0) {
+			const targetsJson = UTF8ToString(targetsPtr);
+			const targets = JSON.parse(targetsJson);
+			ccall("free_cstring", null, ["number"], [targetsPtr]);
+			return targets;
+		}
+		return null;
+	},
+	setModulation(sourceId, targetId, amount, bipolar) {
+		return ccall(
+			"set_modulation",
+			"number",
+			["number", "number", "number", "boolean"],
+			[sourceId, targetId, amount, bipolar],
+		);
+	},
+	clearModulation(sourceId, targetId) {
+		return ccall(
+			"clear_modulation",
+			"number",
+			["number", "number"],
+			[sourceId, targetId],
+		);
+	},
 	getAvailableEffects() {
 		const effectsPtr = ccall("get_available_effects", "number", [], []);
 		if (effectsPtr !== 0) {
@@ -207,6 +243,7 @@ document.getElementById("playButton").addEventListener("click", () => {
 	document.getElementById("octaveUp").disabled = false;
 	effectManager.enableButtons();
 	synthUI.init();
+	modulationUI.init();
 	setStatus("Player started");
 	startCpuDisplay();
 });
@@ -224,6 +261,7 @@ document.getElementById("stopButton").addEventListener("click", () => {
 	effectManager.disableButtons();
 	effectManager.removeAllEffects();
 	synthUI.clear();
+	modulationUI.clear();
 	setStatus("Player stopped");
 	stopCpuDisplay();
 });
@@ -235,7 +273,13 @@ document.getElementById("metronomeCheckbox").addEventListener("change", (e) => {
 document.getElementById("randomizeButton").addEventListener("click", () => {
 	const updates = backend.randomizeSynth();
 	if (updates) {
-		synthUI.applyUpdates(updates);
+		if (updates.parameters) {
+			synthUI.applyUpdates(updates.parameters);
+			modulationUI.applySourceParameterUpdates(updates.parameters);
+		}
+		if (updates.modulation) {
+			modulationUI.applyModulationUpdates(updates.modulation);
+		}
 	}
 });
 
@@ -243,6 +287,7 @@ document.getElementById("synthSelector").addEventListener("change", (e) => {
 	const synthType = parseInt(e.target.value, 10);
 	backend.setActiveSynth(synthType);
 	synthUI.init();
+	modulationUI.init();
 });
 
 document
@@ -251,6 +296,7 @@ document
 		const voiceCount = parseInt(e.target.value, 10);
 		backend.setSynthVoiceCount(voiceCount);
 		synthUI.init();
+		modulationUI.init();
 		logMessage(`Changed voice count to ${voiceCount}`);
 	});
 
@@ -287,7 +333,7 @@ const playNote = (keyIndex) => {
 		backend.synthNoteOff(oldNote);
 	}
 
-	const note = (currentOctave + 1) * 12 + parseInt(keyIndex);
+	const note = (currentOctave + 1) * 12 + parseInt(keyIndex, 10);
 	activeKeyNotes.set(keyIndex, note);
 
 	backend.synthNoteOn(note);
@@ -301,7 +347,7 @@ const stopNote = (keyIndex) => {
 		note = activeKeyNotes.get(keyIndex);
 		activeKeyNotes.delete(keyIndex);
 	} else {
-		note = (currentOctave + 1) * 12 + parseInt(keyIndex);
+		note = (currentOctave + 1) * 12 + parseInt(keyIndex, 10);
 	}
 
 	backend.synthNoteOff(note);
@@ -850,6 +896,451 @@ class EffectManager {
 		this.chainElement.appendChild(emptyMessage);
 	}
 }
+
+// Modulation Matrix UI Class
+class ModulationMatrixUI {
+	constructor() {
+		this.sources = [];
+		this.targets = [];
+		this.connections = new Map(); // key: "sourceId-targetId", value: {sourceId, targetId, amount, bipolar}
+		this.sourceParamControls = new Map(); // key: paramId, value: {input, updateValueDisplay, param}
+		this.containerElement = document.getElementById("modulationSection");
+		this.sourcesElement = document.getElementById("modulationSources");
+	}
+
+	init() {
+		this.clear();
+		const sources = backend.getModulationSources();
+		const targets = backend.getModulationTargets();
+
+		if (!sources || !targets || sources.length === 0) {
+			// No modulation support for this synth
+			this.containerElement.classList.add("hidden");
+			return;
+		}
+
+		this.sources = sources;
+		this.targets = targets;
+		this.containerElement.classList.remove("hidden");
+
+		// Create source cards
+		sources.forEach((source) => {
+			const card = this.createSourceCard(source);
+			this.sourcesElement.appendChild(card);
+			this.updateAvailableTargets(source.id);
+		});
+	}
+
+	clear() {
+		this.sourcesElement.innerHTML = "";
+		this.connections.clear();
+		this.sourceParamControls.clear();
+		this.sources = [];
+		this.targets = [];
+		this.containerElement.classList.add("hidden");
+	}
+
+	createSourceCard(source) {
+		const card = document.createElement("div");
+		card.className = "mod-source-card";
+		card.dataset.sourceId = source.id;
+
+		// Header
+		const header = document.createElement("div");
+		header.className = "mod-source-header";
+
+		const nameSpan = document.createElement("span");
+		nameSpan.className = "mod-source-name";
+		nameSpan.textContent = source.name;
+
+		const polarityBadge = document.createElement("span");
+		polarityBadge.className = "mod-polarity-badge";
+		polarityBadge.textContent = source.polarity === "bipolar" ? "±" : "+";
+
+		header.appendChild(nameSpan);
+		header.appendChild(polarityBadge);
+
+		// Config parameters
+		const paramsDiv = document.createElement("div");
+		paramsDiv.className = "mod-source-params";
+
+		if (source.parameters && source.parameters.length > 0) {
+			source.parameters.forEach((param) => {
+				const control = this.createParameterControl(param);
+				paramsDiv.appendChild(control);
+			});
+		}
+
+		// Add target dropdown
+		const addTargetDiv = document.createElement("div");
+		addTargetDiv.className = "mod-add-target";
+
+		const addTargetSelect = document.createElement("select");
+		addTargetSelect.tabIndex = -1;
+
+		const placeholderOption = document.createElement("option");
+		placeholderOption.value = "";
+		placeholderOption.textContent = "+ Target";
+		placeholderOption.disabled = true;
+		placeholderOption.selected = true;
+		addTargetSelect.appendChild(placeholderOption);
+
+		addTargetSelect.addEventListener("change", (e) => {
+			const targetId = parseInt(e.target.value, 10);
+			if (targetId) {
+				this.addConnection(source.id, targetId, source.polarity === "bipolar");
+				addTargetSelect.value = "";
+			}
+		});
+
+		addTargetDiv.appendChild(addTargetSelect);
+
+		// Connections container
+		const connectionsDiv = document.createElement("div");
+		connectionsDiv.className = "mod-connections";
+		connectionsDiv.dataset.sourceId = source.id;
+
+		card.appendChild(header);
+		if (source.parameters && source.parameters.length > 0) {
+			card.appendChild(paramsDiv);
+		}
+		card.appendChild(addTargetDiv);
+		card.appendChild(connectionsDiv);
+
+		return card;
+	}
+
+	createParameterControl(param) {
+		const container = document.createElement("div");
+		container.className = "parameter-control";
+
+		const label = document.createElement("label");
+		const nameSpan = document.createElement("span");
+		nameSpan.textContent = param.name;
+		const valueSpan = document.createElement("span");
+		valueSpan.className = "param-value";
+		valueSpan.style.cursor = "pointer";
+		valueSpan.title = "Click to edit";
+
+		label.appendChild(nameSpan);
+		label.appendChild(valueSpan);
+
+		const updateValueDisplay = (normalizedValue) => {
+			const valueStr = backend.synthParameterValueToString(
+				param.id,
+				normalizedValue,
+			);
+			if (valueStr) {
+				valueSpan.textContent = valueStr;
+			}
+		};
+
+		let input;
+		if (param.type === "Float" || param.type === "Integer") {
+			input = document.createElement("input");
+			input.tabIndex = -1;
+			input.type = "range";
+			input.min = 0.0;
+			input.max = 1.0;
+			input.step = param.step || 0.01;
+			const normalized = param.default;
+			input.value = normalized;
+			updateValueDisplay(normalized);
+
+			input.addEventListener("input", (e) => {
+				const normalized = parseFloat(e.target.value);
+				backend.setSynthParameterValue(param.id, normalized);
+				updateValueDisplay(normalized);
+			});
+
+			// Add double-click handler to reset to default
+			input.addEventListener("dblclick", () => {
+				const defaultValue = param.default;
+				input.value = defaultValue;
+				backend.setSynthParameterValue(param.id, defaultValue);
+				updateValueDisplay(defaultValue);
+			});
+
+			// Add click handler for value editing
+			valueSpan.addEventListener("click", () => {
+				synthUI.showValueEditor(
+					valueSpan,
+					param.id,
+					input,
+					updateValueDisplay,
+					false,
+				);
+			});
+		} else if (param.type === "Boolean") {
+			input = document.createElement("input");
+			input.tabIndex = -1;
+			input.type = "checkbox";
+			input.checked = param.default > 0.5;
+			updateValueDisplay(param.default);
+
+			input.addEventListener("change", (e) => {
+				const value = e.target.checked;
+				const normalized = value ? 1.0 : 0.0;
+				backend.setSynthParameterValue(param.id, normalized);
+				updateValueDisplay(normalized);
+			});
+		} else if (param.type === "Enum") {
+			input = document.createElement("select");
+			input.tabIndex = -1;
+			const default_index = Math.floor(
+				param.default * (param.values.length - 1),
+			);
+			updateValueDisplay(param.default);
+			param.values.forEach((val, idx) => {
+				const option = document.createElement("option");
+				option.tabIndex = -1;
+				option.value = idx;
+				option.textContent = val;
+				if (idx === default_index) {
+					option.selected = true;
+				}
+				input.appendChild(option);
+			});
+
+			input.addEventListener("change", (e) => {
+				const idx = parseInt(e.target.value, 10);
+				const normalized = idx / (param.values.length - 1);
+				backend.setSynthParameterValue(param.id, normalized);
+				updateValueDisplay(normalized);
+			});
+		}
+
+		container.appendChild(label);
+		if (input) {
+			container.appendChild(input);
+		}
+
+		this.sourceParamControls.set(param.id, {
+			input,
+			updateValueDisplay,
+			param,
+		});
+		return container;
+	}
+
+	updateAvailableTargets(sourceId) {
+		const card = this.sourcesElement.querySelector(
+			`.mod-source-card[data-source-id="${sourceId}"]`,
+		);
+		if (!card) return;
+
+		const select = card.querySelector(".mod-add-target select");
+		if (!select) return;
+
+		// Clear existing options except placeholder
+		while (select.options.length > 1) {
+			select.remove(1);
+		}
+
+		// Get connected targets for this source
+		const connectedTargets = Array.from(this.connections.values())
+			.filter((conn) => conn.sourceId === sourceId)
+			.map((conn) => conn.targetId);
+
+		// Add available targets
+		this.targets.forEach((target) => {
+			if (!connectedTargets.includes(target.id)) {
+				const option = document.createElement("option");
+				option.value = target.id;
+				option.textContent = target.name;
+				option.tabIndex = -1;
+				select.appendChild(option);
+			}
+		});
+	}
+
+	addConnection(sourceId, targetId, defaultBipolar) {
+		const key = `${sourceId}-${targetId}`;
+		if (this.connections.has(key)) return;
+
+		const amount = 0.5;
+		const bipolar = defaultBipolar;
+
+		// Call backend
+		const result = backend.setModulation(sourceId, targetId, amount, bipolar);
+		if (result !== 0) {
+			setStatus(`Failed to add modulation routing`, true);
+			return;
+		}
+
+		// Store connection
+		this.connections.set(key, { sourceId, targetId, amount, bipolar });
+
+		// Create UI element
+		const connectionsDiv = this.sourcesElement.querySelector(
+			`.mod-connections[data-source-id="${sourceId}"]`,
+		);
+		if (connectionsDiv) {
+			const connectionElement = this.createConnectionElement(
+				sourceId,
+				targetId,
+				amount,
+				bipolar,
+			);
+			connectionsDiv.appendChild(connectionElement);
+		}
+
+		// Update dropdown
+		this.updateAvailableTargets(sourceId);
+	}
+
+	createConnectionElement(sourceId, targetId, amount, bipolar) {
+		const container = document.createElement("div");
+		container.className = "mod-connection";
+		container.dataset.connectionKey = `${sourceId}-${targetId}`;
+
+		const target = this.targets.find((t) => t.id === targetId);
+		const targetName = target ? target.name : targetId.toString();
+
+		// Header with name and remove button
+		const header = document.createElement("div");
+		header.className = "mod-connection-header";
+
+		const nameSpan = document.createElement("span");
+		nameSpan.className = "mod-connection-name";
+		nameSpan.textContent = targetName;
+		nameSpan.title = targetName;
+
+		const removeBtn = document.createElement("button");
+		removeBtn.className = "mod-connection-remove";
+		removeBtn.textContent = "×";
+		removeBtn.tabIndex = -1;
+		removeBtn.addEventListener("click", () => {
+			this.removeConnection(sourceId, targetId);
+		});
+
+		header.appendChild(nameSpan);
+		header.appendChild(removeBtn);
+
+		// Slider controls
+		const controlsDiv = document.createElement("div");
+		controlsDiv.className = "mod-connection-controls";
+
+		const slider = document.createElement("input");
+		slider.type = "range";
+		slider.min = -1;
+		slider.max = 1;
+		slider.step = 0.01;
+		slider.value = amount;
+		slider.tabIndex = -1;
+
+		const valueSpan = document.createElement("span");
+		valueSpan.className = "mod-connection-value";
+		valueSpan.textContent = amount.toFixed(2);
+
+		slider.addEventListener("input", (e) => {
+			const newAmount = parseFloat(e.target.value);
+			valueSpan.textContent = newAmount.toFixed(2);
+			this.setConnectionAmount(sourceId, targetId, newAmount, bipolar);
+		});
+
+		controlsDiv.appendChild(slider);
+		controlsDiv.appendChild(valueSpan);
+
+		container.appendChild(header);
+		container.appendChild(controlsDiv);
+
+		return container;
+	}
+
+	setConnectionAmount(sourceId, targetId, amount, bipolar) {
+		const key = `${sourceId}-${targetId}`;
+		const result = backend.setModulation(sourceId, targetId, amount, bipolar);
+		if (result === 0) {
+			const conn = this.connections.get(key);
+			if (conn) {
+				conn.amount = amount;
+			}
+		}
+	}
+
+	removeConnection(sourceId, targetId) {
+		const key = `${sourceId}-${targetId}`;
+		const result = backend.clearModulation(sourceId, targetId);
+		if (result === 0) {
+			this.connections.delete(key);
+
+			// Remove UI element
+			const connectionElement = this.sourcesElement.querySelector(
+				`.mod-connection[data-connection-key="${key}"]`,
+			);
+			if (connectionElement) {
+				connectionElement.remove();
+			}
+
+			// Update dropdown
+			this.updateAvailableTargets(sourceId);
+		} else {
+			setStatus(`Failed to remove modulation routing`, true);
+		}
+	}
+
+	applyModulationUpdates(updates) {
+		// Clear all existing connections
+		Array.from(this.connections.keys()).forEach((key) => {
+			const [sourceId, targetId] = key.split("-").map((id) => parseInt(id, 10));
+			backend.clearModulation(sourceId, targetId);
+		});
+		this.connections.clear();
+
+		// Clear UI
+		this.sourcesElement.querySelectorAll(".mod-connections").forEach((div) => {
+			div.innerHTML = "";
+		});
+
+		// Apply new routings
+		updates.forEach((update) => {
+			this.addConnection(update.source_id, update.target_id, update.bipolar);
+			// Update amount
+			const key = `${update.source_id}-${update.target_id}`;
+			const conn = this.connections.get(key);
+			if (conn) {
+				conn.amount = update.amount;
+				// Update UI slider
+				const slider = this.sourcesElement.querySelector(
+					`.mod-connection[data-connection-key="${key}"] input[type="range"]`,
+				);
+				if (slider) {
+					slider.value = update.amount;
+					const valueSpan = slider.nextElementSibling;
+					if (valueSpan) {
+						valueSpan.textContent = update.amount.toFixed(2);
+					}
+				}
+			}
+		});
+
+		// Update all dropdowns
+		this.sources.forEach((source) => {
+			this.updateAvailableTargets(source.id);
+		});
+	}
+
+	applySourceParameterUpdates(updates) {
+		updates.forEach((update) => {
+			const control = this.sourceParamControls.get(update.id);
+			if (control) {
+				const { input, updateValueDisplay, param } = control;
+				if (param.type === "Boolean") {
+					input.checked = update.value > 0.5;
+				} else if (param.type === "Enum") {
+					const idx = Math.round(update.value * (param.values.length - 1));
+					input.value = idx;
+				} else {
+					input.value = update.value;
+				}
+				updateValueDisplay(update.value);
+			}
+		});
+	}
+}
+
+const modulationUI = new ModulationMatrixUI();
 
 // Initialize effect manager when WASM is ready
 let effectManager;

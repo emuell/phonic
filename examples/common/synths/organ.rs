@@ -4,10 +4,13 @@
 use phonic::{
     four_cc::FourCC,
     fundsp::prelude32::*,
+    generators::{LfoWaveform, ModulationConfig, ModulationSource, ModulationTarget},
     parameters::{EnumParameter, FloatParameter},
-    utils::fundsp::shared_ahdsr,
+    utils::fundsp::{shared_ahdsr, var_buffer, SharedBuffer},
     Parameter, ParameterScaling,
 };
+
+use strum::VariantNames;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -48,10 +51,14 @@ pub const RELEASE: FloatParameter =
         .with_scaling(ParameterScaling::Exponential(2.0));
 
 // Vibrato
-pub const VIB_RATE: FloatParameter =
-    FloatParameter::new(FourCC(*b"vRat"), "Vibrato Rate", 0.1..=10.0, 6.0).with_unit("Hz");
-pub const VIB_DEPTH: FloatParameter =
-    FloatParameter::new(FourCC(*b"vDep"), "Vibrato Depth", 0.0..=1.0, 0.0);
+pub const LFO_RATE: FloatParameter =
+    FloatParameter::new(FourCC(*b"vRat"), "Vibrato Rate", 0.01..=20.0, 6.0).with_unit("Hz");
+pub const LFO_WAVEFORM: EnumParameter = EnumParameter::new(
+    FourCC(*b"vWav"),
+    "Vibrato Waveform",
+    LfoWaveform::VARIANTS,
+    LfoWaveform::Sine as usize,
+);
 
 // Percussion
 pub const PERC_LEVEL: FloatParameter =
@@ -63,8 +70,21 @@ pub const PERC_HARM: EnumParameter =
 
 // -------------------------------------------------------------------------------------------------
 
+// Modulation Source IDs
+pub const MOD_SRC_VIBRATO: FourCC = FourCC(*b"VLFO");
+pub const MOD_SRC_VELOCITY: FourCC = FourCC(*b"MVEL");
+pub const MOD_SRC_KEYTRACK: FourCC = FourCC(*b"MKEY");
+
+// Modulation Target IDs (virtual parameters for modulation)
+pub const MOD_TARGET_PITCH: FourCC = FourCC(*b"mPit");
+pub const MOD_TARGET_VOLUME: FourCC = FourCC(*b"mVol");
+pub const MOD_TARGET_PERC_LEVEL: FourCC = FourCC(*b"mPLv");
+
+// -------------------------------------------------------------------------------------------------
+
+/// Exposes all automateable parameters. *excluding* modulation source parameters.
 pub fn parameters() -> &'static [&'static dyn Parameter] {
-    const ALL_PARAMS: [&dyn Parameter; 18] = [
+    const ALL_PARAMS: [&dyn Parameter; 16] = [
         &DRAWBAR_16,
         &DRAWBAR_8,
         &DRAWBAR_5_1_3,
@@ -78,8 +98,6 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
         &TUNE_2,
         &ATTACK,
         &RELEASE,
-        &VIB_RATE,
-        &VIB_DEPTH,
         &PERC_LEVEL,
         &PERC_DECAY,
         &PERC_HARM,
@@ -87,9 +105,44 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
     &ALL_PARAMS
 }
 
+// -------------------------------------------------------------------------------------------------
+
+/// Returns the modulation configuration for the organ synth.
+pub fn modulation_config() -> ModulationConfig {
+    ModulationConfig {
+        sources: vec![
+            // LFO (Vibrato/Tremolo)
+            ModulationSource::Lfo {
+                id: MOD_SRC_VIBRATO,
+                name: "LFO",
+                rate_param: LFO_RATE,
+                waveform_param: LFO_WAVEFORM,
+            },
+            // Velocity
+            ModulationSource::Velocity {
+                id: MOD_SRC_VELOCITY,
+                name: "Velocity",
+            },
+            // Keytracking
+            ModulationSource::Keytracking {
+                id: MOD_SRC_KEYTRACK,
+                name: "Keytracking",
+            },
+        ],
+        targets: vec![
+            ModulationTarget::new(MOD_TARGET_PITCH, "Pitch"),
+            ModulationTarget::new(MOD_TARGET_VOLUME, "Volume"),
+            ModulationTarget::new(MOD_TARGET_PERC_LEVEL, "Perc Level"),
+        ],
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 #[allow(unused)]
 pub fn randomize() -> Vec<(FourCC, f32)> {
     let mut updates = Vec::new();
+
     for param in parameters() {
         let id = param.id();
         let value = if id == DRAWBAR_8.id() {
@@ -116,12 +169,6 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
         } else if id == RELEASE.id() {
             let val = rand::random_range(0.05..0.5);
             RELEASE.normalize_value(val)
-        } else if id == VIB_DEPTH.id() {
-            if rand::random_range(0.0..1.0) < 0.3 {
-                rand::random_range(0.0..0.2)
-            } else {
-                0.0
-            }
         } else if id == PERC_LEVEL.id() {
             if rand::random_range(0.0..1.0) < 0.3 {
                 rand::random_range(0.3..0.8)
@@ -133,8 +180,78 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
         };
         updates.push((id, value));
     }
+
+    for param in modulation_config().source_parameters() {
+        let id = param.id();
+        let value = if id == LFO_RATE.id() {
+            let val = rand::random_range(4.0..8.0);
+            LFO_RATE.normalize_value(val)
+        } else if id == LFO_WAVEFORM.id() {
+            // Favor Sine for vibrato, but allow Triangle
+            if rand::random_range(0.0..1.0) < 0.8 {
+                0.0 // Sine
+            } else {
+                1.0 / (LfoWaveform::VARIANTS.len() - 1) as f32 // Triangle
+            }
+        } else {
+            rand::random_range(0.0..=1.0)
+        };
+        updates.push((id, value));
+    }
+
     updates
 }
+
+/// Returns random modulation routing connections.
+/// Returns Vec of (source_id, target_id, amount, bipolar).
+#[allow(unused)]
+pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
+    let mut routes = Vec::new();
+
+    // Vibrato LFO -> Pitch: 30% chance of having vibrato
+    if rand::random_range(0.0..1.0) < 0.3 {
+        routes.push((
+            MOD_SRC_VIBRATO,
+            MOD_TARGET_PITCH,
+            rand::random_range(0.2..0.6), // Subtle vibrato
+            true,                         // bipolar
+        ));
+    }
+
+    // Tremolo LFO -> Volume: 20% chance of tremolo
+    if rand::random_range(0.0..1.0) < 0.2 {
+        routes.push((
+            MOD_SRC_VIBRATO,
+            MOD_TARGET_VOLUME,
+            rand::random_range(0.3..0.7), // Moderate tremolo
+            true,                         // bipolar
+        ));
+    }
+
+    // Velocity -> Perc Level: 40% chance
+    if rand::random_range(0.0..1.0) < 0.4 {
+        routes.push((
+            MOD_SRC_VELOCITY,
+            MOD_TARGET_PERC_LEVEL,
+            rand::random_range(0.4..0.8), // Strong velocity sensitivity
+            false,                        // unipolar
+        ));
+    }
+
+    // Keytracking -> Volume: 30% chance (brighter notes louder)
+    if rand::random_range(0.0..1.0) < 0.3 {
+        routes.push((
+            MOD_SRC_KEYTRACK,
+            MOD_TARGET_VOLUME,
+            rand::random_range(0.2..0.5), // Subtle keytracking
+            false,                        // unipolar
+        ));
+    }
+
+    routes
+}
+
+// -------------------------------------------------------------------------------------------------
 
 pub fn voice_factory(
     gate: Shared,
@@ -142,11 +259,15 @@ pub fn voice_factory(
     volume: Shared,
     panning: Shared,
     parameter: &mut dyn FnMut(FourCC) -> Shared,
+    modulation: &mut dyn FnMut(FourCC) -> SharedBuffer,
 ) -> Box<dyn AudioUnit> {
-    // Vibrato
-    let vib_rate = var(&parameter(VIB_RATE.id()));
-    let vib_depth = var(&parameter(VIB_DEPTH.id()));
-    let vibrato = (vib_rate >> sine()) * vib_depth * 0.03; // approx +/- 3% pitch mod
+    // Get modulation buffers
+    let pitch_mod_buffer = modulation(MOD_TARGET_PITCH);
+    let volume_mod_buffer = modulation(MOD_TARGET_VOLUME);
+    let perc_level_mod_buffer = modulation(MOD_TARGET_PERC_LEVEL);
+
+    // Vibrato modulation (±3% pitch mod, approx ±0.5 semitone)
+    let vibrato = var_buffer(&pitch_mod_buffer) * 0.03;
     let freq_mod = var(&freq) * (1.0 + vibrato);
 
     // Helper to create harmonics
@@ -195,7 +316,10 @@ pub fn voice_factory(
         shared(0.0),  // Sustain
         shared(0.01), // Release
     );
-    let perc_sound = perc_sig * perc_env * var(&parameter(PERC_LEVEL.id()));
+    // Apply percussion level modulation (unipolar 0..1)
+    let perc_level_mod = var_buffer(&perc_level_mod_buffer);
+    let perc_level = var(&parameter(PERC_LEVEL.id())) * (1.0 + perc_level_mod);
+    let perc_sound = perc_sig * perc_env * perc_level;
 
     // Main Envelope
     let main_env = shared_ahdsr(
@@ -210,7 +334,11 @@ pub fn voice_factory(
     // Mix
     let mixed = (organ_tone + perc_sound) * main_env;
 
+    // Apply volume modulation (tremolo) - unipolar 0..1
+    let volume_mod = var_buffer(&volume_mod_buffer);
+    let modulated_volume = var(&volume) * (1.0 + volume_mod);
+
     // Output
-    let final_mix = ((mixed * var(&volume)) | var(&panning)) >> panner();
+    let final_mix = ((mixed * modulated_volume) | var(&panning)) >> panner();
     Box::new(final_mix)
 }

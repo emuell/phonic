@@ -7,8 +7,9 @@
 
 use phonic::{
     four_cc::FourCC,
-    fundsp::{prelude32::*, shared::Shared},
+    fundsp::prelude32::*,
     parameters::{EnumParameter, FloatParameter, IntegerParameter},
+    utils::fundsp::SharedBuffer,
     Parameter, ParameterScaling,
 };
 
@@ -454,6 +455,7 @@ pub fn voice_factory(
     vol: Shared,
     panning: Shared,
     parameter: &mut dyn FnMut(FourCC) -> Shared,
+    _modulation: &mut dyn FnMut(FourCC) -> SharedBuffer,
 ) -> Box<dyn AudioUnit> {
     // Helper to grab op params by index
     let mut get_op = |i: usize| -> OpParams {

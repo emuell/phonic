@@ -22,7 +22,15 @@ fn sine_approx(x: f32) -> f32 {
 
 /// Waveform types for LFO oscillators.
 #[derive(
-    Debug, Default, Copy, Clone, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
+    Debug,
+    Default,
+    Copy,
+    Clone,
+    PartialEq,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantNames,
+    strum::VariantArray,
 )]
 pub enum LfoWaveform {
     #[default]
