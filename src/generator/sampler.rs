@@ -14,8 +14,8 @@ use crate::{
     },
     modulation::{ModulationConfig, ModulationSource, ModulationTarget},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, Parameter, ParameterScaling,
-        ParameterValueUpdate,
+        EnumParameter, EnumParameterValue, FloatParameter, IntegerParameter, Parameter,
+        ParameterScaling, ParameterValueUpdate,
     },
     source::{
         file::preloaded::PreloadedFileSource, mixed::MixedSource, unique_source_id, Source,
@@ -25,7 +25,9 @@ use crate::{
     utils::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
+        db_to_linear,
         dsp::lfo::LfoWaveform,
+        linear_to_db,
     },
     Error, FilePlaybackOptions, FileSource, NotePlaybackId, PlaybackId, PlaybackStatusContext,
     PlaybackStatusEvent, ResamplingQuality,
@@ -55,8 +57,12 @@ pub struct Sampler {
     playback_id: PlaybackId,
     playback_message_queue: Arc<ArrayQueue<GeneratorPlaybackMessage>>,
     file_path: Arc<String>,
-    voices: Vec<SamplerVoice>,
     active_voices: usize,
+    voices: Vec<SamplerVoice>,
+    base_transpose: i32,
+    base_finetune: i32,
+    base_volume: f32,
+    base_panning: f32,
     envelope_parameters: Option<AhdsrParameters>,
     granular_parameters: Option<GranularParameters>,
     modulation_state: SamplerModulationState,
@@ -76,6 +82,93 @@ pub struct Sampler {
 // -------------------------------------------------------------------------------------------------
 
 impl Sampler {
+    // Base sampler parameters (always active)
+    pub const TRANSPOSE: IntegerParameter =
+        IntegerParameter::new(FourCC(*b"STRN"), "Transpose", -48..=48, 0).with_unit("st");
+
+    pub const FINETUNE: IntegerParameter =
+        IntegerParameter::new(FourCC(*b"SFTN"), "Finetune", -100..=100, 0).with_unit("ct");
+
+    pub const VOLUME: FloatParameter = FloatParameter::new(
+        FourCC(*b"SVOL"),
+        "Volume",
+        0.000001..=15.848932, // db_to_linear(-60.0)..=db_to_linear(24.0)
+        1.0,                  // 0dB
+    );
+
+    pub const PANNING: FloatParameter =
+        FloatParameter::new(FourCC(*b"SPAN"), "Panning", -1.0..=1.0, 0.0);
+
+    // Base sampler parameters
+    pub fn base_parameters() -> Vec<Box<dyn Parameter>> {
+        let gain_to_string = |v: f32| {
+            let db = linear_to_db(v);
+            if db <= -60.0 {
+                "-INF".to_string()
+            } else {
+                format!("{:.2}", db)
+            }
+        };
+        let string_to_gain = |s: &str| {
+            if s.trim().eq_ignore_ascii_case("-inf") || s.trim().eq_ignore_ascii_case("inf") {
+                Some(*Self::VOLUME.range().start())
+            } else {
+                let s = s.trim_start().trim_end_matches(|c: char| {
+                    c.eq_ignore_ascii_case(&'d')
+                        || c.eq_ignore_ascii_case(&'b')
+                        || c.is_whitespace()
+                });
+                s.parse::<f32>().ok().map(db_to_linear)
+            }
+        };
+
+        let pan_to_string = |v: f32| {
+            let v = v * 50.0;
+            if v.abs() < 0.1 {
+                "C".to_string()
+            } else if v < 0.0 {
+                format!("{:.0}L", v.abs())
+            } else {
+                format!("{:.0}R", v)
+            }
+        };
+        let string_to_pan = |s: &str| {
+            let s = s.trim();
+            if s.eq_ignore_ascii_case("c") {
+                Some(0.0)
+            } else {
+                let last_char = s.trim_end().chars().last().unwrap_or(' ');
+                if last_char.eq_ignore_ascii_case(&'l') {
+                    let s = s.trim_start().trim_end_matches(|c: char| {
+                        c.eq_ignore_ascii_case(&'l') || c.is_whitespace()
+                    });
+                    s.parse::<f32>().ok().map(|v| -v / 50.0)
+                } else if last_char.eq_ignore_ascii_case(&'r') {
+                    let s = s.trim_start().trim_end_matches(|c: char| {
+                        c.eq_ignore_ascii_case(&'r') || c.is_whitespace()
+                    });
+                    s.parse::<f32>().ok().map(|v| v / 50.0)
+                } else {
+                    None
+                }
+            }
+        };
+
+        vec![
+            Self::TRANSPOSE.into_box(),
+            Self::FINETUNE.into_box(),
+            Self::VOLUME
+                .with_unit("dB")
+                .with_scaling(ParameterScaling::Decibel(-60.0, 24.0))
+                .with_display(gain_to_string, string_to_gain)
+                .into_box(),
+            Self::PANNING
+                .with_display(pan_to_string, string_to_pan)
+                .into_box(),
+        ]
+    }
+
+    // Envelope parameters (only active when ahdsr playback is enabled)
     const MIN_TIME_SEC: f32 = 0.0;
     const MAX_TIME_SEC: f32 = 10.0;
 
@@ -119,15 +212,53 @@ impl Sampler {
     .with_unit("s");
 
     // Amplitude envelope parameters
-    pub const ENVELOPE_PARAMETERS: [&dyn Parameter; 5] = [
-        &Self::AMP_ATTACK,
-        &Self::AMP_HOLD,
-        &Self::AMP_DECAY,
-        &Self::AMP_SUSTAIN,
-        &Self::AMP_RELEASE,
-    ];
+    pub fn envelope_parameters() -> Vec<Box<dyn Parameter>> {
+        vec![
+            Self::AMP_ATTACK.into_box(),
+            Self::AMP_HOLD.into_box(),
+            Self::AMP_DECAY.into_box(),
+            Self::AMP_SUSTAIN.into_box(),
+            Self::AMP_RELEASE.into_box(),
+        ]
+    }
 
-    // Granular playback parameters
+    /// Apply given [ParameterValueUpdate] to an [AhdsrParameters] object.
+    pub fn apply_envelope_parameter_update(
+        id: FourCC,
+        value: &ParameterValueUpdate,
+        params: &mut AhdsrParameters,
+    ) -> Result<(), Error> {
+        match id {
+            _ if id == Self::AMP_ATTACK.id() => {
+                let seconds = Sampler::parameter_update_value(value, &Self::AMP_ATTACK)?;
+                params.set_attack_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            _ if id == Self::AMP_HOLD.id() => {
+                let seconds = Sampler::parameter_update_value(value, &Self::AMP_HOLD)?;
+                params.set_hold_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            _ if id == Self::AMP_DECAY.id() => {
+                let seconds = Sampler::parameter_update_value(value, &Self::AMP_DECAY)?;
+                params.set_decay_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            _ if id == Self::AMP_SUSTAIN.id() => {
+                let sustain = Sampler::parameter_update_value(value, &Self::AMP_SUSTAIN)?;
+                params.set_sustain_level(sustain)?;
+            }
+            _ if id == Self::AMP_RELEASE.id() => {
+                let seconds = Sampler::parameter_update_value(value, &Self::AMP_RELEASE)?;
+                params.set_release_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+            }
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Invalid/unknown envelope parameter '{id}'"
+                )))
+            }
+        }
+        Ok(())
+    }
+
+    // Granular playback parameters (only active when granular playback is enabled)
     const MIN_GRAIN_SIZE_MS: f32 = 1.0;
     const MAX_GRAIN_SIZE_MS: f32 = 1000.0;
     const MIN_GRAIN_DENSITY_HZ: f32 = 1.0;
@@ -151,7 +282,7 @@ impl Sampler {
         FourCC(*b"GSIZ"),
         "Grain Size",
         Self::MIN_GRAIN_SIZE_MS..=Self::MAX_GRAIN_SIZE_MS,
-        10.0,
+        100.0,
     )
     .with_scaling(ParameterScaling::Exponential(2.0))
     .with_unit("ms");
@@ -190,22 +321,111 @@ impl Sampler {
         FloatParameter::new(FourCC(*b"GPOS"), "Position", 0.0..=1.0, 0.5);
 
     pub const GRAIN_SPEED: FloatParameter =
-        FloatParameter::new(FourCC(*b"GSPD"), "Speed", 0.001..=4.0, 1.0);
+        FloatParameter::new(FourCC(*b"GSPD"), "Speed", 0.001..=4.0, 1.0).with_unit("x");
 
     // Granular playback parameters
-    pub const GRAIN_PARAMETERS: [&dyn Parameter; 11] = [
-        &Self::GRAIN_OVERLAP_MODE,
-        &Self::GRAIN_WINDOW,
-        &Self::GRAIN_SIZE,
-        &Self::GRAIN_DENSITY,
-        &Self::GRAIN_VARIATION,
-        &Self::GRAIN_SPRAY,
-        &Self::GRAIN_PAN_SPREAD,
-        &Self::GRAIN_PLAYBACK_DIR,
-        &Self::GRAIN_PLAYHEAD_MODE,
-        &Self::GRAIN_POSITION,
-        &Self::GRAIN_SPEED,
-    ];
+    pub fn granular_parameters() -> Vec<Box<dyn Parameter>> {
+        let percent_to_string = |v: f32| format!("{:.1} %", v * 100.0);
+        let string_to_percent = |s: &str| {
+            let s = s
+                .trim_start()
+                .trim_end_matches(|c: char| c == '%' || c.is_whitespace());
+            s.parse::<f32>().ok().map(|v| v / 100.0)
+        };
+
+        vec![
+            Self::GRAIN_OVERLAP_MODE.into_box(),
+            Self::GRAIN_WINDOW.into_box(),
+            Self::GRAIN_SIZE.into_box(),
+            Self::GRAIN_DENSITY.into_box(),
+            Self::GRAIN_VARIATION
+                .with_display(percent_to_string, string_to_percent)
+                .into_box(),
+            Self::GRAIN_SPRAY
+                .with_display(percent_to_string, string_to_percent)
+                .into_box(),
+            Self::GRAIN_PAN_SPREAD
+                .with_display(percent_to_string, string_to_percent)
+                .into_box(),
+            Self::GRAIN_PLAYBACK_DIR.into_box(),
+            Self::GRAIN_PLAYHEAD_MODE.into_box(),
+            Self::GRAIN_POSITION
+                .with_display(percent_to_string, string_to_percent)
+                .into_box(),
+            Self::GRAIN_SPEED.into_box(),
+        ]
+    }
+
+    /// Apply given [ParameterValueUpdate] to a [GranularParameters] object.
+    pub fn apply_granular_playback_parameter_update(
+        id: FourCC,
+        value: &ParameterValueUpdate,
+        params: &mut GranularParameters,
+    ) -> Result<(), Error> {
+        match id {
+            _ if id == Self::GRAIN_OVERLAP_MODE.id() => {
+                let mut enum_value = EnumParameterValue::<GrainOverlapMode>::from_description(
+                    Self::GRAIN_OVERLAP_MODE,
+                );
+                enum_value.apply_update(value);
+                params.overlap_mode = enum_value.value();
+            }
+            _ if id == Self::GRAIN_WINDOW.id() => {
+                let mut enum_value =
+                    EnumParameterValue::<GrainWindowMode>::from_description(Self::GRAIN_WINDOW);
+                enum_value.apply_update(value);
+                params.window = enum_value.value();
+            }
+            _ if id == Self::GRAIN_SIZE.id() => {
+                let ms = Sampler::parameter_update_value(value, &Self::GRAIN_SIZE)?;
+                params.size = ms;
+            }
+            _ if id == Self::GRAIN_DENSITY.id() => {
+                let hz = Sampler::parameter_update_value(value, &Self::GRAIN_DENSITY)?;
+                params.density = hz;
+            }
+            _ if id == Self::GRAIN_VARIATION.id() => {
+                let variation = Sampler::parameter_update_value(value, &Self::GRAIN_VARIATION)?;
+                params.variation = variation;
+            }
+            _ if id == Self::GRAIN_SPRAY.id() => {
+                let spray = Sampler::parameter_update_value(value, &Self::GRAIN_SPRAY)?;
+                params.spray = spray;
+            }
+            _ if id == Self::GRAIN_PAN_SPREAD.id() => {
+                let spread = Sampler::parameter_update_value(value, &Self::GRAIN_PAN_SPREAD)?;
+                params.pan_spread = spread;
+            }
+            _ if id == Self::GRAIN_PLAYBACK_DIR.id() => {
+                let mut enum_value = EnumParameterValue::<GrainPlaybackDirection>::from_description(
+                    Self::GRAIN_PLAYBACK_DIR,
+                );
+                enum_value.apply_update(value);
+                params.playback_direction = enum_value.value();
+            }
+            _ if id == Self::GRAIN_PLAYHEAD_MODE.id() => {
+                let mut enum_value = EnumParameterValue::<GrainPlayheadMode>::from_description(
+                    Self::GRAIN_PLAYHEAD_MODE,
+                );
+                enum_value.apply_update(value);
+                params.playhead_mode = enum_value.value();
+            }
+            _ if id == Self::GRAIN_POSITION.id() => {
+                let position = Sampler::parameter_update_value(value, &Self::GRAIN_POSITION)?;
+                params.manual_position = position;
+            }
+            _ if id == Self::GRAIN_SPEED.id() => {
+                let speed = Sampler::parameter_update_value(value, &Self::GRAIN_SPEED)?;
+                params.playhead_speed = speed;
+            }
+            _ => {
+                return Err(Error::ParameterError(format!(
+                    "Invalid/unknown granular playback parameter '{id}'"
+                )))
+            }
+        }
+        Ok(())
+    }
 
     // Modulation source descriptors
     pub const MOD_SOURCE_LFO1: FourCC = FourCC(*b"LFO1");
@@ -372,33 +592,25 @@ impl Sampler {
             ));
         }
 
+        // Base parameter values
+        let base_transpose = 0;
+        let base_finetune = 0;
+        let base_volume = 1.0;
+        let base_panning = 0.0;
+
         // Optional parameters
         let envelope_parameters = None;
         let granular_parameters = None;
 
         // Modulation state (with empty config - will be initialized in with_granular_playback)
-        let empty_config = crate::modulation::ModulationConfig {
-            sources: Vec::new(),
-            targets: Vec::new(),
-        };
-        let modulation_state = SamplerModulationState::new(empty_config);
+        let modulation_state = SamplerModulationState::new(ModulationConfig::default());
         let modulation_source_parameters = Vec::new();
         let modulation_target_parameters = Vec::new();
 
         let active_voices = 0;
 
-        // Collect active parameters
-        let active_parameters = if envelope_parameters.is_some() {
-            vec![
-                Self::AMP_ATTACK.into_box(),
-                Self::AMP_HOLD.into_box(),
-                Self::AMP_DECAY.into_box(),
-                Self::AMP_SUSTAIN.into_box(),
-                Self::AMP_RELEASE.into_box(),
-            ]
-        } else {
-            vec![]
-        };
+        // Base parameters are always active. Envelope and granular parameters are added when enabled.
+        let active_parameters = Self::base_parameters();
 
         // Initial playback state
         let transient = false;
@@ -413,8 +625,12 @@ impl Sampler {
             playback_message_queue,
             playback_status_send,
             file_path,
-            voices,
             active_voices,
+            voices,
+            base_transpose,
+            base_finetune,
+            base_volume,
+            base_panning,
             envelope_parameters,
             granular_parameters,
             modulation_state,
@@ -441,8 +657,7 @@ impl Sampler {
             })?;
 
         // Add AHDSR parameters to the active parameters list
-        self.active_parameters
-            .extend(Self::ENVELOPE_PARAMETERS.into_iter().map(|p| p.dyn_clone()));
+        self.active_parameters.extend(Self::envelope_parameters());
 
         self.envelope_parameters = Some(parameters);
         Ok(self)
@@ -456,8 +671,7 @@ impl Sampler {
             .map_err(|err| Error::ParameterError(format!("Invalid granular parameters: {err}")))?;
 
         // Add granular parameters to the active parameters list
-        self.active_parameters
-            .extend(Self::GRAIN_PARAMETERS.into_iter().map(|p| p.dyn_clone()));
+        self.active_parameters.extend(Self::granular_parameters());
 
         // Create modulation config
         let modulation_config = Self::modulation_config();
@@ -586,9 +800,12 @@ impl Sampler {
         panning: Option<f32>,
         context: Option<PlaybackStatusContext>,
     ) {
+        // Unwrap volume/pan
+        let volume_value = volume.unwrap_or(1.0);
+        let panning_value = panning.unwrap_or(0.0);
+
         // Allocate a new voice
         let voice_index = self.next_free_voice_index();
-        let volume_value = volume.unwrap_or(1.0);
 
         let voice = &mut self.voices[voice_index];
 
@@ -601,7 +818,11 @@ impl Sampler {
             note_id,
             note,
             volume_value,
-            panning.unwrap_or(0.0),
+            panning_value,
+            self.base_transpose,
+            self.base_finetune,
+            self.base_volume,
+            self.base_panning,
             &self.envelope_parameters,
             context,
         );
@@ -634,7 +855,7 @@ impl Sampler {
             .iter_mut()
             .find(|v| v.note_id() == Some(note_id))
         {
-            voice.set_speed(speed, glide);
+            voice.set_speed(speed, glide, self.base_transpose, self.base_finetune);
         }
     }
 
@@ -644,7 +865,7 @@ impl Sampler {
             .iter_mut()
             .find(|v| v.note_id() == Some(note_id))
         {
-            voice.set_volume(volume);
+            voice.set_volume(volume, self.base_volume);
         }
     }
 
@@ -654,7 +875,7 @@ impl Sampler {
             .iter_mut()
             .find(|v| v.note_id() == Some(note_id))
         {
-            voice.set_panning(panning);
+            voice.set_panning(panning, self.base_panning);
         }
     }
 
@@ -719,144 +940,27 @@ impl Sampler {
         }
     }
 
-    /// Apply given [ParameterValueUpdate] to an [AhdsrParameters] object.
-    pub fn apply_envelope_parameter_update(
-        id: FourCC,
+    fn parameter_update_value_integer(
         value: &ParameterValueUpdate,
-        params: &mut AhdsrParameters,
-    ) -> Result<(), Error> {
-        match id {
-            _ if id == Self::AMP_ATTACK.id() => {
-                let seconds = Sampler::parameter_update_value(value, &Self::AMP_ATTACK)?;
-                params.set_attack_time(Duration::from_secs_f32(seconds.max(0.0)))?;
+        descriptor: &IntegerParameter,
+    ) -> Result<i32, Error> {
+        match value {
+            ParameterValueUpdate::Normalized(norm) => {
+                Ok(descriptor.denormalize_value(norm.clamp(0.0, 1.0)))
             }
-            _ if id == Self::AMP_HOLD.id() => {
-                let seconds = Sampler::parameter_update_value(value, &Self::AMP_HOLD)?;
-                params.set_hold_time(Duration::from_secs_f32(seconds.max(0.0)))?;
-            }
-            _ if id == Self::AMP_DECAY.id() => {
-                let seconds = Sampler::parameter_update_value(value, &Self::AMP_DECAY)?;
-                params.set_decay_time(Duration::from_secs_f32(seconds.max(0.0)))?;
-            }
-            _ if id == Self::AMP_SUSTAIN.id() => {
-                let sustain = Sampler::parameter_update_value(value, &Self::AMP_SUSTAIN)?;
-                params.set_sustain_level(sustain)?;
-            }
-            _ if id == Self::AMP_RELEASE.id() => {
-                let seconds = Sampler::parameter_update_value(value, &Self::AMP_RELEASE)?;
-                params.set_release_time(Duration::from_secs_f32(seconds.max(0.0)))?;
-            }
-            _ => {
-                return Err(Error::ParameterError(format!(
-                    "Invalid/unknown envelope parameter '{id}'"
-                )))
+            ParameterValueUpdate::Raw(raw) => {
+                if let Some(v) = raw.downcast_ref::<i32>() {
+                    Ok(descriptor.clamp_value(*v))
+                } else if let Some(v) = raw.downcast_ref::<i64>() {
+                    Ok(descriptor.clamp_value(*v as i32))
+                } else {
+                    Err(Error::ParameterError(format!(
+                        "Unsupported payload type for sampler parameter '{}'",
+                        descriptor.name()
+                    )))
+                }
             }
         }
-        Ok(())
-    }
-
-    /// Apply given [ParameterValueUpdate] to a [GranularParameters] object.
-    pub fn apply_granular_playback_parameter_update(
-        id: FourCC,
-        value: &ParameterValueUpdate,
-        params: &mut GranularParameters,
-    ) -> Result<(), Error> {
-        match id {
-            _ if id == Self::GRAIN_OVERLAP_MODE.id() => {
-                let mut enum_value = EnumParameterValue::<GrainOverlapMode>::from_description(
-                    Self::GRAIN_OVERLAP_MODE,
-                );
-                enum_value.apply_update(value);
-                params.overlap_mode = enum_value.value();
-            }
-            _ if id == Self::GRAIN_WINDOW.id() => {
-                let mut enum_value =
-                    EnumParameterValue::<GrainWindowMode>::from_description(Self::GRAIN_WINDOW);
-                enum_value.apply_update(value);
-                params.window = enum_value.value();
-            }
-            _ if id == Self::GRAIN_SIZE.id() => {
-                let ms = Sampler::parameter_update_value(value, &Self::GRAIN_SIZE)?;
-                params.size = ms;
-            }
-            _ if id == Self::GRAIN_DENSITY.id() => {
-                let hz = Sampler::parameter_update_value(value, &Self::GRAIN_DENSITY)?;
-                params.density = hz;
-            }
-            _ if id == Self::GRAIN_VARIATION.id() => {
-                let variation = Sampler::parameter_update_value(value, &Self::GRAIN_VARIATION)?;
-                params.variation = variation;
-            }
-            _ if id == Self::GRAIN_SPRAY.id() => {
-                let spray = Sampler::parameter_update_value(value, &Self::GRAIN_SPRAY)?;
-                params.spray = spray;
-            }
-            _ if id == Self::GRAIN_PAN_SPREAD.id() => {
-                let spread = Sampler::parameter_update_value(value, &Self::GRAIN_PAN_SPREAD)?;
-                params.pan_spread = spread;
-            }
-            _ if id == Self::GRAIN_PLAYBACK_DIR.id() => {
-                let mut enum_value = EnumParameterValue::<GrainPlaybackDirection>::from_description(
-                    Self::GRAIN_PLAYBACK_DIR,
-                );
-                enum_value.apply_update(value);
-                params.playback_direction = enum_value.value();
-            }
-            _ if id == Self::GRAIN_PLAYHEAD_MODE.id() => {
-                let mut enum_value = EnumParameterValue::<GrainPlayheadMode>::from_description(
-                    Self::GRAIN_PLAYHEAD_MODE,
-                );
-                enum_value.apply_update(value);
-                params.playhead_mode = enum_value.value();
-            }
-            _ if id == Self::GRAIN_POSITION.id() => {
-                let position = Sampler::parameter_update_value(value, &Self::GRAIN_POSITION)?;
-                params.manual_position = position;
-            }
-            _ if id == Self::GRAIN_SPEED.id() => {
-                let speed = Sampler::parameter_update_value(value, &Self::GRAIN_SPEED)?;
-                params.playhead_speed = speed;
-            }
-            _ => {
-                return Err(Error::ParameterError(format!(
-                    "Invalid/unknown granular playback parameter '{id}'"
-                )))
-            }
-        }
-        Ok(())
-    }
-
-    /// Apply modulation parameter updates to the sampler.
-    fn apply_modulation_parameter_update(
-        &mut self,
-        id: FourCC,
-        value: &ParameterValueUpdate,
-    ) -> Result<(), Error> {
-        // Check if this is an LFO rate parameter
-        let rate = if id == Self::MOD_LFO1_RATE.id() {
-            Some(Self::parameter_update_value(value, &Self::MOD_LFO1_RATE)?)
-        } else if id == Self::MOD_LFO2_RATE.id() {
-            Some(Self::parameter_update_value(value, &Self::MOD_LFO2_RATE)?)
-        } else {
-            None
-        };
-
-        // Check if this is an LFO waveform parameter
-        let waveform = if id == Self::MOD_LFO1_WAVEFORM.id() {
-            let mut waveform_value = EnumParameterValue::from_description(Self::MOD_LFO1_WAVEFORM);
-            waveform_value.apply_update(value);
-            Some(waveform_value.value())
-        } else if id == Self::MOD_LFO2_WAVEFORM.id() {
-            let mut waveform_value = EnumParameterValue::from_description(Self::MOD_LFO2_WAVEFORM);
-            waveform_value.apply_update(value);
-            Some(waveform_value.value())
-        } else {
-            None
-        };
-
-        // Delegate to modulation state
-        self.modulation_state
-            .apply_parameter_update(id, rate, waveform, &mut self.voices)
     }
 
     /// Update modulation routing in all voices.
@@ -1046,32 +1150,121 @@ impl Generator for Sampler {
         id: FourCC,
         value: &ParameterValueUpdate,
     ) -> Result<(), Error> {
-        // Handle AHDSR parameters
-        if let Some(params) = &mut self.envelope_parameters {
-            if Self::ENVELOPE_PARAMETERS.iter().any(|p| p.id() == id) {
-                Self::apply_envelope_parameter_update(id, value, params)?;
+        match id {
+            // Base parameters
+            _ if id == Sampler::TRANSPOSE.id() => {
+                let semitones =
+                    Sampler::parameter_update_value_integer(value, &Sampler::TRANSPOSE)?;
+                self.base_transpose = semitones;
+                // Recompute speed for all active voices
+                for voice in &mut self.voices {
+                    if voice.is_active() {
+                        voice.set_base_pitch(self.base_transpose, self.base_finetune);
+                    }
+                }
                 return Ok(());
             }
-        }
-        // Handle granular parameters
-        if let Some(params) = &mut self.granular_parameters {
-            if Self::GRAIN_PARAMETERS.iter().any(|p| p.id() == id) {
-                Self::apply_granular_playback_parameter_update(id, value, params)?;
+            _ if id == Sampler::FINETUNE.id() => {
+                let cents = Sampler::parameter_update_value_integer(value, &Sampler::FINETUNE)?;
+                self.base_finetune = cents;
+                // Recompute speed for all active voices
+                for voice in &mut self.voices {
+                    if voice.is_active() {
+                        voice.set_base_pitch(self.base_transpose, self.base_finetune);
+                    }
+                }
                 return Ok(());
             }
+            _ if id == Sampler::VOLUME.id() => {
+                let volume = Sampler::parameter_update_value(value, &Sampler::VOLUME)?;
+                self.base_volume = volume;
+                // Recompute volume for all active voices
+                for voice in &mut self.voices {
+                    if voice.is_active() {
+                        voice.set_base_volume(self.base_volume);
+                    }
+                }
+                return Ok(());
+            }
+            _ if id == Sampler::PANNING.id() => {
+                let panning = Sampler::parameter_update_value(value, &Sampler::PANNING)?;
+                self.base_panning = panning;
+                // Recompute panning for all active voices
+                for voice in &mut self.voices {
+                    if voice.is_active() {
+                        voice.set_base_panning(self.base_panning);
+                    }
+                }
+                return Ok(());
+            }
+            // Envelope parameters
+            _ if id == Sampler::AMP_ATTACK.id()
+                || id == Sampler::AMP_HOLD.id()
+                || id == Sampler::AMP_DECAY.id()
+                || id == Sampler::AMP_SUSTAIN.id()
+                || id == Sampler::AMP_RELEASE.id() =>
+            {
+                if let Some(params) = &mut self.envelope_parameters {
+                    return Self::apply_envelope_parameter_update(id, value, params);
+                }
+            }
+            // Granular parameters
+            _ if id == Sampler::GRAIN_OVERLAP_MODE.id()
+                || id == Sampler::GRAIN_WINDOW.id()
+                || id == Sampler::GRAIN_SIZE.id()
+                || id == Sampler::GRAIN_DENSITY.id()
+                || id == Sampler::GRAIN_VARIATION.id()
+                || id == Sampler::GRAIN_SPRAY.id()
+                || id == Sampler::GRAIN_PAN_SPREAD.id()
+                || id == Sampler::GRAIN_PLAYBACK_DIR.id()
+                || id == Sampler::GRAIN_PLAYHEAD_MODE.id()
+                || id == Sampler::GRAIN_POSITION.id()
+                || id == Sampler::GRAIN_SPEED.id() =>
+            {
+                if let Some(params) = &mut self.granular_parameters {
+                    return Self::apply_granular_playback_parameter_update(id, value, params);
+                }
+            }
+            // Modulation Parameters
+            _ if self
+                .modulation_source_parameters
+                .iter()
+                .any(|p| p.id() == id) =>
+            {
+                // Check if this is an LFO rate parameter
+                let rate = if id == Self::MOD_LFO1_RATE.id() {
+                    Some(Self::parameter_update_value(value, &Self::MOD_LFO1_RATE)?)
+                } else if id == Self::MOD_LFO2_RATE.id() {
+                    Some(Self::parameter_update_value(value, &Self::MOD_LFO2_RATE)?)
+                } else {
+                    None
+                };
+                // Check if this is an LFO waveform parameter
+                let waveform = if id == Self::MOD_LFO1_WAVEFORM.id() {
+                    let mut waveform_value =
+                        EnumParameterValue::from_description(Self::MOD_LFO1_WAVEFORM);
+                    waveform_value.apply_update(value);
+                    Some(waveform_value.value())
+                } else if id == Self::MOD_LFO2_WAVEFORM.id() {
+                    let mut waveform_value =
+                        EnumParameterValue::from_description(Self::MOD_LFO2_WAVEFORM);
+                    waveform_value.apply_update(value);
+                    Some(waveform_value.value())
+                } else {
+                    None
+                };
+                // Delegate to modulation state
+                return self.modulation_state.apply_parameter_update(
+                    id,
+                    rate,
+                    waveform,
+                    &mut self.voices,
+                );
+            }
+            _ => {}
         }
-        // Handle modulation parameters
-        if self
-            .modulation_source_parameters
-            .iter()
-            .any(|p| p.id() == id)
-        {
-            self.apply_modulation_parameter_update(id, value)?;
-            return Ok(());
-        }
-        // If we get here, the parameter wasn't handled and thus is unknown
         Err(Error::ParameterError(format!(
-            "Unknown sampler parameter: {id}"
+            "Invalid or unknown sampler parameter: '{id}'"
         )))
     }
 

@@ -161,13 +161,14 @@ impl FloatParameter {
     pub fn string_to_value(&self, string: &str) -> Option<f32> {
         let string = string.trim();
         let value = match &self.string_to_value {
-            Some(f) => f(string),
+            Some(f) => f(string).filter(|v| !v.is_nan()),
             None => string
                 .to_lowercase()
                 .trim_end_matches(self.unit.to_lowercase().as_str())
                 .trim_end()
-                .parse()
-                .ok(),
+                .parse::<f32>()
+                .ok()
+                .filter(|v| !v.is_nan()),
         }?;
         Some(self.clamp_value(value))
     }
