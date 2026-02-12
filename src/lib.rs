@@ -87,7 +87,6 @@
 //!     let generator = player.play_generator(
 //!         Sampler::from_file(
 //!             "path/to/instrument_sample.wav",
-//!             None,
 //!             GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id()),
 //!             player.output_channel_count(),
 //!             player.output_sample_rate(),

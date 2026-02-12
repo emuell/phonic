@@ -343,19 +343,19 @@ fn main() -> Result<(), Error> {
                     // Sampler with AHDSR envelope
                     let sampler = Sampler::from_file(
                         "assets/bass.wav",
-                        Some(AhdsrParameters::new(
-                            Duration::from_millis(10),
-                            Duration::ZERO,
-                            Duration::ZERO,
-                            1.0,
-                            Duration::from_secs(1),
-                        )?),
                         GeneratorPlaybackOptions::default()
                             .voices(4)
                             .target_mixer(mixer.id()),
                         player.output_channel_count(),
                         player.output_sample_rate(),
-                    )?;
+                    )?
+                    .with_ahdsr(AhdsrParameters::new(
+                        Duration::from_millis(10),
+                        Duration::ZERO,
+                        Duration::ZERO,
+                        1.0,
+                        Duration::from_secs(1),
+                    )?)?;
                     let generator = player.play_generator(sampler, None)?;
 
                     // Play a few random notes

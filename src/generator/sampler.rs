@@ -237,49 +237,8 @@ impl Sampler {
         LfoWaveform::Triangle as usize,
     );
 
-    // complete Modulation source setup
-    pub fn modulation_sources() -> Vec<ModulationSource> {
-        vec![
-            ModulationSource::Lfo {
-                id: Self::MOD_SOURCE_LFO1,
-                name: "LFO 1",
-                rate_param: Self::MOD_LFO1_RATE,
-                waveform_param: Self::MOD_LFO1_WAVEFORM,
-            },
-            ModulationSource::Lfo {
-                id: Self::MOD_SOURCE_LFO2,
-                name: "LFO 2",
-                rate_param: Self::MOD_LFO2_RATE,
-                waveform_param: Self::MOD_LFO2_WAVEFORM,
-            },
-            ModulationSource::Velocity {
-                id: Self::MOD_SOURCE_VELOCITY,
-                name: "Velocity",
-            },
-            ModulationSource::Keytracking {
-                id: Self::MOD_SOURCE_KEYTRACK,
-                name: "Keytracking",
-            },
-        ]
-    }
-
-    // All modulatable grain target parameters
-    pub fn modulation_targets() -> Vec<Box<dyn Parameter>> {
-        vec![
-            Self::GRAIN_SIZE.into_box(),
-            Self::GRAIN_DENSITY.into_box(),
-            Self::GRAIN_VARIATION.into_box(),
-            Self::GRAIN_SPRAY.into_box(),
-            Self::GRAIN_PAN_SPREAD.into_box(),
-            Self::GRAIN_POSITION.into_box(),
-            Self::GRAIN_SPEED.into_box(),
-        ]
-    }
-
-    /// Default modulation configuration for the sampler.
-    fn default_modulation_config() -> ModulationConfig {
-        use crate::modulation::ModulationTarget;
-
+    /// Modulation configuration for the sampler (with granular playback enabled).
+    pub fn modulation_config() -> ModulationConfig {
         ModulationConfig {
             sources: vec![
                 ModulationSource::Lfo {
@@ -328,7 +287,6 @@ impl Sampler {
     ///   usually the player's audio backend's channel count.
     pub fn from_file<P: AsRef<Path>>(
         file_path: P,
-        envelope_parameters: Option<AhdsrParameters>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -341,7 +299,6 @@ impl Sampler {
 
         Self::from_file_source(
             file_source,
-            envelope_parameters,
             options,
             output_channel_count,
             output_sample_rate,
@@ -353,7 +310,6 @@ impl Sampler {
     pub fn from_file_buffer<P: AsRef<Path>>(
         file_buffer: Vec<u8>,
         file_path: P,
-        envelope_parameters: Option<AhdsrParameters>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -368,7 +324,6 @@ impl Sampler {
 
         Self::from_file_source(
             file_source,
-            envelope_parameters,
             options,
             output_channel_count,
             output_sample_rate,
@@ -379,7 +334,6 @@ impl Sampler {
     /// See [Self::from_file] for more info about the parameters.
     pub fn from_file_source(
         file_source: PreloadedFileSource,
-        envelope_parameters: Option<AhdsrParameters>,
         options: GeneratorPlaybackOptions,
         output_channel_count: usize,
         output_sample_rate: u32,
@@ -418,18 +372,8 @@ impl Sampler {
             ));
         }
 
-        // Initialize envelope parameters, if any
-        let mut envelope_parameters = envelope_parameters;
-        if let Some(envelope_parameters) = &mut envelope_parameters {
-            envelope_parameters
-                .set_sample_rate(output_sample_rate)
-                .map_err(|err| {
-                    Error::ParameterError(format!(
-                        "Failed to create envelope parameters for sampler: {err}"
-                    ))
-                })?;
-        }
-
+        // Optional parameters
+        let envelope_parameters = None;
         let granular_parameters = None;
 
         // Modulation state (with empty config - will be initialized in with_granular_playback)
@@ -516,7 +460,7 @@ impl Sampler {
             .extend(Self::GRAIN_PARAMETERS.into_iter().map(|p| p.dyn_clone()));
 
         // Create modulation config
-        let modulation_config = Self::default_modulation_config();
+        let modulation_config = Self::modulation_config();
 
         // Cache modulation parameters for lookups
         self.modulation_source_parameters = modulation_config.source_parameters();
