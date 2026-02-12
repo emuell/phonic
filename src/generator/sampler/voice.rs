@@ -29,6 +29,9 @@ const GRAIN_POOL_SIZE: usize = 64;
 
 pub struct SamplerVoice {
     note_id: Option<NotePlaybackId>,
+    note: u8,
+    note_volume: f32,
+    note_panning: f32,
     source: SamplerVoiceSource,
     envelope: AhdsrEnvelope,
     release_start_frame: Option<u64>,
@@ -48,6 +51,9 @@ pub struct SamplerVoice {
 impl SamplerVoice {
     pub fn new(file_source: PreloadedFileSource, channel_count: usize, sample_rate: u32) -> Self {
         let note_id = None;
+        let note = 60; // default middle C
+        let note_volume = 1.0;
+        let note_panning = 0.0;
 
         // Create wrapped voice source
         let source = {
@@ -79,6 +85,9 @@ impl SamplerVoice {
 
         Self {
             note_id,
+            note,
+            note_volume,
+            note_panning,
             source,
             envelope,
             release_start_frame,
@@ -132,23 +141,44 @@ impl SamplerVoice {
         note: u8,
         volume: f32,
         panning: f32,
+        base_transpose: i32,
+        base_finetune: i32,
+        base_volume: f32,
+        base_panning: f32,
         envelope_parameters: &Option<AhdsrParameters>,
         context: Option<PlaybackStatusContext>,
     ) {
         // Reset a probably recycled file source
         self.reset();
-        // Set initial speed, volume and pan
-        let speed = speed_from_note(note);
-        self.file_source_mut().set_speed(speed, None);
-        self.file_source_mut().set_playback_status_context(context);
-        self.amplified_source_mut().set_volume(volume);
-        self.panned_source_mut().set_panning(panning);
 
-        // Start granular playback
+        // Store per-note values for later recomputation
+        self.note = note;
+        self.note_volume = volume;
+        self.note_panning = panning;
+
+        // Compute effective speed: note speed * pitch factor from transpose + finetune
+        let note_speed = speed_from_note(note);
+        let pitch_factor =
+            2.0_f64.powf((base_transpose as f64) / 12.0 + (base_finetune as f64) / 1200.0);
+        let effective_speed = note_speed * pitch_factor;
+
+        // Compute effective volume and panning
+        let effective_volume = base_volume * volume;
+        let effective_panning = (base_panning + panning).clamp(-1.0, 1.0);
+
+        // Apply to source chain
+        self.file_source_mut().set_speed(effective_speed, None);
+        self.amplified_source_mut().set_volume(effective_volume);
+        self.panned_source_mut().set_panning(effective_panning);
+
+        // Start granular playback with effective values
         if let Some(grain_pool) = &mut self.grain_pool {
             self.grain_pool_started = true;
-            grain_pool.start(speed, volume, panning);
+            grain_pool.start(effective_speed, effective_volume, effective_panning);
         }
+
+        // Set playback context
+        self.file_source_mut().set_playback_status_context(context);
 
         // Start envelope
         if let Some(envelope_parameters) = envelope_parameters {
@@ -192,6 +222,7 @@ impl SamplerVoice {
             // reset source
             self.file_source_mut().reset();
             self.file_source_mut().set_playback_status_context(None);
+            // note properties are left as they are: they will be overwritten in start()
             self.note_id = None;
             // reset granular state
             if let Some(grain_pool) = &mut self.grain_pool {
@@ -202,27 +233,77 @@ impl SamplerVoice {
         self.release_start_frame = None;
     }
 
-    /// Set a new playback speed value with optional glide.
-    pub fn set_speed(&mut self, speed: f64, glide: Option<f32>) {
-        self.file_source_mut().set_speed(speed, glide);
+    /// This is called when a SetSpeed event is applied for a specific note.
+    pub fn set_speed(
+        &mut self,
+        speed: f64,
+        glide: Option<f32>,
+        base_transpose: i32,
+        base_finetune: i32,
+    ) {
+        // Compute effective speed: note speed * pitch factor from transpose + finetune
+        let pitch_factor =
+            2.0_f64.powf((base_transpose as f64) / 12.0 + (base_finetune as f64) / 1200.0);
+        let effective_speed = speed * pitch_factor;
+        self.file_source_mut().set_speed(effective_speed, glide);
         if let Some(grain_pool) = &mut self.grain_pool {
-            grain_pool.set_speed(speed);
+            grain_pool.set_speed(effective_speed);
         }
     }
 
-    /// Set a new volume value.
-    pub fn set_volume(&mut self, volume: f32) {
-        self.amplified_source_mut().set_volume(volume);
+    /// Recompute and apply the effective speed from stored note + base transpose/finetune.
+    /// This is called when the sampler's base pitch changes during playback.
+    pub fn set_base_pitch(&mut self, base_transpose: i32, base_finetune: i32) {
+        // Clear any speed override -- transpose/finetune takes precedence
+        let note_speed = speed_from_note(self.note);
+        let pitch_factor =
+            2.0_f64.powf((base_transpose as f64) / 12.0 + (base_finetune as f64) / 1200.0);
+        let effective_speed = note_speed * pitch_factor;
+        self.file_source_mut().set_speed(effective_speed, None);
         if let Some(grain_pool) = &mut self.grain_pool {
-            grain_pool.set_volume(volume);
+            grain_pool.set_speed(effective_speed);
         }
     }
 
-    /// Set a new panning value.
-    pub fn set_panning(&mut self, panning: f32) {
-        self.panned_source_mut().set_panning(panning);
+    /// Set a new per-note volume value. Composes with base volume.
+    /// This is called when a SetVolume event is applied for a specific note.
+    pub fn set_volume(&mut self, volume: f32, base_volume: f32) {
+        self.note_volume = volume;
+        let effective_volume = base_volume * volume;
+        self.amplified_source_mut().set_volume(effective_volume);
         if let Some(grain_pool) = &mut self.grain_pool {
-            grain_pool.set_panning(panning);
+            grain_pool.set_volume(effective_volume);
+        }
+    }
+
+    /// Recompute and apply the effective volume from stored per-note volume + base volume.
+    /// This is called when the sampler's base volume changes during playback.
+    pub fn set_base_volume(&mut self, base_volume: f32) {
+        let effective_volume = base_volume * self.note_volume;
+        self.amplified_source_mut().set_volume(effective_volume);
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_volume(effective_volume);
+        }
+    }
+
+    /// Set a new per-note panning value. Composes with base panning.
+    /// This is called when a SetPanning event is applied for a specific note.
+    pub fn set_panning(&mut self, panning: f32, base_panning: f32) {
+        self.note_panning = panning;
+        let effective_panning = (base_panning + panning).clamp(-1.0, 1.0);
+        self.panned_source_mut().set_panning(effective_panning);
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_panning(effective_panning);
+        }
+    }
+
+    /// Recompute and apply the effective panning from stored per-note panning + base panning.
+    /// This is called when the sampler's base panning changes during playback.
+    pub fn set_base_panning(&mut self, base_panning: f32) {
+        let effective_panning = (base_panning + self.note_panning).clamp(-1.0, 1.0);
+        self.panned_source_mut().set_panning(effective_panning);
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_panning(effective_panning);
         }
     }
 

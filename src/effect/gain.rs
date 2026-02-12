@@ -21,17 +21,17 @@ pub struct GainEffect {
 impl GainEffect {
     pub const EFFECT_NAME: &str = "Gain";
 
+    const MIN_DB: f32 = -60.0;
+    const MAX_DB: f32 = 24.0;
+
     pub const GAIN: FloatParameter = FloatParameter::new(
         FourCC(*b"gain"),
         "Gain",
-        0.000001..=15.848_932, // Self::MIN_DB..=Self::MAX_DB,
-        1.0,                   // 0dB
+        0.000001..=15.848932, // Self::MIN_DB..=Self::MAX_DB,
+        1.0,                  // 0dB
     )
     .with_unit("dB")
     .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB));
-
-    const MIN_DB: f32 = -60.0;
-    const MAX_DB: f32 = 12.0;
 
     /// Creates a new `GainEffect` with default gain (0dB = unity gain).
     pub fn new() -> Self {
@@ -54,9 +54,7 @@ impl GainEffect {
         Self {
             channel_count: 0,
             gain: SmoothedParameterValue::from_description(
-                Self::GAIN
-                    .clone()
-                    .with_display(gain_to_string, string_to_gain),
+                Self::GAIN.with_display(gain_to_string, string_to_gain),
             ),
         }
     }
