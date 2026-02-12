@@ -107,7 +107,6 @@ fn main() -> Result<(), Error> {
     // Create sampler with granular playback
     let sampler = Sampler::from_file(
         SAMPLE_PATH,
-        None,
         GeneratorPlaybackOptions::default().voices(8),
         channel_count,
         sample_rate,

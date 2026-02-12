@@ -37,7 +37,6 @@ fn main() -> Result<(), Error> {
     let metronome = player.play_generator(
         Sampler::from_file(
             "assets/cowbell.wav",
-            None,
             GeneratorPlaybackOptions::default().voices(2),
             player.output_channel_count(),
             player.output_sample_rate(),
@@ -46,20 +45,21 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Create bass sampler
+    let bass_envelope = AhdsrParameters::new(
+        Duration::from_millis(10),
+        Duration::ZERO,
+        Duration::ZERO,
+        1.0,
+        Duration::from_secs_f32(2.0),
+    )?;
     let bass = player.play_generator(
         Sampler::from_file(
             "assets/bass.wav",
-            Some(AhdsrParameters::new(
-                Duration::from_millis(10),
-                Duration::ZERO,
-                Duration::ZERO,
-                1.0,
-                Duration::from_secs_f32(2.0),
-            )?),
             GeneratorPlaybackOptions::default(),
             player.output_channel_count(),
             player.output_sample_rate(),
-        )?,
+        )?
+        .with_ahdsr(bass_envelope)?,
         None,
     )?;
 

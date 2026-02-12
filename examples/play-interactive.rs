@@ -120,22 +120,23 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Create sampler generator for sample-based playback
+    let sampler_envelope = AhdsrParameters::new(
+        Duration::ZERO,         // attack
+        Duration::ZERO,         // hold
+        Duration::ZERO,         // decay
+        1.0,                    // sustain
+        Duration::from_secs(3), // release
+    )?;
     let sampler_generator = player.play_generator(
         Sampler::from_file(
             "assets/pad-ambient.wav",
-            Some(AhdsrParameters::new(
-                Duration::ZERO,         // attack
-                Duration::ZERO,         // hold
-                Duration::ZERO,         // decay
-                1.0,                    // sustain
-                Duration::from_secs(3), // release
-            )?),
             GeneratorPlaybackOptions::default()
                 .voices(8)
                 .target_mixer(tone_mixer.id()),
             player.output_channel_count(),
             player.output_sample_rate(),
-        )?,
+        )?
+        .with_ahdsr(sampler_envelope)?,
         None,
     )?;
 
