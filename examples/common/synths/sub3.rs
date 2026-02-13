@@ -282,6 +282,8 @@ pub fn modulation_config() -> ModulationConfig {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns random parameter values.
+/// Returns Vec of (parameter_id, normalized_value).
 #[allow(unused)]
 pub fn randomize() -> Vec<(FourCC, f32)> {
     let mut updates = Vec::new();
@@ -359,7 +361,11 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
         } else if id == FILTER_RES.id() {
             rand::random_range(0.0..0.7)
         } else if id == FILTER_DRIVE.id() {
-            rand::random_range(0.0..0.5)
+            if rand::random_range(0.0..1.0) < 0.5 {
+                0.0
+            } else {
+                rand::random_range(0.0..0.5)
+            }
         } else if id == AENV_ATTACK.id() {
             if rand::random_range(0.0..1.0) < 0.5 {
                 0.0
@@ -411,8 +417,8 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
 pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
     let mut routes = Vec::new();
 
-    // LFO1 -> OSC1 Pitch: 15% chance (vibrato)
-    if rand::random_range(0.0..1.0) < 0.15 {
+    // LFO1 -> OSC1 Pitch: 10% chance (vibrato)
+    if rand::random_range(0.0..1.0) < 0.1 {
         routes.push((
             MOD_SRC_LFO1,
             MOD_TARGET_OSC1_PITCH,
@@ -421,8 +427,8 @@ pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
         ));
     }
 
-    // LFO1 -> OSC2 Pitch: 15% chance (vibrato)
-    if rand::random_range(0.0..1.0) < 0.15 {
+    // LFO1 -> OSC2 Pitch: 10% chance (vibrato)
+    if rand::random_range(0.0..1.0) < 0.1 {
         routes.push((
             MOD_SRC_LFO1,
             MOD_TARGET_OSC2_PITCH,
@@ -461,8 +467,8 @@ pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
         ));
     }
 
-    // Mod Env -> OSC1 Pitch: 20% chance
-    if rand::random_range(0.0..1.0) < 0.2 {
+    // Mod Env -> OSC1 Pitch: 10% chance
+    if rand::random_range(0.0..1.0) < 0.1 {
         routes.push((
             MOD_SRC_MOD_ENV,
             MOD_TARGET_OSC1_PITCH,
@@ -471,8 +477,8 @@ pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
         ));
     }
 
-    // Mod Env -> OSC2 Pitch: 20% chance
-    if rand::random_range(0.0..1.0) < 0.2 {
+    // Mod Env -> OSC2 Pitch: 10% chance
+    if rand::random_range(0.0..1.0) < 0.1 {
         routes.push((
             MOD_SRC_MOD_ENV,
             MOD_TARGET_OSC2_PITCH,
@@ -536,6 +542,7 @@ pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns a single synths funDSP voice as audio unit.
 pub fn voice_factory(
     gate: Shared,
     freq: Shared,
@@ -656,8 +663,8 @@ pub fn voice_factory(
     let fl_drive = (var(&parameter(FILTER_DRIVE.id())) * (1.0 + fl_drive_mod)) >> clip_to(0.0, 1.0);
 
     // Apply Drive (Soft Clip / Tanh)
-    // Gain = 1.0 + Drive
-    let drive_gain = 1.0 + fl_drive;
+    // Gain = 1.0 + Drive * 7.0 (range: 1x-8x)
+    let drive_gain = 1.0 + fl_drive * 7.0;
     let driven_sig = (mixed * drive_gain) >> shape_fn(|x| x.tanh());
 
     let filtered = (driven_sig | fl_cutoff | fl_res) >> moog();
@@ -672,8 +679,11 @@ pub fn voice_factory(
         parameter(AENV_RELEASE.id()),
     );
 
-    // Apply Amp Env and Volume and Panning
-    let final_mix = ((filtered * amp_env * var(&vol)) | var(&panning)) >> panner();
+    // Lower global volume, assuming both oscillators are playing together fully
+    let global_vol = 0.5;
+
+    // Apply Amp Env, Volume and Panning
+    let final_mix = ((filtered * amp_env * var(&vol) * global_vol) | var(&panning)) >> panner();
 
     Box::new(final_mix)
 }

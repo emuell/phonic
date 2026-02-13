@@ -39,9 +39,8 @@
 
             <select id="synthSelector" tabindex='-1' disabled>
                 <option value="0" selected>sub3</option>
-                <option value="1">fm3</option>
-                <option value="2">organ</option>
-                <option value="3">dx7</option>
+                <option value="1">organ</option>
+                <option value="2">dx7</option>
             </select>
 
             <select id="voiceCountSelector" tabindex='-1' disabled>
@@ -62,9 +61,9 @@
 
         <div class="piano-wrapper">
             <div class="piano-controls">
-                <button id="octaveDown" tabindex='-1' disabled>-</button>
-                <span id="octaveDisplay">Octave: 4</span>
-                <button id="octaveUp" tabindex='-1' disabled>+</button>
+                <button id="midiButton" tabindex='-1' disabled>Enable MIDI</button>
+                <label>Octave <input type="number" id="octaveInput" min="0" max="8" value="4" tabindex='-1' disabled /></label>
+                <label>Velocity <input type="number" id="velocityInput" min="1" max="127" value="80" tabindex='-1' disabled /></label>
             </div>
             <ul class="piano-keys">
                 <li class="key white" data-key="0"><span>a</span></li>

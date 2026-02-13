@@ -14,7 +14,7 @@ phonic = { path = "../..", default-features = false, features = [
 emscripten_rs_sys = { version = "^0.1" }
 fundsp = { version = "^0.20", default-features = false }
 four-cc = { version = "^0.4" }
-strum = { version = "^0.27", default-features = false, features = ["derive"] }
+strum = { version = "^0.27", default-features = false }
 rand = { version = "^0.9", default-features = false }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }

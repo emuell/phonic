@@ -216,11 +216,12 @@ pub extern "C" fn synth_parameter_string_to_value(
 /// Play a single synth note when the app is running. Exported as `_synth_note_on`
 /// function in the WASM.
 #[no_mangle]
-pub extern "C" fn synth_note_on(note: ffi::c_int) {
+pub extern "C" fn synth_note_on(note: ffi::c_int, velocity: ffi::c_float) {
     APP.with_borrow_mut(|app| {
         if let Some(app) = app {
             let note = note.clamp(0, 127) as u8;
-            app.synth_note_on(note);
+            let velocity = velocity.clamp(0.0, 1.0);
+            app.synth_note_on(note, velocity);
         }
     });
 }

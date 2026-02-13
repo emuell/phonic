@@ -284,7 +284,8 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Randomize all parameters to create some easy "interesting" FM sounds.
+/// Returns random parameter values.
+/// Returns Vec of (parameter_id, normalized_value).
 #[allow(unused)]
 pub fn randomize() -> Vec<(FourCC, f32)> {
     let mut updates = Vec::new();
@@ -449,6 +450,7 @@ pub fn randomize() -> Vec<(FourCC, f32)> {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns a single synths funDSP voice as audio unit.
 pub fn voice_factory(
     gate: Shared,
     freq: Shared,

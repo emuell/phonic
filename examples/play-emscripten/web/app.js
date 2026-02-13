@@ -62,8 +62,8 @@ const backend = {
 		}
 		return null;
 	},
-	synthNoteOn(key) {
-		ccall("synth_note_on", null, ["number"], [key]);
+	synthNoteOn(key, velocity) {
+		ccall("synth_note_on", null, ["number", "number"], [key, velocity]);
 	},
 	synthNoteOff(key) {
 		ccall("synth_note_off", null, ["number"], [key]);
@@ -234,13 +234,14 @@ document.getElementById("playButton").addEventListener("click", () => {
 	backend.start();
 	document.getElementById("playButton").disabled = true;
 	document.getElementById("stopButton").disabled = false;
+	document.getElementById("midiButton").disabled = false;
 	document.getElementById("randomizeButton").disabled = false;
 	document.getElementById("synthSelector").disabled = false;
 	document.getElementById("voiceCountSelector").disabled = false;
 	document.getElementById("metronomeCheckbox").disabled = false;
 	document.getElementById("metronomeCheckbox").checked = true;
-	document.getElementById("octaveDown").disabled = false;
-	document.getElementById("octaveUp").disabled = false;
+	document.getElementById("octaveInput").disabled = false;
+	document.getElementById("velocityInput").disabled = false;
 	effectManager.enableButtons();
 	synthUI.init();
 	modulationUI.init();
@@ -249,15 +250,20 @@ document.getElementById("playButton").addEventListener("click", () => {
 });
 
 document.getElementById("stopButton").addEventListener("click", () => {
+	// Disable MIDI if it's enabled
+	if (midiEnabled) {
+		disableMidi();
+	}
 	backend.stop();
 	document.getElementById("playButton").disabled = false;
 	document.getElementById("stopButton").disabled = true;
+	document.getElementById("midiButton").disabled = true;
 	document.getElementById("randomizeButton").disabled = true;
 	document.getElementById("synthSelector").disabled = true;
 	document.getElementById("voiceCountSelector").disabled = true;
 	document.getElementById("metronomeCheckbox").disabled = true;
-	document.getElementById("octaveDown").disabled = true;
-	document.getElementById("octaveUp").disabled = true;
+	document.getElementById("octaveInput").disabled = true;
+	document.getElementById("velocityInput").disabled = true;
 	effectManager.disableButtons();
 	effectManager.removeAllEffects();
 	synthUI.clear();
@@ -268,6 +274,96 @@ document.getElementById("stopButton").addEventListener("click", () => {
 
 document.getElementById("metronomeCheckbox").addEventListener("change", (e) => {
 	backend.setMetronomeEnabled(e.target.checked);
+});
+
+// MIDI support
+let midiEnabled = false;
+let midiAccess = null;
+const currentMidiNotes = new Set();
+
+const handleMidiMessage = (message) => {
+	const data = message.data;
+	const status = data[0] & 0xf0;
+	const note = data[1];
+	const velocity = data[2];
+	if (status === 0x90 && velocity > 0) {
+		// Note on
+		if (!currentMidiNotes.has(note)) {
+			currentMidiNotes.add(note);
+			const normalizedVelocity = velocity / 127.0;
+			backend.synthNoteOn(note, normalizedVelocity);
+		}
+	} else if (status === 0x80 || (status === 0x90 && velocity === 0)) {
+		// Note off
+		if (currentMidiNotes.has(note)) {
+			currentMidiNotes.delete(note);
+			backend.synthNoteOff(note);
+		}
+	}
+};
+
+const enableMidi = () => {
+	if (!navigator.requestMIDIAccess) {
+		return Promise.reject(new Error("Web MIDI API not supported"));
+	}
+	return navigator
+		.requestMIDIAccess()
+		.then((access) => {
+			midiAccess = access;
+			midiEnabled = true;
+			const midiButton = document.getElementById("midiButton");
+			midiButton.textContent = "Disable MIDI";
+			midiButton.style.backgroundColor = "var(--button-active-bg)";
+			// Start listening to MIDI input
+			for (const input of midiAccess.inputs.values()) {
+				input.onmidimessage = handleMidiMessage;
+			}
+			setStatus("MIDI input enabled. Play notes on your MIDI keyboard.");
+		})
+		.catch((err) => {
+			setStatus("Failed to access MIDI: " + err.message, true);
+			throw err;
+		});
+};
+
+const disableMidi = () => {
+	midiEnabled = false;
+	const midiButton = document.getElementById("midiButton");
+	midiButton.textContent = "Enable MIDI";
+	midiButton.style.backgroundColor = "";
+	// Stop listening to MIDI input
+	if (midiAccess) {
+		for (const input of midiAccess.inputs.values()) {
+			input.onmidimessage = null;
+		}
+	}
+	// Release all notes
+	currentMidiNotes.forEach((note) => {
+		backend.synthNoteOff(note);
+	});
+	currentMidiNotes.clear();
+	setStatus("MIDI input disabled");
+	return Promise.resolve();
+};
+
+document.getElementById("midiButton").addEventListener("click", () => {
+	if (!midiEnabled) {
+		enableMidi().catch((_err) => {
+			// Error already logged in enableMidi
+		});
+	} else {
+		disableMidi();
+	}
+});
+
+// Stop all MIDI notes when leaving the page
+document.addEventListener("visibilitychange", () => {
+	if (document.visibilityState === "hidden" && midiEnabled) {
+		currentMidiNotes.forEach((note) => {
+			backend.synthNoteOff(note);
+		});
+		currentMidiNotes.clear();
+	}
 });
 
 document.getElementById("randomizeButton").addEventListener("click", () => {
@@ -283,6 +379,9 @@ document.getElementById("randomizeButton").addEventListener("click", () => {
 	}
 });
 
+document.getElementById("synthSelector").addEventListener("keydown", (e) => {
+	e.preventDefault();
+});
 document.getElementById("synthSelector").addEventListener("change", (e) => {
 	const synthType = parseInt(e.target.value, 10);
 	backend.setActiveSynth(synthType);
@@ -290,6 +389,11 @@ document.getElementById("synthSelector").addEventListener("change", (e) => {
 	modulationUI.init();
 });
 
+document
+	.getElementById("voiceCountSelector")
+	.addEventListener("keydown", (e) => {
+		e.preventDefault();
+	});
 document
 	.getElementById("voiceCountSelector")
 	.addEventListener("change", (e) => {
@@ -302,23 +406,27 @@ document
 
 // Octave controls
 let currentOctave = 4;
+const octaveInput = document.getElementById("octaveInput");
 
-function updateOctaveDisplay() {
-	document.getElementById("octaveDisplay").textContent =
-		`Octave: ${currentOctave}`;
-}
-
-document.getElementById("octaveDown").addEventListener("click", () => {
-	if (currentOctave > 0) {
-		currentOctave--;
-		updateOctaveDisplay();
+octaveInput.addEventListener("change", (e) => {
+	const value = parseInt(e.target.value, 10);
+	if (!Number.isNaN(value) && value >= 0 && value <= 8) {
+		currentOctave = value;
+	} else {
+		octaveInput.value = currentOctave;
 	}
 });
 
-document.getElementById("octaveUp").addEventListener("click", () => {
-	if (currentOctave < 8) {
-		currentOctave++;
-		updateOctaveDisplay();
+// Velocity controls (1-127 MIDI range)
+let currentVelocity = 80;
+const velocityInput = document.getElementById("velocityInput");
+
+velocityInput.addEventListener("change", (e) => {
+	const value = parseInt(e.target.value, 10);
+	if (!Number.isNaN(value) && value >= 1 && value <= 127) {
+		currentVelocity = value;
+	} else {
+		velocityInput.value = currentVelocity;
 	}
 });
 
@@ -336,7 +444,9 @@ const playNote = (keyIndex) => {
 	const note = (currentOctave + 1) * 12 + parseInt(keyIndex, 10);
 	activeKeyNotes.set(keyIndex, note);
 
-	backend.synthNoteOn(note);
+	// Convert MIDI velocity (0-127) to normalized (0.0-1.0)
+	const normalizedVelocity = currentVelocity / 127.0;
+	backend.synthNoteOn(note, normalizedVelocity);
 	const clickedKey = document.querySelector(`[data-key="${keyIndex}"]`);
 	clickedKey?.classList.add("active");
 };
@@ -480,6 +590,9 @@ class SynthUI {
 		} else if (param.type === "Enum") {
 			input = document.createElement("select");
 			input.tabIndex = -1;
+			input.onkeydown = (e) => {
+				e.preventDefault();
+			};
 			const default_index = Math.floor(
 				param.default * (param.values.length - 1),
 			);
@@ -804,6 +917,9 @@ class EffectManager {
 		} else if (param.type === "Enum") {
 			input = document.createElement("select");
 			input.tabIndex = -1;
+			input.onkeydown = (e) => {
+				e.preventDefault();
+			};
 			const default_index = Math.floor(
 				param.default * (param.values.length - 1),
 			);
@@ -977,6 +1093,9 @@ class ModulationMatrixUI {
 
 		const addTargetSelect = document.createElement("select");
 		addTargetSelect.tabIndex = -1;
+		addTargetSelect.onkeydown = (e) => {
+			e.preventDefault();
+		};
 
 		const placeholderOption = document.createElement("option");
 		placeholderOption.value = "";
@@ -1087,12 +1206,18 @@ class ModulationMatrixUI {
 		} else if (param.type === "Enum") {
 			input = document.createElement("select");
 			input.tabIndex = -1;
+			input.onkeydown = (e) => {
+				e.preventDefault();
+			};
 			const default_index = Math.floor(
 				param.default * (param.values.length - 1),
 			);
 			updateValueDisplay(param.default);
 			param.values.forEach((val, idx) => {
 				const option = document.createElement("option");
+				option.onkeydown = (e) => {
+					e.preventDefault();
+				};
 				option.tabIndex = -1;
 				option.value = idx;
 				option.textContent = val;
@@ -1149,6 +1274,9 @@ class ModulationMatrixUI {
 				option.value = target.id;
 				option.textContent = target.name;
 				option.tabIndex = -1;
+				option.onkeydown = (e) => {
+					e.preventDefault();
+				};
 				select.appendChild(option);
 			}
 		});

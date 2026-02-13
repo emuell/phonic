@@ -13,7 +13,6 @@ const DEFAULT_LOG_LEVEL: log::Level = if cfg!(debug_assertions) {
 } else {
     log::Level::Warn
 };
-
 // -------------------------------------------------------------------------------------------------
 
 /// Default program arguments for phonic example applications.
@@ -28,8 +27,6 @@ pub struct Arguments {
     /// By default \"debug\" in dev builds and \"warn\" in release builds.
     pub log_level: Option<log::Level>,
 }
-
-// -------------------------------------------------------------------------------------------------
 
 /// Parse common example arguments and apply the log-level arg to the logger
 #[allow(unused)]

@@ -68,8 +68,6 @@ pub const PERC_DECAY: FloatParameter =
 pub const PERC_HARM: EnumParameter =
     EnumParameter::new(FourCC(*b"pHrm"), "Perc Harmonic", &["2nd", "3rd"], 1);
 
-// -------------------------------------------------------------------------------------------------
-
 // Modulation Source IDs
 pub const MOD_SRC_VIBRATO: FourCC = FourCC(*b"VLFO");
 pub const MOD_SRC_VELOCITY: FourCC = FourCC(*b"MVEL");
@@ -105,8 +103,6 @@ pub fn parameters() -> &'static [&'static dyn Parameter] {
     &ALL_PARAMS
 }
 
-// -------------------------------------------------------------------------------------------------
-
 /// Returns the modulation configuration for the organ synth.
 pub fn modulation_config() -> ModulationConfig {
     ModulationConfig {
@@ -139,6 +135,8 @@ pub fn modulation_config() -> ModulationConfig {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns random parameter values.
+/// Returns Vec of (parameter_id, normalized_value).
 #[allow(unused)]
 pub fn randomize() -> Vec<(FourCC, f32)> {
     let mut updates = Vec::new();
@@ -253,6 +251,7 @@ pub fn randomize_modulation() -> Vec<(FourCC, FourCC, f32, bool)> {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Returns a single synths funDSP voice as audio unit.
 pub fn voice_factory(
     gate: Shared,
     freq: Shared,
