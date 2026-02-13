@@ -122,8 +122,6 @@ pub struct ModulationRoutingUpdate {
 
 #[path = "../../common/synths/dx7.rs"]
 mod dx7;
-#[path = "../../common/synths/fm3.rs"]
-mod fm3;
 #[path = "../../common/synths/organ.rs"]
 mod organ;
 #[path = "../../common/synths/sub3.rs"]
@@ -132,7 +130,6 @@ mod sub3;
 #[derive(Clone, Copy, PartialEq)]
 enum SynthType {
     Sub3,
-    Fm3,
     Organ,
     Dx7,
 }
@@ -141,7 +138,6 @@ impl SynthType {
     fn info(&self) -> SynthInfo {
         match self {
             SynthType::Sub3 => SynthInfo::new("sub3", sub3::parameters()),
-            SynthType::Fm3 => SynthInfo::new("fm3", fm3::parameters()),
             SynthType::Dx7 => SynthInfo::new("dx7", dx7::parameters()),
             SynthType::Organ => SynthInfo::new("organ", organ::parameters()),
         }
@@ -152,10 +148,9 @@ impl SynthType {
         sample_rate: u32,
         voice_count: usize,
     ) -> Result<FunDspGenerator, Error> {
-        let volume_db = -3.0;
         let options = GeneratorPlaybackOptions::default()
             .voices(voice_count)
-            .volume_db(volume_db);
+            .volume_db(-3.0);
 
         match self {
             Self::Sub3 => FunDspGenerator::with_parameters(
@@ -164,15 +159,6 @@ impl SynthType {
                 None,
                 sub3::modulation_config(),
                 sub3::voice_factory,
-                options,
-                sample_rate,
-            ),
-            Self::Fm3 => FunDspGenerator::with_parameters(
-                "fm3_synth",
-                fm3::parameters(),
-                None,
-                fm3::modulation_config(),
-                fm3::voice_factory,
                 options,
                 sample_rate,
             ),
@@ -200,7 +186,6 @@ impl SynthType {
     fn modulation_config(&self) -> Option<ModulationConfig> {
         match self {
             Self::Sub3 => Some(sub3::modulation_config()),
-            Self::Fm3 => Some(fm3::modulation_config()),
             Self::Organ => Some(organ::modulation_config()),
             Self::Dx7 => None,
         }
@@ -209,7 +194,6 @@ impl SynthType {
     fn randomize_modulation(&self) -> Vec<(FourCC, FourCC, f32, bool)> {
         match self {
             Self::Sub3 => sub3::randomize_modulation(),
-            Self::Fm3 => fm3::randomize_modulation(),
             Self::Organ => organ::randomize_modulation(),
             Self::Dx7 => Vec::new(),
         }
@@ -218,7 +202,6 @@ impl SynthType {
     fn parameters(&self) -> &[&dyn Parameter] {
         match self {
             SynthType::Sub3 => sub3::parameters(),
-            SynthType::Fm3 => fm3::parameters(),
             SynthType::Dx7 => dx7::parameters(),
             SynthType::Organ => organ::parameters(),
         }
@@ -227,7 +210,6 @@ impl SynthType {
     fn randomize(&self) -> Vec<(FourCC, f32)> {
         match self {
             Self::Sub3 => sub3::randomize(),
-            Self::Fm3 => fm3::randomize(),
             Self::Organ => organ::randomize(),
             Self::Dx7 => dx7::randomize(),
         }
@@ -285,7 +267,6 @@ impl App {
         let voice_count = 8;
         let active_synth = SynthType::Sub3;
         let synth_generator = active_synth.create_generator(sample_rate, voice_count)?;
-        // Extract modulation info before adding to player
         let synth_modulation_sources = synth_generator.modulation_sources();
         let synth_modulation_targets = synth_generator.modulation_targets();
         let synth_handle = player.add_generator(synth_generator, synth_mixer.id())?;
@@ -337,9 +318,8 @@ impl App {
     pub fn set_active_synth(&mut self, synth_type: i32) -> Result<(), Error> {
         let new_synth_type = match synth_type {
             0 => SynthType::Sub3,
-            1 => SynthType::Fm3,
-            2 => SynthType::Organ,
-            3 | _ => SynthType::Dx7,
+            1 => SynthType::Organ,
+            2 | _ => SynthType::Dx7,
         };
         if new_synth_type != self.active_synth {
             self.active_synth = new_synth_type;
@@ -350,7 +330,6 @@ impl App {
             // Create and add the new synth
             let sample_rate = self.player.output_sample_rate();
             let synth_generator = new_synth_type.create_generator(sample_rate, self.voice_count)?;
-            // Extract modulation info before adding to player
             self.synth_modulation_sources = synth_generator.modulation_sources();
             self.synth_modulation_targets = synth_generator.modulation_targets();
             self.synth_handle = self
@@ -459,14 +438,14 @@ impl App {
     }
 
     // Trigger a synth note on.
-    pub fn synth_note_on(&mut self, note: u8) {
+    pub fn synth_note_on(&mut self, note: u8, velocity: f32) {
         // If a note is already playing for this key, stop it first.
         if let Some(note_id) = self.playing_notes.remove(&note) {
             let _ = self.synth_handle.note_off(note_id, None);
         }
 
-        // Trigger the new note with velocity 0.3 and default panning
-        if let Ok(note_id) = self.synth_handle.note_on(note, Some(0.3), None, None) {
+        // Trigger the new note with the specified velocity and default panning
+        if let Ok(note_id) = self.synth_handle.note_on(note, Some(velocity), None, None) {
             self.playing_notes.insert(note, note_id);
         }
     }

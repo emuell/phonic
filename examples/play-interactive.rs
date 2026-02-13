@@ -32,8 +32,8 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod arguments;
 
 // FunDSP synth example
-#[path = "./common/synths/fm3.rs"]
-mod fm3_synth;
+#[path = "./common/synths/sub3.rs"]
+mod sub3_synth;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -103,23 +103,24 @@ fn main() -> Result<(), Error> {
             .target_mixer(loop_mixer.id()),
     )?;
 
-    // Create FunDSP synth generator with FM synthesis and modulation matrix
+    // Create FunDSP synth generator
     let synth_generator = player.play_generator(
         FunDspGenerator::with_parameters(
-            "fm_synth",
-            fm3_synth::parameters(),
+            "sub3_synth",
+            sub3_synth::parameters(),
             None,
-            fm3_synth::modulation_config(),
-            fm3_synth::voice_factory,
+            sub3_synth::modulation_config(),
+            sub3_synth::voice_factory,
             GeneratorPlaybackOptions::default()
                 .voices(4)
+                .volume_db(-3.0)
                 .target_mixer(tone_mixer.id()),
             player.output_sample_rate(),
         )?,
         None,
     )?;
 
-    // Create sampler generator for sample-based playback
+    // Create sampler generator
     let sampler_envelope = AhdsrParameters::new(
         Duration::ZERO,         // attack
         Duration::ZERO,         // hold
@@ -169,7 +170,7 @@ fn main() -> Result<(), Error> {
     println!();
     println!("  Alt + Arrow 'left/right' to change filter cutoff frequency.");
     println!("  Alt + 1,2,3,4 to change filter type (LP,BP,BR,HP).");
-    println!("  Alt + R to randomize the FM synths parameters.");
+    println!("  Alt + R to randomize the FunDSP synth parameters.");
     println!();
     println!("  !! NB: this example uses a HQ resampler and a complex fundsp synth. ");
     println!("  In debug builds this may be very slow and may thus cause crackles. !!");
@@ -275,7 +276,7 @@ fn main() -> Result<(), Error> {
                 }
                 Keycode::R if alt_key => {
                     // Randomize parameters
-                    let values = fm3_synth::randomize()
+                    let values = sub3_synth::randomize()
                         .into_iter()
                         .map(|(id, value)| (id, ParameterValueUpdate::Normalized(value)))
                         .collect();
@@ -286,14 +287,14 @@ fn main() -> Result<(), Error> {
                         let _ = synth_generator.clear_modulation(source, target, None);
                     }
                     // Apply new random routing
-                    let modulation = fm3_synth::randomize_modulation();
+                    let modulation = sub3_synth::randomize_modulation();
                     for &(source, target, amount, bipolar) in &modulation {
                         let _ =
                             synth_generator.set_modulation(source, target, amount, bipolar, None);
                     }
                     *synth_modulation.lock().unwrap() = modulation;
 
-                    println!("Randomized FM synth params and modulation routing");
+                    println!("Randomized FunDSP synth params and modulation routing");
                 }
                 _ => {
                     if let Some(relative_note) = key_to_note(key) {

@@ -268,7 +268,7 @@ select:disabled {
 	border-radius: 4px;
 	background-color: var(--bg-panel);
 	padding: 10px;
-	margin-top: 20px;
+	margin-top: 10px;
 	border: 1px solid var(--border-main);
 	display: flex;
 	flex-direction: column;
@@ -284,11 +284,17 @@ select:disabled {
 	font-size: 14px;
 }
 
+.piano-controls label {
+	padding: 4px 8px;
+	min-width: 60px;
+	border: none;
+}
+
 .piano-controls button {
 	padding: 4px 8px;
+	margin-left: 8px;
 	font-size: 12px;
 	min-width: 20px;
-	border: none;
 }
 
 .piano-keys {
