@@ -14,7 +14,7 @@ use super::processor::{
 
 /// Container for a modulation processor with its target routings.
 ///
-/// Processes modulation in blocks (up to [`MAX_MODULATION_BLOCK_SIZE`](super::processor::MAX_MODULATION_BLOCK_SIZE)),
+/// Processes modulation in blocks (up to [`MAX_MODULATION_BLOCK_SIZE`]),
 /// caching results for efficient per-sample access. Used by [`ModulationMatrix`].
 #[derive(Debug, Clone)]
 pub struct ModulationMatrixSlot<P: ModulationProcessor> {
@@ -101,9 +101,8 @@ impl<S: ModulationProcessor> ModulationMatrixSlot<S> {
 
 /// Per-voice modulation matrix containing all modulation sources and their routings.
 ///
-/// Created from [`ModulationConfig`](crate::modulation::ModulationConfig) via state managers
-/// (`FunDspModulationState`, `SamplerModulationState`). Processes all sources in blocks,
-/// providing block or per-sample modulation output for target parameters.
+/// Created from [`ModulationConfig`](crate::modulation::ModulationConfig). Processes all sources
+/// in blocks, providing block or per-sample modulation output for all target parameters.
 #[derive(Debug, Clone)]
 pub struct ModulationMatrix {
     /// LFO slots (typically 2 or 4 LFOs)
@@ -172,10 +171,10 @@ impl ModulationMatrix {
         for slot in &mut self.envelope_slots {
             slot.process(chunk_size);
         }
-        if let Some(ref mut slot) = self.velocity_slot {
+        if let Some(slot) = &mut self.velocity_slot {
             slot.process(chunk_size);
         }
-        if let Some(ref mut slot) = self.keytracking_slot {
+        if let Some(slot) = &mut self.keytracking_slot {
             slot.process(chunk_size);
         }
 
@@ -192,7 +191,7 @@ impl ModulationMatrix {
     ///
     /// Writes the sum of all modulation processors targeting the given parameter to the output buffer.
     /// The output buffer must be at least `output_size` long.
-    pub fn modulation_output(&self, parameter_id: FourCC, output: &mut [f32]) {
+    pub fn output(&self, parameter_id: FourCC, output: &mut [f32]) {
         let block_size = self.current_output_size;
         debug_assert!(
             output.len() >= block_size,
@@ -269,7 +268,7 @@ impl ModulationMatrix {
         }
 
         // Accumulate modulation from velocity slot
-        if let Some(ref slot) = self.velocity_slot {
+        if let Some(slot) = &self.velocity_slot {
             if slot.enabled {
                 for target in &slot.targets {
                     if target.parameter_id == parameter_id {
@@ -286,7 +285,7 @@ impl ModulationMatrix {
         }
 
         // Accumulate modulation from keytracking slot
-        if let Some(ref slot) = self.keytracking_slot {
+        if let Some(slot) = &self.keytracking_slot {
             if slot.enabled {
                 for target in &slot.targets {
                     if target.parameter_id == parameter_id {
@@ -308,7 +307,7 @@ impl ModulationMatrix {
     /// Returns the sum of all modulation processors targeting the given parameter,
     /// weighted by their amounts.
     #[inline]
-    pub fn modulation_output_at(&self, parameter_id: FourCC, sample_index: usize) -> f32 {
+    pub fn output_at(&self, parameter_id: FourCC, sample_index: usize) -> f32 {
         debug_assert!(
             sample_index < self.current_output_size,
             "Sample index out of bounds"
@@ -363,7 +362,7 @@ impl ModulationMatrix {
         }
 
         // Accumulate modulation from velocity slot
-        if let Some(ref slot) = self.velocity_slot {
+        if let Some(slot) = &self.velocity_slot {
             if slot.enabled {
                 for target in &slot.targets {
                     if target.parameter_id == parameter_id {
@@ -376,7 +375,7 @@ impl ModulationMatrix {
         }
 
         // Accumulate modulation from keytracking slot
-        if let Some(ref slot) = self.keytracking_slot {
+        if let Some(slot) = &self.keytracking_slot {
             if slot.enabled {
                 for target in &slot.targets {
                     if target.parameter_id == parameter_id {
@@ -391,28 +390,20 @@ impl ModulationMatrix {
         total
     }
 
-    /// Reset all modulation processors (called on note-on).
-    pub fn reset(&mut self, sample_rate: u32) {
+    /// Reset & (Re)Trigger & all sources.
+    pub fn note_on(&mut self, note: u8, volume: f32) {
         for slot in &mut self.lfo_slots {
-            slot.processor.reset(sample_rate);
+            slot.processor.reset();
         }
         for slot in &mut self.envelope_slots {
-            slot.processor.reset(sample_rate);
+            slot.processor.reset();
+            slot.processor.note_on(1.0); // 1.0 for full modulation depth
         }
-        if let Some(ref mut slot) = self.velocity_slot {
-            slot.processor.reset(sample_rate);
+        if let Some(slot) = &mut self.velocity_slot {
+            slot.processor.set_velocity(volume);
         }
-        if let Some(ref mut slot) = self.keytracking_slot {
-            slot.processor.reset(sample_rate);
-        }
-        self.current_output_size = 0;
-    }
-
-    /// Trigger note-on for all envelope sources.
-    /// Volume parameter scales the envelope output (typically 1.0 for full modulation depth).
-    pub fn note_on(&mut self, volume: f32) {
-        for slot in &mut self.envelope_slots {
-            slot.processor.note_on(volume);
+        if let Some(slot) = &mut self.keytracking_slot {
+            slot.processor.set_midi_note(note as f32);
         }
     }
 
@@ -422,8 +413,6 @@ impl ModulationMatrix {
             slot.processor.note_off();
         }
     }
-
-    // --- Helper methods for updating modulation parameters without destroying state ---
 
     /// Update LFO rate for a specific LFO slot.
     pub fn update_lfo_rate(&mut self, lfo_index: usize, rate: f64) {
@@ -502,14 +491,14 @@ impl ModulationMatrix {
 
     /// Update velocity target amount for a specific parameter.
     pub fn update_velocity_target(&mut self, parameter_id: FourCC, amount: f32, bipolar: bool) {
-        if let Some(ref mut slot) = self.velocity_slot {
+        if let Some(slot) = &mut self.velocity_slot {
             slot.update_target(parameter_id, amount, bipolar);
         }
     }
 
     /// Update keytracking target amount for a specific parameter.
     pub fn update_keytracking_target(&mut self, parameter_id: FourCC, amount: f32, bipolar: bool) {
-        if let Some(ref mut slot) = self.keytracking_slot {
+        if let Some(slot) = &mut self.keytracking_slot {
             slot.update_target(parameter_id, amount, bipolar);
         }
     }

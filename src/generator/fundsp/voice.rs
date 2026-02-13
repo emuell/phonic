@@ -18,6 +18,8 @@ use crate::{
     NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent, SourceTime,
 };
 
+use super::modulation::FunDSpModulationVoiceState;
+
 // -------------------------------------------------------------------------------------------------
 
 // -60dB as audio silence
@@ -28,7 +30,7 @@ const EXHAUSTION_DURATION: Duration = Duration::from_millis(200);
 // -------------------------------------------------------------------------------------------------
 
 /// A single voice that wraps a FunDSP node with control parameters and release state tracking.
-pub struct FunDspVoice {
+pub(crate) struct FunDspVoice {
     /// The name of the generator as passed to playback contexts.
     synth_name: Arc<String>,
     /// The voice's audio graph
@@ -62,13 +64,8 @@ pub struct FunDspVoice {
     playback_pos: u64,
     playback_pos_emit_rate: Option<SampleTime>,
     playback_pos_sample_time_clock: SampleTimeClock,
-    /// Optional modulation matrix (per-voice, independent envelope state)
-    modulation_matrix: Option<ModulationMatrix>,
-    /// SharedBuffers keyed by target parameter FourCC
-    /// Voice factory connects these to the audio graph via var_buffer()
-    modulation_buffers: HashMap<FourCC, SharedBuffer>,
-    /// Temp buffer for modulation_output() calls, avoids per-block allocation
-    modulation_temp_buffer: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+    /// Optional modulation state
+    modulation_state: Option<Box<FunDSpModulationVoiceState>>,
     /// Output sample rate
     sample_rate: u32,
 }
@@ -108,9 +105,7 @@ impl FunDspVoice {
         let playback_pos_emit_rate = playback_pos_emit_rate
             .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
 
-        let modulation_matrix = None;
-        let modulation_buffers = HashMap::new();
-        let modulation_temp_buffer = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulation_state = None;
 
         Self {
             synth_name,
@@ -131,9 +126,7 @@ impl FunDspVoice {
             playback_pos,
             playback_pos_emit_rate,
             playback_pos_sample_time_clock,
-            modulation_matrix,
-            modulation_buffers,
-            modulation_temp_buffer,
+            modulation_state,
             sample_rate,
         }
     }
@@ -175,8 +168,10 @@ impl FunDspVoice {
         let playback_pos_emit_rate = playback_pos_emit_rate
             .map(|d| SampleTimeClock::duration_to_sample_time(d, sample_rate));
 
-        let modulation_matrix = Some(modulation_matrix);
-        let modulation_temp_buffer = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        let modulation_state = Some(Box::new(FunDSpModulationVoiceState::new(
+            modulation_matrix,
+            modulation_buffers,
+        )));
 
         Self {
             synth_name,
@@ -197,9 +192,7 @@ impl FunDspVoice {
             playback_pos,
             playback_pos_emit_rate,
             playback_pos_sample_time_clock,
-            modulation_matrix,
-            modulation_buffers,
-            modulation_temp_buffer,
+            modulation_state,
             sample_rate,
         }
     }
@@ -239,9 +232,14 @@ impl FunDspVoice {
         self.playback_status_send = sender;
     }
 
+    /// Get access to the modulation matrix.
+    #[allow(unused)]
+    pub fn modulation_matrix(&mut self) -> Option<&ModulationMatrix> {
+        self.modulation_state.as_ref().map(|m| m.matrix())
+    }
     /// Get mutable access to the modulation matrix.
     pub fn modulation_matrix_mut(&mut self) -> Option<&mut ModulationMatrix> {
-        self.modulation_matrix.as_mut()
+        self.modulation_state.as_mut().map(|m| m.matrix_mut())
     }
 
     /// Start playback on the voice.
@@ -268,34 +266,24 @@ impl FunDspVoice {
         self.playback_pos = 0; // Reset position and context
         self.playback_context = context;
 
-        // Reset and trigger modulation matrix
-        if let Some(matrix) = &mut self.modulation_matrix {
-            matrix.reset(self.sample_rate);
-            matrix.note_on(volume);
-
-            // Set velocity for the modulation matrix
-            if let Some(slot) = &mut matrix.velocity_slot {
-                slot.processor.set_velocity(volume);
-            }
-
-            // Set keytracking for the modulation matrix
-            if let Some(slot) = &mut matrix.keytracking_slot {
-                slot.processor.set_midi_note(note as f32);
-            }
+        // Start modulation matrix
+        if let Some(modulation_state) = &mut self.modulation_state {
+            modulation_state.start(note, volume);
         }
     }
 
     /// Stop voice, starting fadeout.
     pub fn stop(&mut self, current_sample_frame: u64) {
         if self.note_id.is_some() {
-            self.gate.set_value(0.0); // Gate off - envelope will fade out
-            self.is_releasing = true; // Mark as releasing
-            self.silence_samples_count = 0; // Reset silence counter
-            self.release_start_frame = Some(current_sample_frame); // Record when release started
-
-            // Trigger note off for modulation matrix envelopes
-            if let Some(matrix) = &mut self.modulation_matrix {
-                matrix.note_off();
+            // Gate off - envelopes will fade out now
+            self.gate.set_value(0.0);
+            // Mark as releasing
+            self.is_releasing = true;
+            self.silence_samples_count = 0;
+            self.release_start_frame = Some(current_sample_frame);
+            // Stop modulation matrix
+            if let Some(modulation_state) = &mut self.modulation_state {
+                modulation_state.stop();
             }
         }
     }
@@ -306,20 +294,18 @@ impl FunDspVoice {
         if self.note_id.is_some() {
             self.send_stopped_event(self.is_exhausted());
         }
-        self.note_id = None; // Free up the voice
+        // Reset voice state
+        self.note_id = None;
         self.current_note = None;
         self.is_releasing = false;
         self.silence_samples_count = 0;
-        self.frequency.set_value(0.0); // Silence the oscillator by setting frequency to 0.0
-        self.release_start_frame = None; // Clear release start time
-        self.playback_context = None; // Reset position and context
+        self.release_start_frame = None;
+        self.playback_context = None;
         self.playback_pos = 0;
 
         // Clear modulation buffers
-        if !self.modulation_buffers.is_empty() {
-            for buffer in self.modulation_buffers.values_mut() {
-                buffer.clear();
-            }
+        if let Some(state) = &mut self.modulation_state {
+            state.clear();
         }
     }
 
@@ -374,27 +360,22 @@ impl FunDspVoice {
         }
 
         // Process in SIMD friendly blocks as long as possible
-        const BLOCK_SIZE: usize = 64;
+        const CHUNK_SIZE: usize = 64;
+        const _: () = assert!(CHUNK_SIZE <= MODULATION_PROCESSOR_BLOCK_SIZE);
+
         let frame_count = output.len() / self.audio_unit.outputs();
-        for block_start in (0..frame_count).step_by(BLOCK_SIZE) {
-            let block_end = std::cmp::min(block_start + BLOCK_SIZE, frame_count);
-            let block_len = block_end - block_start;
+        for chunk_start in (0..frame_count).step_by(CHUNK_SIZE) {
+            let chunk_end = std::cmp::min(chunk_start + CHUNK_SIZE, frame_count);
+            let chnunk_len = chunk_end - chunk_start;
+
             // Update glide state for the entire block if active
             if self.glide_state.is_some() {
-                self.update_glide(block_len);
+                self.update_glide(chnunk_len);
             }
 
-            // Process modulation matrix for this block
-            if let Some(matrix) = &mut self.modulation_matrix {
-                matrix.process(block_len);
-                // Write modulation outputs to shared buffers
-                for (param_id, buffer) in &mut self.modulation_buffers {
-                    matrix.modulation_output(
-                        *param_id,
-                        &mut self.modulation_temp_buffer[..block_len],
-                    );
-                    buffer.write(&self.modulation_temp_buffer[..block_len]);
-                }
+            // Process modulation matrix for this block (if any)
+            if let Some(state) = &mut self.modulation_state {
+                state.process(chnunk_len);
             }
 
             match self.audio_unit.outputs() {
@@ -403,24 +384,24 @@ impl FunDspVoice {
                     let input_buffer = BufferArray::<U1>::new();
                     let mut output_buffer = BufferArray::<U1>::new();
                     self.audio_unit.process(
-                        block_len,
+                        chnunk_len,
                         &input_buffer.buffer_ref(),
                         &mut output_buffer.buffer_mut(),
                     );
                     // Check for silence in the entire block using SIMD if voice is releasing
                     if self.is_releasing {
-                        let max_abs = max_abs_sample(&output_buffer.channel_f32(0)[..block_len]);
+                        let max_abs = max_abs_sample(&output_buffer.channel_f32(0)[..chnunk_len]);
                         if max_abs < SILENCE_THRESHOLD {
                             self.silence_samples_count =
-                                self.silence_samples_count.saturating_add(block_len);
+                                self.silence_samples_count.saturating_add(chnunk_len);
                         } else {
                             self.silence_samples_count = 0;
                         }
                     }
                     // Extract samples from the output buffer and mix into the main output.
                     add_buffers(
-                        &mut output[block_start..block_start + block_len],
-                        &output_buffer.channel_f32(0)[..block_len],
+                        &mut output[chunk_start..chunk_start + chnunk_len],
+                        &output_buffer.channel_f32(0)[..chnunk_len],
                     );
                 }
                 2 => {
@@ -428,28 +409,28 @@ impl FunDspVoice {
                     let input_buffer = BufferArray::<U2>::new();
                     let mut output_buffer = BufferArray::<U2>::new();
                     self.audio_unit.process(
-                        block_len,
+                        chnunk_len,
                         &input_buffer.buffer_ref(),
                         &mut output_buffer.buffer_mut(),
                     );
                     // Check for silence in both channels
                     if self.is_releasing {
                         let max_abs_left =
-                            max_abs_sample(&output_buffer.channel_f32(0)[..block_len]);
+                            max_abs_sample(&output_buffer.channel_f32(0)[..chnunk_len]);
                         let max_abs_right =
-                            max_abs_sample(&output_buffer.channel_f32(1)[..block_len]);
+                            max_abs_sample(&output_buffer.channel_f32(1)[..chnunk_len]);
                         let max_abs = max_abs_left.max(max_abs_right);
 
                         if max_abs < SILENCE_THRESHOLD {
                             self.silence_samples_count =
-                                self.silence_samples_count.saturating_add(block_len);
+                                self.silence_samples_count.saturating_add(chnunk_len);
                         } else {
                             self.silence_samples_count = 0;
                         }
                     }
                     // Mix stereo output to output buffer.
-                    let start_offset = block_start * 2;
-                    for index in 0..block_len {
+                    let start_offset = chunk_start * 2;
+                    for index in 0..chnunk_len {
                         let left = output_buffer.at_f32(0, index);
                         let right = output_buffer.at_f32(1, index);
                         let frame_start = start_offset + index * 2;

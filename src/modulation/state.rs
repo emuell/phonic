@@ -192,6 +192,14 @@ impl ModulationState {
             )));
         }
 
+        // Validate amount
+        if !(-1.0..=1.0).contains(&amount) {
+            return Err(Error::ParameterError(format!(
+                "Modulation amount must be in range -1..-1.0 but is {}",
+                amount
+            )));
+        }
+
         // Update the appropriate slot
         match slot_type {
             ModulationSlotType::Lfo(index) => {

@@ -98,7 +98,7 @@ impl FunDspGenerator {
         let playback_id = unique_source_id();
         let playback_status_send = None;
 
-        // Create playback message queue with space for trigger events only
+        // Pre-allocate playback message queue so it fits a bunch of trigger events only
         let playback_message_queue_size: usize = 16;
         let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
 
@@ -226,7 +226,7 @@ impl FunDspGenerator {
             }
         }
 
-        // Create playback message queue
+        // Pre-allocate playback message queue so it fits all parameters and a bunch of trigger events
         let playback_message_queue_size: usize = all_parameters.len() * 2 + 16;
         let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
 
@@ -253,6 +253,9 @@ impl FunDspGenerator {
             let volume = Shared::new(1.0);
             let panning = Shared::new(0.0);
 
+            // Create modulation matrix for this voice
+            let modulation_matrix = modulation_state.create_matrix(output_sample_rate);
+
             // Create SharedBuffers for each modulation target
             let mut modulation_buffers = HashMap::new();
             for target in &modulation_config.targets {
@@ -261,9 +264,6 @@ impl FunDspGenerator {
                     SharedBuffer::new(MODULATION_PROCESSOR_BLOCK_SIZE),
                 );
             }
-
-            // Clone for the closure
-            let modulation_buffers_for_factory = modulation_buffers.clone();
 
             // Create the voice node using the factory
             let mut audio_unit = voice_factory(
@@ -281,7 +281,7 @@ impl FunDspGenerator {
                         .clone()
                 },
                 &mut |id: FourCC| -> SharedBuffer {
-                    modulation_buffers_for_factory
+                    modulation_buffers
                         .get(&id)
                         .unwrap_or_else(|| {
                             panic!("Modulation buffer for parameter '{id}' not found")
@@ -298,9 +298,6 @@ impl FunDspGenerator {
                 "Channel layout should be the same for every created voice"
             );
             output_channel_count = audio_unit.outputs();
-
-            // Create modulation matrix for this voice
-            let modulation_matrix = modulation_state.create_matrix(output_sample_rate);
 
             // Create voice with modulation
             voices.push(FunDspVoice::with_modulation(
@@ -519,7 +516,7 @@ impl FunDspGenerator {
                                 amount,
                                 bipolar,
                             } => {
-                                if let Some(ref modulation_state) = self.modulation_state {
+                                if let Some(modulation_state) = &self.modulation_state {
                                     for voice in &mut self.voices {
                                         if let Some(matrix) = voice.modulation_matrix_mut() {
                                             if let Err(err) = modulation_state.set_modulation(
@@ -538,7 +535,7 @@ impl FunDspGenerator {
                                 }
                             }
                             GeneratorPlaybackEvent::ClearModulation { source, target } => {
-                                if let Some(ref modulation_state) = self.modulation_state {
+                                if let Some(modulation_state) = &self.modulation_state {
                                     for voice in &mut self.voices {
                                         if let Some(matrix) = voice.modulation_matrix_mut() {
                                             if let Err(err) = modulation_state
@@ -576,7 +573,7 @@ impl FunDspGenerator {
                 if modulation_state.is_source_parameter(id) {
                     for voice in &mut self.voices {
                         if let Some(matrix) = voice.modulation_matrix_mut() {
-                            modulation_state.apply_parameter_to_matrix(
+                            modulation_state.apply_parameter_update(
                                 matrix,
                                 id,
                                 &self.shared_parameters,
@@ -709,14 +706,14 @@ impl Generator for FunDspGenerator {
     fn modulation_sources(&self) -> Vec<ModulationSource> {
         self.modulation_state
             .as_ref()
-            .map(|s| s.modulation_sources())
+            .map(|s| s.sources())
             .unwrap_or_default()
     }
 
     fn modulation_targets(&self) -> Vec<ModulationTarget> {
         self.modulation_state
             .as_ref()
-            .map(|s| s.modulation_targets())
+            .map(|s| s.targets())
             .unwrap_or_default()
     }
 
@@ -742,7 +739,7 @@ impl Generator for FunDspGenerator {
     }
 
     fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
-        if let Some(ref modulation_state) = self.modulation_state {
+        if let Some(modulation_state) = &self.modulation_state {
             for voice in &mut self.voices {
                 if let Some(matrix) = voice.modulation_matrix_mut() {
                     modulation_state.clear_modulation(matrix, source, target)?;

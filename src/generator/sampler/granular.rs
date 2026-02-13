@@ -110,7 +110,7 @@ impl GrainWindowMode {
 
 /// Precomputed grain windows (optimized for granular synthesis)
 /// `N` must be a pow2 value.
-pub struct GrainWindow<const N: usize> {
+pub(crate) struct GrainWindow<const N: usize> {
     luts: [[f32; N]; GrainWindowMode::COUNT],
 }
 
@@ -131,7 +131,7 @@ impl<const N: usize> GrainWindow<N> {
             let phase = i as f32 / N as f32; // [0.0, 1.0)
 
             // Hann: cosine-squared window (perfect overlap-add)
-            // Industry standard for granular synthesis
+            // Standard for granular synthesis
             // Also known as Hanning window
             luts[GrainWindowMode::Hann as usize][i] =
                 0.5 * (1.0 - (2.0 * std::f32::consts::PI * phase).cos());
@@ -144,7 +144,6 @@ impl<const N: usize> GrainWindow<N> {
                 0.42 - 0.5 * (2.0 * pi_phase).cos() + 0.08 * (4.0 * pi_phase).cos();
 
             // Triangle: linear rise to peak at 0.5, linear fall
-            // Simple, classic envelope shape, CPU-efficient
             luts[GrainWindowMode::Triangle as usize][i] = if phase < 0.5 {
                 2.0 * phase
             } else {
@@ -234,7 +233,7 @@ impl<const N: usize> GrainWindow<N> {
 
 /// Modulation buffers for block-based parameter modulation.
 /// Contains pre-computed modulation values for a block of samples.
-pub struct GranularParameterModulation<'a> {
+pub(crate) struct GranularParameterModulation<'a> {
     pub size: &'a [f32],
     pub density: &'a [f32],
     pub variation: &'a [f32],
@@ -243,6 +242,8 @@ pub struct GranularParameterModulation<'a> {
     pub position: &'a [f32],
     pub speed: &'a [f32],
 }
+
+// -------------------------------------------------------------------------------------------------
 
 /// Parameters controlling granular playback behavior.
 #[derive(Clone, Debug)]
@@ -280,7 +281,7 @@ impl Default for GranularParameters {
         Self {
             overlap_mode: GrainOverlapMode::Cloud,
             window: GrainWindowMode::Triangle,
-            size: 10.0,
+            size: 100.0,
             density: 10.0,
             spray: 0.0,
             variation: 0.0,
@@ -336,9 +337,9 @@ impl GranularParameters {
             ));
         }
 
-        if self.playhead_speed < 0.1 || self.playhead_speed > 4.0 {
+        if self.playhead_speed < 0.001 || self.playhead_speed > 4.0 {
             return Err(Error::ParameterError(
-                "Playhead speed must be between 0.1 and 4.0".to_string(),
+                "Playhead speed must be between 0.001 and 4.0".to_string(),
             ));
         }
 
@@ -359,7 +360,7 @@ impl GranularParameters {
 /// The pool reuses inactive [Grain] instances to avoid allocations during real-time processing.
 /// Active grains are processed in parallel each sample, reading from the source buffer and
 /// mixing their output with sine-windowed envelopes applied.
-pub struct GrainPool<const POOL_SIZE: usize> {
+pub(crate) struct GrainPool<const POOL_SIZE: usize> {
     /// Current overlap mode (Cloud or Sequential).
     overlap_mode: GrainOverlapMode,
     /// Pool of reusable grain instances.
@@ -623,7 +624,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         mut output: &mut [f32],
         channel_count: usize,
         parameters: &GranularParameters,
-        modulation: GranularParameterModulation,
+        modulation: &GranularParameterModulation,
     ) -> usize {
         let grain_window = &*GRAIN_WINDOW_LUT;
 

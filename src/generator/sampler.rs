@@ -50,7 +50,7 @@ pub use granular::{
 // -------------------------------------------------------------------------------------------------
 
 /// Basic sampler which plays a single audio file with optional AHDSR envelope and/or
-/// granular playback on a limited set of voices.
+/// granular playback on a predefined number of voices.
 ///
 /// AHDSR and granular parameters can be automated.
 pub struct Sampler {
@@ -65,9 +65,7 @@ pub struct Sampler {
     base_panning: f32,
     envelope_parameters: Option<AhdsrParameters>,
     granular_parameters: Option<GranularParameters>,
-    modulation_state: SamplerModulationState,
-    modulation_source_parameters: Vec<Box<dyn Parameter>>,
-    modulation_target_parameters: Vec<FourCC>,
+    modulation_state: Option<SamplerModulationState>,
     active_parameters: Vec<Box<dyn Parameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
     transient: bool, // True if the generator can exhaust
@@ -561,9 +559,13 @@ impl Sampler {
         // Memorize file path
         let file_path = Arc::new(file_source.file_name());
 
-        // Pre-allocate playback message queue
-        const PLAYBACK_MESSAGE_QUEUE_SIZE: usize = 10 + 16;
-        let playback_message_queue = Arc::new(ArrayQueue::new(PLAYBACK_MESSAGE_QUEUE_SIZE));
+        // Pre-allocate playback message queue so it fits all parameters and a bunch of trigger events
+        let playback_message_queue_size: usize = (Self::base_parameters().len()
+            + Self::envelope_parameters().len()
+            + Self::granular_parameters().len())
+            * 2
+            + 16;
+        let playback_message_queue = Arc::new(ArrayQueue::new(playback_message_queue_size));
 
         // Create a new unique source id
         let playback_id = unique_source_id();
@@ -603,9 +605,7 @@ impl Sampler {
         let granular_parameters = None;
 
         // Modulation state (with empty config - will be initialized in with_granular_playback)
-        let modulation_state = SamplerModulationState::new(ModulationConfig::default());
-        let modulation_source_parameters = Vec::new();
-        let modulation_target_parameters = Vec::new();
+        let modulation_state = None;
 
         let active_voices = 0;
 
@@ -634,8 +634,6 @@ impl Sampler {
             envelope_parameters,
             granular_parameters,
             modulation_state,
-            modulation_source_parameters,
-            modulation_target_parameters,
             active_parameters,
             transient,
             stopping,
@@ -676,14 +674,6 @@ impl Sampler {
         // Create modulation config
         let modulation_config = Self::modulation_config();
 
-        // Cache modulation parameters for lookups
-        self.modulation_source_parameters = modulation_config.source_parameters();
-        self.modulation_target_parameters = modulation_config
-            .targets
-            .iter()
-            .map(|target| target.id())
-            .collect();
-
         // Add modulation parameters to the active parameters list
         self.active_parameters
             .extend(modulation_config.source_parameters());
@@ -695,17 +685,18 @@ impl Sampler {
         )?;
 
         // Initialize modulation state
-        self.modulation_state = SamplerModulationState::new(modulation_config);
+        let modulation_state = SamplerModulationState::new(modulation_config);
 
         // Initialize granular playback on all voices
         for voice in &mut self.voices {
-            let modulation_matrix = self.modulation_state.create_matrix(self.output_sample_rate);
             voice.enable_granular_playback(
+                modulation_state.create_matrix(self.output_sample_rate),
                 self.output_sample_rate,
                 sample_buffer.clone(),
-                modulation_matrix,
             );
         }
+
+        self.modulation_state = Some(modulation_state);
 
         self.granular_parameters = Some(parameters);
         Ok(self)
@@ -806,12 +797,7 @@ impl Sampler {
 
         // Allocate a new voice
         let voice_index = self.next_free_voice_index();
-
         let voice = &mut self.voices[voice_index];
-
-        // Update modulation matrix for the newly triggered voice
-        self.modulation_state
-            .start_voice_modulation(voice.modulation_matrix(), note, volume_value);
 
         // Start the voice
         voice.start(
@@ -961,27 +947,6 @@ impl Sampler {
                 }
             }
         }
-    }
-
-    /// Update modulation routing in all voices.
-    fn update_modulation_routing(
-        &mut self,
-        source_id: FourCC,
-        target_id: FourCC,
-        amount: f32,
-        bipolar: bool,
-    ) -> Result<(), Error> {
-        for voice in &mut self.voices {
-            self.modulation_state.update_voice_modulation(
-                voice.modulation_matrix(),
-                source_id,
-                target_id,
-                amount,
-                bipolar,
-            )?;
-        }
-
-        Ok(())
     }
 
     fn create_granular_sample_buffer(
@@ -1227,10 +1192,12 @@ impl Generator for Sampler {
             }
             // Modulation Parameters
             _ if self
-                .modulation_source_parameters
-                .iter()
-                .any(|p| p.id() == id) =>
+                .modulation_state
+                .as_ref()
+                .is_some_and(|state| state.is_source_parameter(id)) =>
             {
+                let modulation_state = self.modulation_state.as_mut().unwrap();
+
                 // Check if this is an LFO rate parameter
                 let rate = if id == Self::MOD_LFO1_RATE.id() {
                     Some(Self::parameter_update_value(value, &Self::MOD_LFO1_RATE)?)
@@ -1253,8 +1220,9 @@ impl Generator for Sampler {
                 } else {
                     None
                 };
+
                 // Delegate to modulation state
-                return self.modulation_state.apply_parameter_update(
+                return modulation_state.apply_parameter_update(
                     id,
                     rate,
                     waveform,
@@ -1269,16 +1237,16 @@ impl Generator for Sampler {
     }
 
     fn modulation_sources(&self) -> Vec<ModulationSource> {
-        if self.granular_parameters.is_some() {
-            self.modulation_state.config().sources.clone()
+        if let Some(modulation_state) = &self.modulation_state {
+            modulation_state.sources()
         } else {
             Vec::new()
         }
     }
 
     fn modulation_targets(&self) -> Vec<ModulationTarget> {
-        if self.granular_parameters.is_some() {
-            self.modulation_state.config().targets.clone()
+        if let Some(modulation_state) = &self.modulation_state {
+            modulation_state.targets()
         } else {
             Vec::new()
         }
@@ -1291,38 +1259,32 @@ impl Generator for Sampler {
         amount: f32,
         bipolar: bool,
     ) -> Result<(), Error> {
-        // Validate source id
-        if !self
-            .modulation_state
-            .config()
-            .sources
-            .iter()
-            .any(|config| config.id() == source)
-        {
-            return Err(Error::ParameterError(format!(
-                "Invalid modulation source: {}",
-                source
-            )));
+        if let Some(modulation_state) = &self.modulation_state {
+            for voice in &mut self.voices {
+                if let Some(matrix) = voice.modulation_matrix_mut() {
+                    modulation_state.set_modulation(matrix, source, target, amount, bipolar)?;
+                }
+            }
+            Ok(())
+        } else {
+            Err(Error::ParameterError(
+                "Modulation routing only available when granular playback is enabled".to_string(),
+            ))
         }
-        // Validate target parameter
-        if !self.modulation_target_parameters.contains(&target) {
-            return Err(Error::ParameterError(format!(
-                "Parameter {} is not modulatable",
-                target
-            )));
-        }
-
-        // Clamp amount to standard modulation range
-        let clamped_amount = amount.clamp(-1.0, 1.0);
-
-        // Update all voices
-        self.update_modulation_routing(source, target, clamped_amount, bipolar)?;
-
-        Ok(())
     }
 
     fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
-        self.update_modulation_routing(source, target, 0.0, false)?;
-        Ok(())
+        if let Some(modulation_state) = &self.modulation_state {
+            for voice in &mut self.voices {
+                if let Some(matrix) = voice.modulation_matrix_mut() {
+                    modulation_state.clear_modulation(matrix, source, target)?;
+                }
+            }
+            Ok(())
+        } else {
+            Err(Error::ParameterError(
+                "Modulation routing only available when granular playback is enabled".to_string(),
+            ))
+        }
     }
 }
