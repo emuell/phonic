@@ -7,10 +7,11 @@ use four_cc::FourCC;
 use crate::{
     modulation::{
         matrix::ModulationMatrix,
+        processor::MODULATION_PROCESSOR_BLOCK_SIZE,
         state::{ModulationSlotType, ModulationState},
         ModulationConfig, ModulationSource, ModulationTarget,
     },
-    utils::dsp::lfo::LfoWaveform,
+    utils::{dsp::lfo::LfoWaveform, fundsp::SharedBuffer},
 };
 
 use super::parameter::SharedParameterValue;
@@ -37,25 +38,25 @@ impl FunDspModulationState {
         self.inner.create_matrix(sample_rate)
     }
 
-    /// Get modulation source descriptors for the Generator trait.
-    pub fn modulation_sources(&self) -> Vec<ModulationSource> {
-        self.inner.sources()
-    }
-
-    /// Get modulatable parameter IDs for the Generator trait.
-    pub fn modulation_targets(&self) -> Vec<ModulationTarget> {
-        self.inner.targets()
-    }
-
     /// Check if a parameter ID belongs to a modulation source.
     pub fn is_source_parameter(&self, id: FourCC) -> bool {
         self.inner.is_source_parameter(id)
     }
 
+    /// Get modulation source descriptors for the Generator trait.
+    pub fn sources(&self) -> Vec<ModulationSource> {
+        self.inner.sources()
+    }
+
+    /// Get modulatable parameter IDs for the Generator trait.
+    pub fn targets(&self) -> Vec<ModulationTarget> {
+        self.inner.targets()
+    }
+
     /// Apply a parameter update to a modulation matrix.
     ///
     /// Reads the current shared parameter value and pushes it to the matrix.
-    pub fn apply_parameter_to_matrix(
+    pub fn apply_parameter_update(
         &self,
         matrix: &mut ModulationMatrix,
         param_id: FourCC,
@@ -150,5 +151,74 @@ impl FunDspModulationState {
         target: FourCC,
     ) -> Result<(), crate::Error> {
         self.inner.clear_modulation(matrix, source, target)
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Sampler modulation state within a FunDspVoice. Holds and processes the modulation matrix.
+pub(crate) struct FunDSpModulationVoiceState {
+    matrix: ModulationMatrix,
+    shared_buffers: HashMap<FourCC, SharedBuffer>,
+    temp_buffer: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
+}
+
+impl FunDSpModulationVoiceState {
+    /// Create a new voice state with the given matrix and shared buffers
+    pub fn new(matrix: ModulationMatrix, shared_buffers: HashMap<FourCC, SharedBuffer>) -> Self {
+        let temp_buffer = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        Self {
+            matrix,
+            shared_buffers,
+            temp_buffer,
+        }
+    }
+
+    /// Access to the modulation matrix.
+    #[inline]
+    #[allow(unused)]
+    pub fn matrix(&self) -> &ModulationMatrix {
+        &self.matrix
+    }
+
+    /// Mutable access to the modulation matrix.
+    #[inline]
+    pub fn matrix_mut(&mut self) -> &mut ModulationMatrix {
+        &mut self.matrix
+    }
+
+    /// Start modulation processing when the voice starts playing.
+    pub fn start(&mut self, note: u8, volume: f32) {
+        self.matrix.note_on(note, volume);
+    }
+
+    /// Stop modulation processing when the voice stops playing.
+    pub fn stop(&mut self) {
+        self.matrix.note_off();
+    }
+
+    /// Process modulation block and fill shared buffers.
+    pub fn process(&mut self, chunk_size: usize) {
+        debug_assert!(
+            chunk_size <= MODULATION_PROCESSOR_BLOCK_SIZE,
+            "Frames exceeds maximum block size"
+        );
+
+        // Process matrix
+        self.matrix.process(chunk_size);
+
+        // Write processed outputs into shared buffers
+        for (param_id, shared_buffer) in &mut self.shared_buffers {
+            self.matrix
+                .output(*param_id, &mut self.temp_buffer[..chunk_size]);
+            shared_buffer.write(&self.temp_buffer[..chunk_size]);
+        }
+    }
+
+    /// Clear all shared buffers.
+    pub fn clear(&mut self) {
+        for buffer in self.shared_buffers.values_mut() {
+            buffer.clear();
+        }
     }
 }

@@ -21,7 +21,7 @@ pub const MODULATION_PROCESSOR_BLOCK_SIZE: usize = 64;
 /// values in blocks for use in [`ModulationMatrixSlot`](crate::modulation::matrix::ModulationMatrixSlot).
 pub trait ModulationProcessor: Debug + Clone + Send {
     /// Initialize/reset the modulation processor (called on note-on or when source is enabled).
-    fn reset(&mut self, sample_rate: u32);
+    fn reset(&mut self);
 
     /// Check if source is active (for envelopes: not idle, for LFOs: always true).
     fn is_active(&self) -> bool;
@@ -84,9 +84,8 @@ impl LfoModulationProcessor {
 }
 
 impl ModulationProcessor for LfoModulationProcessor {
-    fn reset(&mut self, sample_rate: u32) {
-        self.sample_rate = sample_rate;
-        self.lfo = Lfo::new(sample_rate, self.rate, self.waveform);
+    fn reset(&mut self) {
+        self.lfo.reset();
     }
 
     fn is_active(&self) -> bool {
@@ -191,9 +190,8 @@ impl AhdsrModulationProcessor {
 }
 
 impl ModulationProcessor for AhdsrModulationProcessor {
-    fn reset(&mut self, _sample_rate: u32) {
-        self.envelope = AhdsrEnvelope::new();
-        self.envelope.note_on(&self.parameters, 1.0); // Full volume for modulation
+    fn reset(&mut self) {
+        self.envelope.reset();
     }
 
     fn is_active(&self) -> bool {
@@ -245,7 +243,7 @@ impl VelocityModulationProcessor {
 }
 
 impl ModulationProcessor for VelocityModulationProcessor {
-    fn reset(&mut self, _sample_rate: u32) {
+    fn reset(&mut self) {
         // Velocity is static, nothing to reset
     }
 
@@ -301,7 +299,7 @@ impl KeytrackingModulationProcessor {
 }
 
 impl ModulationProcessor for KeytrackingModulationProcessor {
-    fn reset(&mut self, _sample_rate: u32) {
+    fn reset(&mut self) {
         // Keytracking is static, nothing to reset
     }
 

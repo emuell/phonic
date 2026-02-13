@@ -14,7 +14,10 @@ use crate::{
     FileSource, NotePlaybackId, PlaybackStatusContext, PlaybackStatusEvent,
 };
 
-use super::granular::{GrainPool, GranularParameterModulation, GranularParameters};
+use super::{
+    granular::{GrainPool, GranularParameters},
+    modulation::SamplerVoiceModulationState,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -27,7 +30,7 @@ const GRAIN_POOL_SIZE: usize = 64;
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct SamplerVoice {
+pub(crate) struct SamplerVoice {
     note_id: Option<NotePlaybackId>,
     note: u8,
     note_volume: f32,
@@ -37,21 +40,13 @@ pub struct SamplerVoice {
     release_start_frame: Option<u64>,
     grain_pool_started: bool,
     grain_pool: Option<Box<GrainPool<GRAIN_POOL_SIZE>>>,
-    modulation_matrix: ModulationMatrix,
-    modulated_size: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_density: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_variation: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_spray: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_pan_spread: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_position: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    modulated_speed: [f32; MODULATION_PROCESSOR_BLOCK_SIZE],
-    sample_rate: u32,
+    modulation_state: Option<Box<SamplerVoiceModulationState>>,
 }
 
 impl SamplerVoice {
-    pub fn new(file_source: PreloadedFileSource, channel_count: usize, sample_rate: u32) -> Self {
+    pub fn new(file_source: PreloadedFileSource, channel_count: usize, _sample_rate: u32) -> Self {
         let note_id = None;
-        let note = 60; // default middle C
+        let note = 60; // middle C
         let note_volume = 1.0;
         let note_panning = 0.0;
 
@@ -73,15 +68,8 @@ impl SamplerVoice {
         let grain_pool_started = false;
         let grain_pool = None;
 
-        // Initialize modulation matrix (empty for now, will be configured later)
-        let modulation_matrix = ModulationMatrix::new();
-        let modulated_size = [1.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_density = [1.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_variation = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_spray = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_pan_spread = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_position = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
-        let modulated_speed = [0.0; MODULATION_PROCESSOR_BLOCK_SIZE];
+        // Initialize modulation matrix (empty without granular playback enabled)
+        let modulation_state = None;
 
         Self {
             note_id,
@@ -93,15 +81,7 @@ impl SamplerVoice {
             release_start_frame,
             grain_pool_started,
             grain_pool,
-            modulation_matrix,
-            modulated_size,
-            modulated_density,
-            modulated_variation,
-            modulated_spray,
-            modulated_pan_spread,
-            modulated_position,
-            modulated_speed,
-            sample_rate,
+            modulation_state,
         }
     }
 
@@ -180,15 +160,17 @@ impl SamplerVoice {
         // Set playback context
         self.file_source_mut().set_playback_status_context(context);
 
-        // Start envelope
+        // Initialize volume envelope
         if let Some(envelope_parameters) = envelope_parameters {
-            self.envelope.note_on(envelope_parameters, 1.0);
+            self.envelope.note_on(envelope_parameters, 1.0); // Trigger envelopes with full volume
         }
 
-        // Initialize the matrix (reset sample rate, trigger envelopes)
-        self.modulation_matrix.reset(self.sample_rate);
-        self.modulation_matrix.note_on(1.0); // Trigger envelopes with full volume
+        // Initialize modulation matrix
+        if let Some(state) = &mut self.modulation_state {
+            state.start(note, volume);
+        }
 
+        // Memorize note id and act as active
         self.note_id = Some(note_id);
     }
 
@@ -201,9 +183,6 @@ impl SamplerVoice {
         if self.is_active() {
             self.release_start_frame = Some(current_sample_frame);
 
-            // Trigger release phase for modulation envelopes
-            self.modulation_matrix.note_off();
-
             // Trigger release phase for sample playback
             if let Some(envelope_parameters) = envelope_parameters {
                 self.envelope.note_off(envelope_parameters);
@@ -212,6 +191,11 @@ impl SamplerVoice {
                 if let Some(grain_pool) = &mut self.grain_pool {
                     grain_pool.stop();
                 }
+            }
+
+            // Trigger release phase for modulation
+            if let Some(state) = &mut self.modulation_state {
+                state.stop();
             }
         }
     }
@@ -307,12 +291,12 @@ impl SamplerVoice {
         }
     }
 
-    /// Initialize granular playback for this voice at the given sample rate.
+    /// Initialize granular playback for this voice with the given sample rate.
     pub fn enable_granular_playback(
         &mut self,
+        modulation_matrix: ModulationMatrix,
         sample_rate: u32,
         sample_buffer: Arc<Box<[f32]>>,
-        modulation_matrix: ModulationMatrix,
     ) {
         assert!(
             !sample_buffer.is_empty(),
@@ -335,14 +319,23 @@ impl SamplerVoice {
             sample_loop_range,
         )));
 
-        // Set the pre-built modulation matrix
-        self.modulation_matrix = modulation_matrix;
+        // Setup grain modulation matrix
+        self.modulation_state = Some(Box::new(SamplerVoiceModulationState::new(
+            modulation_matrix,
+        )));
+    }
+
+    /// Access to the voice modulation matrix.
+    #[inline]
+    #[allow(unused)]
+    pub fn modulation_matrix(&self) -> Option<&ModulationMatrix> {
+        self.modulation_state.as_ref().map(|s| s.matrix())
     }
 
     /// Mut access to the voice modulation matrix.
     #[inline]
-    pub fn modulation_matrix(&mut self) -> &mut ModulationMatrix {
-        &mut self.modulation_matrix
+    pub fn modulation_matrix_mut(&mut self) -> Option<&mut ModulationMatrix> {
+        self.modulation_state.as_mut().map(|s| s.matrix_mut())
     }
 
     /// Write source and apply envelope, if set.
@@ -357,45 +350,50 @@ impl SamplerVoice {
     ) -> usize {
         debug_assert!(self.is_active(), "Only active voices need to process");
 
-        let written = if let Some(granular_parameters) =
-            self.grain_pool.as_ref().and(granular_parameters.as_ref())
-        {
-            // Process in chunks of MODULATION_PROCESSOR_BLOCK_SIZE
-            for chunk in output.chunks_mut(MODULATION_PROCESSOR_BLOCK_SIZE * channel_count) {
-                let chunk_frame_count = chunk.len() / channel_count;
+        debug_assert!(
+            self.grain_pool.is_some() == granular_parameters.is_some()
+                && self.grain_pool.is_some() == self.modulation_state.is_some(),
+            "Expecting grain pool, parameters and modulation to be enabled or disabled together"
+        );
 
-                // Process modulation for this chunk
-                self.process_modulation(chunk_frame_count);
-
-                // Process chunk with modulation
-                self.grain_pool.as_mut().unwrap().process(
-                    chunk,
-                    channel_count,
-                    granular_parameters,
-                    GranularParameterModulation {
-                        size: &self.modulated_size[..chunk_frame_count],
-                        density: &self.modulated_density[..chunk_frame_count],
-                        variation: &self.modulated_variation[..chunk_frame_count],
-                        spray: &self.modulated_spray[..chunk_frame_count],
-                        pan_spread: &self.modulated_pan_spread[..chunk_frame_count],
-                        position: &self.modulated_position[..chunk_frame_count],
-                        speed: &self.modulated_speed[..chunk_frame_count],
-                    },
-                );
+        let written = match (
+            self.grain_pool.as_deref_mut(),
+            self.modulation_state.as_deref_mut(),
+            granular_parameters.as_ref(),
+        ) {
+            // Grain playback mode
+            (Some(grain_pool), Some(modulation_state), Some(granular_parameters)) => {
+                // Process in chunks of MODULATION_PROCESSOR_BLOCK_SIZE
+                for chunk in output.chunks_mut(MODULATION_PROCESSOR_BLOCK_SIZE * channel_count) {
+                    let chunk_frame_count = chunk.len() / channel_count;
+                    // Process modulation for this chunk
+                    modulation_state.process(chunk_frame_count);
+                    // Process chunk with modulation
+                    grain_pool.process(
+                        chunk,
+                        channel_count,
+                        granular_parameters,
+                        &modulation_state.output(chunk_frame_count),
+                    );
+                }
+                output.len()
             }
-
-            output.len()
-        } else {
-            // Continuous playback mode
-            self.source.write(output, time)
+            _ => {
+                // Regular file playback mode
+                self.source.write(output, time)
+            }
         };
 
-        // Get current t recent odulation value for position parameters
-        let pos_mod = if self.modulation_matrix.output_size() > 0 {
-            self.modulation_matrix.modulation_output_at(
-                super::Sampler::GRAIN_POSITION.id(),
-                self.modulation_matrix.output_size() - 1,
-            )
+        // Get current modulation value for position parameters
+        let pos_mod = if let Some(state) = &self.modulation_state {
+            if state.matrix().output_size() > 0 {
+                state.matrix().output_at(
+                    super::Sampler::GRAIN_POSITION.id(),
+                    state.matrix().output_size() - 1,
+                )
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -479,52 +477,5 @@ impl SamplerVoice {
             .input_source_mut()
             .input_source_mut()
             .input_source_mut()
-    }
-
-    /// Process modulation block and fill modulation buffers.
-    ///
-    /// # Arguments
-    /// * `base_params` - Base granular parameters to modulate
-    /// * `chunk_frames` - Number of frames to process (up to MODULATION_PROCESSOR_BLOCK_SIZE)
-    fn process_modulation(&mut self, chunk_frames: usize) {
-        use super::Sampler;
-
-        debug_assert!(
-            chunk_frames <= MODULATION_PROCESSOR_BLOCK_SIZE,
-            "Chunk frames exceeds maximum block size"
-        );
-
-        // Process modulation sources for this chunk
-        self.modulation_matrix.process(chunk_frames);
-
-        // Fill modulation buffers for the chunk
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_SIZE.id(),
-            &mut self.modulated_size[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_DENSITY.id(),
-            &mut self.modulated_density[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_VARIATION.id(),
-            &mut self.modulated_variation[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_SPRAY.id(),
-            &mut self.modulated_spray[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_PAN_SPREAD.id(),
-            &mut self.modulated_pan_spread[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_POSITION.id(),
-            &mut self.modulated_position[..chunk_frames],
-        );
-        self.modulation_matrix.modulation_output(
-            Sampler::GRAIN_SPEED.id(),
-            &mut self.modulated_speed[..chunk_frames],
-        );
     }
 }

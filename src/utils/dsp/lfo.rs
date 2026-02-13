@@ -85,6 +85,19 @@ impl Lfo {
         }
     }
 
+    /// Restart the LFO by resetting the phase and random states
+    pub fn reset(&mut self) {
+        self.phase = 0.0;
+        if matches!(
+            self.waveform,
+            LfoWaveform::Random | LfoWaveform::SmoothRandom
+        ) {
+            self.sample_hold_value = self.rng.random::<f32>() * 2.0 - 1.0;
+            self.jitter_current = self.jitter_target;
+            self.jitter_target = self.rng.random::<f32>() * 2.0 - 1.0;
+        }
+    }
+
     /// Set a new rate in Hz with the given sample rate.
     pub fn set_rate(&mut self, sample_rate: u32, rate: f64) {
         self.phase_inc = (rate / sample_rate as f64) as f32;

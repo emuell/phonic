@@ -151,6 +151,7 @@ fn main() -> Result<(), Error> {
     let current_octave = Arc::new(Mutex::new(5));
     let current_loop_seek_start = Arc::new(Mutex::new(Duration::ZERO));
     let current_filter_cutoff = Arc::new(Mutex::new(20000.0));
+    let current_synth_modulation = Arc::new(Mutex::new(Vec::new()));
 
     // global key state
     let alt_key_pressed = Arc::new(AtomicBool::new(false));
@@ -196,7 +197,9 @@ fn main() -> Result<(), Error> {
         move |key: &Keycode| {
             let synth_generator = synth_generator.clone();
             let sampler_generator = sampler_generator.clone();
+            let synth_modulation = current_synth_modulation.clone();
             let alt_key = alt_key_pressed.load(Ordering::Relaxed);
+
             match key {
                 Keycode::RAlt | Keycode::LAlt => {
                     alt_key_pressed.store(true, Ordering::Relaxed);
@@ -278,18 +281,17 @@ fn main() -> Result<(), Error> {
                         .collect();
                     synth_generator.set_parameters(values, None).unwrap();
 
-                    // Randomize modulation routing
-                    let routing = fm3_synth::randomize_modulation();
-                    // Clear all existing modulation first
-                    for (source, target, _, _) in &routing {
-                        let _ = synth_generator.clear_modulation(*source, *target, None);
+                    // Clear existing routing
+                    for &(source, target, _, _) in &*synth_modulation.lock().unwrap() {
+                        let _ = synth_generator.clear_modulation(source, target, None);
                     }
                     // Apply new random routing
-                    for (source, target, amount, bipolar) in routing {
-                        synth_generator
-                            .set_modulation(source, target, amount, bipolar, None)
-                            .unwrap();
+                    let modulation = fm3_synth::randomize_modulation();
+                    for &(source, target, amount, bipolar) in &modulation {
+                        let _ =
+                            synth_generator.set_modulation(source, target, amount, bipolar, None);
                     }
+                    *synth_modulation.lock().unwrap() = modulation;
 
                     println!("Randomized FM synth params and modulation routing");
                 }
