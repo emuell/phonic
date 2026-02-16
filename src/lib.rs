@@ -218,8 +218,7 @@ pub mod generators {
     pub use super::generator::{
         empty::EmptyGenerator,
         sampler::{
-            GrainOverlapMode, GrainPlaybackDirection, GrainPlayheadMode, GrainWindowMode,
-            GranularParameters, Sampler,
+            GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters, Sampler,
         },
         GeneratorPlaybackEvent, GeneratorPlaybackMessage,
     };

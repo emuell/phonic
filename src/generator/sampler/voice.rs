@@ -26,7 +26,8 @@ type SamplerVoiceAmplifiedSource = AmplifiedSource<ChannelMappedSource<Preloaded
 type SamplerVoicePannedSource = PannedSource<SamplerVoiceAmplifiedSource>;
 type SamplerVoiceSource = SamplerVoicePannedSource;
 
-const GRAIN_POOL_SIZE: usize = 64;
+// Fit 100 grains with a max density of 100Hz and a max grain size of 100ms
+const GRAIN_POOL_SIZE: usize = 100;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -126,6 +127,7 @@ impl SamplerVoice {
         base_volume: f32,
         base_panning: f32,
         envelope_parameters: &Option<AhdsrParameters>,
+        granular_parameters: &Option<GranularParameters>,
         context: Option<PlaybackStatusContext>,
     ) {
         // Reset a probably recycled file source
@@ -152,9 +154,22 @@ impl SamplerVoice {
         self.panned_source_mut().set_panning(effective_panning);
 
         // Start granular playback with effective values
-        if let Some(grain_pool) = &mut self.grain_pool {
+        debug_assert!(
+            self.grain_pool.is_some() == granular_parameters.is_some(),
+            "Expecting valid grain parameters when granular playback is enabled",
+        );
+        if let Some((grain_pool, granular_parameters)) = self
+            .grain_pool
+            .as_deref_mut()
+            .zip(granular_parameters.as_ref())
+        {
             self.grain_pool_started = true;
-            grain_pool.start(effective_speed, effective_volume, effective_panning);
+            grain_pool.start(
+                granular_parameters,
+                effective_speed,
+                effective_volume,
+                effective_panning,
+            );
         }
 
         // Set playback context

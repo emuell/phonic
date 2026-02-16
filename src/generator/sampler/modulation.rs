@@ -228,7 +228,7 @@ impl SamplerVoiceModulationState {
             &mut self.position[..chunk_size],
         );
         self.matrix.output(
-            Sampler::GRAIN_SPEED.id(), //
+            Sampler::GRAIN_STEP.id(), //
             &mut self.speed[..chunk_size],
         );
     }
