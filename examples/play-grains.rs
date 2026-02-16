@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use phonic::{
     generators::{
-        GrainOverlapMode, GrainPlaybackDirection, GrainPlayheadMode, GrainWindowMode,
-        GranularParameters, LfoWaveform, Sampler,
+        GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters, LfoWaveform,
+        Sampler,
     },
     utils::ahdsr::AhdsrParameters,
     Error, GeneratorPlaybackOptions,
@@ -28,37 +28,36 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // Granular parameter consts (tweak as needed!)
 
 /// Path to sample
-const SAMPLE_PATH: &str = "assets/pad-ambient.wav"; // "assets/YuaiLoop.wav";
+const SAMPLE_PATH: &str = "assets/altijd synth bit.wav"; // "assets/YuaiLoop.wav";
 
 // AHDSR Envelope parameters
-const ATTACK_MS: u64 = 100;
+const ATTACK_MS: u64 = 10;
 const HOLD_MS: u64 = 0;
-const DECAY_MS: u64 = 0;
-const SUSTAIN_LEVEL: f32 = 1.0;
-const RELEASE_MS: u64 = 2000;
+const DECAY_MS: u64 = 1000;
+const SUSTAIN_LEVEL: f32 = 0.6;
+const RELEASE_MS: u64 = 4000;
 
 /// Grainular parameters
 const GRAIN_OVERLAP_MODE: GrainOverlapMode = GrainOverlapMode::Cloud;
-const GRAIN_WINDOW: GrainWindowMode = GrainWindowMode::Hann;
-const GRAIN_SIZE: f32 = 80.0; // 1ms - 1000ms
-const GRAIN_DENSITY: f32 = 40.0; // 1hz - 100hz
+const GRAIN_WINDOW: GrainWindowMode = GrainWindowMode::RampDown;
+const GRAIN_SIZE: f32 = 400.0; // 1ms - 1000ms
+const GRAIN_DENSITY: f32 = 100.0; // 1hz - 100hz
 const GRAIN_VARIATION: f32 = 0.25; // 0.0 = no variation, 1.0 = full variation
-const GRAIN_SPRAY: f32 = 0.2; // 0.0 = no randomness, 1.0 = full random
+const GRAIN_SPRAY: f32 = 0.0; // 0.0 = no randomness, 1.0 = full random
 const GRAIN_PAN_SPREAD: f32 = 0.15; // 0.0 = no pan, 1.0 = full left/right
 const GRAIN_PLAYBACK_DIR: GrainPlaybackDirection = GrainPlaybackDirection::Forward;
-const GRAIN_PLAYHEAD_MODE: GrainPlayheadMode = GrainPlayheadMode::PlayThrough;
-const GRAIN_MANUAL_POSITION: f32 = 0.5; // 0.0 = start, 0.5 = middle, 1.0 = end
-const GRAIN_PLAYHEAD_SPEED: f32 = 2.0; // speed for PlayThrough mode (0.1 - 4.0)
+const GRAIN_POSITION: f32 = 0.0; // 0.0 = start, 0.5 = middle, 1.0 = end
+const GRAIN_STEP: f32 = 0.0; // -4.0 = backwards, 0.0 = stay at position, 4.0 = forward
 
 // Modulation Parameters - LFO 1
-const MOD_LFO1_RATE: f32 = 0.15; // Hz
-const MOD_LFO1_WAVEFORM: LfoWaveform = LfoWaveform::SmoothRandom;
-const MOD_LFO1_TO_GRAIN_POS: f32 = 0.4; // 40% modulation depth
+const MOD_LFO1_RATE: f32 = 0.18; // Hz
+const MOD_LFO1_WAVEFORM: LfoWaveform = LfoWaveform::Sine;
+const MOD_LFO1_TO_GRAIN_POS: f32 = 0.33; // 33% modulation depth
 
 // Modulation Parameters - LFO 2
-const MOD_LFO2_RATE: f32 = 2.5; // Hz
-const MOD_LFO2_WAVEFORM: LfoWaveform = LfoWaveform::Sine;
-const MOD_LFO2_TO_GRAIN_SIZE: f32 = 0.3; // 30% modulation depth
+const MOD_LFO2_RATE: f32 = 5.5; // Hz
+const MOD_LFO2_WAVEFORM: LfoWaveform = LfoWaveform::SmoothRandom;
+const MOD_LFO2_TO_GRAIN_SIZE: f32 = 0.5; // 50% modulation depth
 
 // Modulation Parameters - Velocity
 const MOD_VEL_TO_GRAIN_DENSITY: f32 = 0.5; // Louder notes = denser grains
@@ -100,9 +99,8 @@ fn main() -> Result<(), Error> {
     granular_parameters.spray = GRAIN_SPRAY;
     granular_parameters.pan_spread = GRAIN_PAN_SPREAD;
     granular_parameters.playback_direction = GRAIN_PLAYBACK_DIR;
-    granular_parameters.playhead_mode = GRAIN_PLAYHEAD_MODE;
-    granular_parameters.manual_position = GRAIN_MANUAL_POSITION;
-    granular_parameters.playhead_speed = GRAIN_PLAYHEAD_SPEED;
+    granular_parameters.position = GRAIN_POSITION;
+    granular_parameters.step = GRAIN_STEP;
 
     // Create sampler with granular playback
     let sampler = Sampler::from_file(
@@ -186,12 +184,8 @@ fn main() -> Result<(), Error> {
     println!("Spray: {GRAIN_SPRAY:.2} (randomness)");
     println!("Pan Spread: {GRAIN_PAN_SPREAD:.2} (stereo width)");
     println!("Playback Direction: {GRAIN_PLAYBACK_DIR}");
-    println!("Playhead Mode: {GRAIN_PLAYHEAD_MODE}");
-    if GRAIN_PLAYHEAD_MODE == GrainPlayheadMode::Manual {
-        println!("Manual Position: {GRAIN_MANUAL_POSITION:.2}");
-    } else {
-        println!("Playhead Speed: {GRAIN_PLAYHEAD_SPEED:.2}x");
-    }
+    println!("Position: {GRAIN_POSITION:.2}");
+    println!("Step: {GRAIN_STEP:.2}x");
 
     println!("\n=== Modulation System ===");
     println!("LFO 1: {MOD_LFO1_WAVEFORM} @ {MOD_LFO1_RATE:.2} Hz");
@@ -231,7 +225,7 @@ fn main() -> Result<(), Error> {
     }
 
     // Stop all notes
-    let stop_time = 12.0;
+    let stop_time = 16.0;
     generator.stop(now + (stop_time * sample_rate as f64) as u64)?;
     println!("Stop all notes at +{:.1}s", stop_time);
 

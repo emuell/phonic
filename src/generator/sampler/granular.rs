@@ -27,20 +27,6 @@ pub enum GrainPlaybackDirection {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Playhead mode for granular synthesis grain position tracking.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, strum::EnumString, strum::Display, strum::VariantNames,
-)]
-#[repr(u8)]
-pub enum GrainPlayheadMode {
-    /// Grains spawn at a fixed manual position (default 0.5 = middle of file).
-    /// Spray parameter adds randomness around this position.
-    Manual,
-    /// Grains spawn at a position that advances through the file over time.
-    /// Creates a "moving window" effect. Spray still adds randomness.
-    PlayThrough,
-}
-
 /// Grain overlap mode for controlling how grains are scheduled.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, strum::EnumString, strum::Display, strum::VariantNames,
@@ -261,19 +247,17 @@ pub struct GranularParameters {
     /// At 1.0, grain size varies 25%-200% and volume varies 0.0-1.0.
     pub variation: f32,
     /// Random variation in grain start position (0.0 - 1.0).
-    /// Each grain's start position is varied by ±2.0 seconds at maximum spray.
+    /// Each grain's start position is varied by ±1.0 seconds at maximum spray.
     pub spray: f32,
     /// Random stereo spread per grain (0.0 - 1.0).
     /// Each grain's panning is offset by ±(pan_spread × 0.5) from the voice's base pan.
     pub pan_spread: f32,
     /// Direction for grain playback (forward, backward, or random).
     pub playback_direction: GrainPlaybackDirection,
-    /// Playhead mode for grain position tracking (Manual or PlayThrough).
-    pub playhead_mode: GrainPlayheadMode,
-    /// Manual position in the file (0.0 - 1.0) when playhead_mode is Manual.
-    pub manual_position: f32,
-    /// Playback speed multiplier for PlayThrough mode (typically 0.1 - 4.0).
-    pub playhead_speed: f32,
+    /// Position in the file (0.0 - 1.0) when step is 0.0.
+    pub position: f32,
+    /// Playback step multiplier (-4.0 = backwards, 0.0 = stay at position, 4.0 = forward).
+    pub step: f32,
 }
 
 impl Default for GranularParameters {
@@ -287,9 +271,8 @@ impl Default for GranularParameters {
             variation: 0.0,
             pan_spread: 0.0,
             playback_direction: GrainPlaybackDirection::Forward,
-            playhead_mode: GrainPlayheadMode::Manual,
-            manual_position: 0.5,
-            playhead_speed: 1.0,
+            position: 0.5,
+            step: 0.0,
         }
     }
 }
@@ -331,15 +314,15 @@ impl GranularParameters {
             ));
         }
 
-        if self.manual_position < 0.0 || self.manual_position > 1.0 {
+        if self.position < 0.0 || self.position > 1.0 {
             return Err(Error::ParameterError(
-                "Manual position must be between 0.0 and 1.0".to_string(),
+                "Position must be between 0.0 and 1.0".to_string(),
             ));
         }
 
-        if self.playhead_speed < 0.001 || self.playhead_speed > 4.0 {
+        if self.step < -4.0 || self.step > 4.0 {
             return Err(Error::ParameterError(
-                "Playhead speed must be between 0.001 and 4.0".to_string(),
+                "Step must be between -4.0 and 4.0".to_string(),
             ));
         }
 
@@ -373,6 +356,8 @@ pub(crate) struct GrainPool<const POOL_SIZE: usize> {
     sample_buffer: Arc<Box<[f32]>>,
     /// Loop range for playback (normalized 0.0..1.0).
     sample_loop_range: Option<(f32, f32)>,
+    /// Loop range playback status.
+    playing_loop_range: bool,
     /// Whether new grains should be triggered (set to false when stopping).
     trigger_new_grains: bool,
     /// Current phase of the grain trigger oscillator (0.0..1.0).
@@ -384,8 +369,7 @@ pub(crate) struct GrainPool<const POOL_SIZE: usize> {
     volume: f32,
     /// Base stereo panning position for grains (-1.0..1.0).
     panning: f32,
-    /// Current playhead position for PlayThrough mode (0.0..1.0).
-    /// Advances through the file over time, determining where new grains spawn.
+    /// Current playhead position, when playback step is != 0 (0.0..1.0).
     playhead: f32,
     /// Sample rate of the audio output.
     sample_rate: u32,
@@ -420,6 +404,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         let grain_pool = [Grain::new(); POOL_SIZE];
         let active_grain_indices = Vec::with_capacity(POOL_SIZE);
         let primary_grain_index = None;
+        let playing_loop_range = false;
         let trigger_phase = 0.0;
         let trigger_new_grains = true;
         let speed = 1.0;
@@ -435,6 +420,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
             primary_grain_index,
             sample_buffer,
             sample_loop_range,
+            playing_loop_range,
             trigger_new_grains,
             trigger_phase,
             speed,
@@ -446,41 +432,64 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         }
     }
 
+    /// Fold `position` into `[loop_start, loop_end)` using modular arithmetic.
+    #[inline]
+    fn fold_into_loop_range(position: f64, loop_start: f64, loop_end: f64) -> f64 {
+        let loop_len = loop_end - loop_start;
+        if loop_len > 0.0 {
+            loop_start + (position - loop_start).rem_euclid(loop_len)
+        } else {
+            loop_start
+        }
+    }
+
     pub fn is_exhausted(&self) -> bool {
         !self.trigger_new_grains && self.active_grain_indices.is_empty()
     }
 
     pub fn playback_position(&self, parameters: &GranularParameters, position_mod: f32) -> f32 {
-        // Determine base position based on playhead mode
-        let mut base_position = match parameters.playhead_mode {
-            GrainPlayheadMode::Manual => parameters.manual_position,
-            GrainPlayheadMode::PlayThrough => self.playhead,
+        // Determine base position based on step value
+        let mut base_position = if parameters.step == 0.0 {
+            parameters.position
+        } else {
+            self.playhead
         };
 
         // Apply modulation
-        base_position += position_mod;
+        if position_mod != 0.0 {
+            base_position += position_mod;
+        }
 
-        // Fold manual position into loop range
-        if parameters.playhead_mode == GrainPlayheadMode::Manual {
+        // When playing in loop, fold modulated position into loop range
+        if self.playing_loop_range {
             if let Some((loop_start, loop_end)) = self.sample_loop_range {
-                let loop_len = loop_end - loop_start;
-                if loop_len > 0.0 {
-                    base_position = loop_start + (base_position - loop_start).rem_euclid(loop_len);
-                }
+                base_position = Self::fold_into_loop_range(
+                    base_position as f64,
+                    loop_start as f64,
+                    loop_end as f64,
+                ) as f32;
             }
         }
-        // Return modulated position
+
+        // Return modulated position and ensure it's valid
         base_position.rem_euclid(1.0)
     }
 
-    pub fn start(&mut self, speed: f64, volume: f32, panning: f32) {
+    pub fn start(
+        &mut self,
+        parameters: &GranularParameters,
+        speed: f64,
+        volume: f32,
+        panning: f32,
+    ) {
         self.trigger_new_grains = true;
         self.trigger_phase = 1.0;
 
         self.speed = speed;
         self.volume = volume;
         self.panning = panning;
-        self.playhead = 0.0;
+        self.playhead = parameters.position;
+        self.playing_loop_range = false;
     }
 
     pub fn stop(&mut self) {
@@ -549,21 +558,33 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
             return false;
         }
 
-        // Calculate playback position
-        let modulated_position = self.playback_position(parameters, position_mod);
-
         // Apply spray to randomize grain start position
         let spray_variation = if !self.sample_buffer.is_empty() {
             let file_duration = self.sample_buffer.len() as f64 / self.sample_rate as f64;
             // Apply modulation to spray (additive, clamped)
             let modulated_spray = (parameters.spray + spray_mod).clamp(0.0, 1.0);
-            // Spray range: +/- 2.0 seconds at 1.0
-            let spray_seconds = modulated_spray as f64 * 4.0 * (self.rng.random::<f64>() - 0.5);
+            // Spray range: +/- 1.0 seconds at 1.0
+            let spray_seconds = modulated_spray as f64 * 2.0 * (self.rng.random::<f64>() - 0.5);
             spray_seconds / file_duration
         } else {
             0.0
         };
-        let grain_position = (modulated_position as f64 + spray_variation).rem_euclid(1.0);
+
+        // Calculate playback position and apply spray
+        let mut grain_position =
+            self.playback_position(parameters, position_mod) as f64 + spray_variation;
+        // When playing in loop, fold modulated position into loop range
+        if self.playing_loop_range {
+            if let Some((loop_start, loop_end)) = self.sample_loop_range {
+                grain_position = Self::fold_into_loop_range(
+                    grain_position,
+                    loop_start as f64,
+                    loop_end as f64,
+                );
+            }
+        }
+        // either way ensure it's always valid
+        grain_position = grain_position.rem_euclid(1.0);
 
         // Start a new grain
         let activated_index = self.activate_new_grain(
@@ -584,32 +605,34 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         activated_index.is_some()
     }
 
-    /// Advance the playhead position for PlayThrough mode.
+    /// Advance the playhead position when step > 0.
     #[inline]
-    fn advance_playhead(&mut self, buffer_frame_count: usize, playhead_speed: f32, speed_mod: f32) {
-        // Apply modulation to playhead speed (multiplicative)
+    fn advance_playhead(&mut self, buffer_frame_count: usize, step: f32, speed_mod: f32) {
+        // Apply modulation to step (multiplicative)
         let speed_mult = 1.0 + speed_mod;
-        let modulated_speed = playhead_speed * speed_mult;
+        let modulated_step = step * speed_mult;
 
-        // Advance position by one frame worth of time at the current playback speed
-        let position_increment = modulated_speed / buffer_frame_count as f32;
+        // Advance position by one frame worth of time at the current step
+        let position_increment = modulated_step / buffer_frame_count as f32;
         self.playhead += position_increment;
 
         // Wrap around at file boundaries or loop points
         if let Some((loop_start, loop_end)) = self.sample_loop_range {
-            if self.playhead >= loop_end {
-                let loop_len = loop_end - loop_start;
-                if loop_len > 0.0 {
-                    self.playhead = loop_start + (self.playhead - loop_end) % loop_len;
-                } else {
-                    self.playhead = loop_start;
-                }
-            } else if self.playhead < loop_start {
-                let loop_len = loop_end - loop_start;
-                if loop_len > 0.0 {
-                    self.playhead = loop_end - (loop_start - self.playhead).rem_euclid(loop_len);
-                } else {
-                    self.playhead = loop_start;
+            if self.playing_loop_range {
+                self.playhead = Self::fold_into_loop_range(
+                    self.playhead as f64,
+                    loop_start as f64,
+                    loop_end as f64,
+                ) as f32;
+            } else if self.playhead >= loop_start && self.playhead < loop_end {
+                // Playhead entered the loop range from either direction; start looping
+                self.playing_loop_range = true;
+            } else {
+                // Not yet in the loop: wrap globally so we can reach the loop from either side
+                if self.playhead >= 1.0 {
+                    self.playhead -= 1.0;
+                } else if self.playhead < 0.0 {
+                    self.playhead += 1.0;
                 }
             }
         } else if self.playhead >= 1.0 {
@@ -629,8 +652,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         let grain_window = &*GRAIN_WINDOW_LUT;
 
         let sample_frame_count = self.sample_buffer.len();
-        let move_playhead =
-            parameters.playhead_mode == GrainPlayheadMode::PlayThrough && sample_frame_count > 0;
+        let move_playhead = parameters.step != 0.0 && sample_frame_count > 0;
 
         // Eliminate channel count match branch from hot path
         match channel_count {
@@ -651,7 +673,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
                     if move_playhead {
                         self.advance_playhead(
                             sample_frame_count,
-                            parameters.playhead_speed,
+                            parameters.step,
                             modulation.speed[frame_index],
                         );
                     }
@@ -686,7 +708,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
                     if move_playhead {
                         self.advance_playhead(
                             sample_frame_count,
-                            parameters.playhead_speed,
+                            parameters.step,
                             modulation.speed[frame_index],
                         );
                     }
@@ -725,7 +747,7 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
                     if move_playhead {
                         self.advance_playhead(
                             sample_frame_count,
-                            parameters.playhead_speed,
+                            parameters.step,
                             modulation.speed[frame_index],
                         );
                     }
@@ -811,13 +833,21 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
             let volume_scale = 1.0 - (variation * self.rng.random::<f32>());
             let volume = self.volume * volume_scale;
 
+            // Pitch variation: 1.0 -> ±0.5 semitone
+            let random_semitones = variation as f64 * (self.rng.random::<f64>() - 0.5);
+            let speed = if random_semitones != 0.0 {
+                speed * 2.0_f64.powf(random_semitones / 12.0)
+            } else {
+                speed
+            };
+
             // Grain size variation: 1.0 -> 25%..400%
             let min_scale = 1.0 - (0.75 * variation);
             let max_scale = 1.0 + (2.0 * variation);
             let size_scale = min_scale + (max_scale - min_scale) * self.rng.random::<f32>();
 
             // Size: bipolar modulation, multiplies current size
-            // Convert mod value to multiplier: -1 → 0.5×, 0 → 1.0×, +1 → 2.0×
+            // Convert mod value to multiplier: -1 -> 0.5×, 0 -> 1.0×, +1 -> 2.0×
             let size_mult = 1.0 + size_mod;
             let grain_size_ms = (parameters.size * size_mult).clamp(1.0, 1000.0);
 
@@ -829,21 +859,34 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
             let panning_spread = modulated_pan_spread * (self.rng.random::<f32>() * 2.0 - 1.0);
             let panning = (self.panning + panning_spread).clamp(-1.0, 1.0);
 
+            // Pitch variation: 1.0 -> ±0.5 semitones, 0.0 -> no variation
+            let pitch_variation_semitones =
+                variation * (self.rng.random::<f32>() * 2.0 - 1.0) * 0.5;
+            let pitch_variation_mult = 2.0_f64.powf(pitch_variation_semitones as f64 / 12.0);
+            let varied_speed = speed * pitch_variation_mult;
+
             let file_length_frames = self.sample_buffer.len();
             let reverse = match parameters.playback_direction {
                 GrainPlaybackDirection::Forward => false,
                 GrainPlaybackDirection::Backward => true,
                 GrainPlaybackDirection::Random => self.rng.random::<bool>(),
             };
+            let loop_range = if self.playing_loop_range {
+                self.sample_loop_range
+                    .map(|(start, end)| (start as f64, end as f64))
+            } else {
+                None
+            };
             grain.activate(
                 window_mode,
                 position,
-                speed,
+                varied_speed,
                 volume,
                 panning,
                 grain_size,
                 file_length_frames,
                 reverse,
+                loop_range,
             );
             if let Some(position) = self.active_grain_indices.iter().position(|&v| v == index) {
                 // don't recycle a grain when it got stopped in the current process cycle
@@ -940,6 +983,8 @@ struct Grain {
     window_increment: f64,
     /// Grain window type that should be applied.
     window_mode: GrainWindowMode,
+    /// Loop range (normalized 0.0..1.0) to wrap position within, if any.
+    loop_range: Option<(f64, f64)>,
 }
 
 impl Default for Grain {
@@ -961,6 +1006,7 @@ impl Grain {
             window_phase: 0.0,
             window_increment: 0.0,
             window_mode: GrainWindowMode::Triangle,
+            loop_range: None,
         }
     }
 
@@ -989,6 +1035,7 @@ impl Grain {
         grain_size_samples: usize,
         file_length_frames: usize,
         reverse: bool,
+        loop_range: Option<(f64, f64)>,
     ) {
         self.active = true;
         self.window_mode = window_mode;
@@ -996,6 +1043,7 @@ impl Grain {
         self.volume = volume.clamp(0.0, 100.0);
         self.panning = panning.clamp(-1.0, 1.0);
         self.samples_remaining = grain_size_samples;
+        self.loop_range = loop_range;
 
         // Calculate the increment per sample
         // For a normalized position (0.0 to 1.0) spanning file_length_frames:
@@ -1047,8 +1095,14 @@ impl Grain {
         self.window_phase += self.window_increment;
         self.samples_remaining = self.samples_remaining.saturating_sub(1);
 
-        // Wrap position to [0.0, 1.0] range (loop through file)
-        if self.position < 0.0 {
+        // Wrap position within loop range, or globally to [0.0, 1.0]
+        if let Some((loop_start, loop_end)) = self.loop_range {
+            let loop_len = loop_end - loop_start;
+            if loop_len > 0.0 {
+                self.position =
+                    loop_start + (self.position - loop_start).rem_euclid(loop_len);
+            }
+        } else if self.position < 0.0 {
             self.position += 1.0;
         } else if self.position > 1.0 {
             self.position -= 1.0;

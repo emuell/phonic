@@ -42,10 +42,7 @@ mod voice;
 use modulation::SamplerModulationState;
 use voice::SamplerVoice;
 
-pub use granular::{
-    GrainOverlapMode, GrainPlaybackDirection, GrainPlayheadMode, GrainWindowMode,
-    GranularParameters,
-};
+pub use granular::{GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -309,17 +306,11 @@ impl Sampler {
         GrainPlaybackDirection::VARIANTS,
         GrainPlaybackDirection::Forward as usize,
     );
-    pub const GRAIN_PLAYHEAD_MODE: EnumParameter = EnumParameter::new(
-        FourCC(*b"GPHM"),
-        "Playhead Mode",
-        GrainPlayheadMode::VARIANTS,
-        GrainPlayheadMode::Manual as usize,
-    );
     pub const GRAIN_POSITION: FloatParameter =
         FloatParameter::new(FourCC(*b"GPOS"), "Position", 0.0..=1.0, 0.5);
 
-    pub const GRAIN_SPEED: FloatParameter =
-        FloatParameter::new(FourCC(*b"GSPD"), "Speed", 0.001..=4.0, 1.0).with_unit("x");
+    pub const GRAIN_STEP: FloatParameter =
+        FloatParameter::new(FourCC(*b"GSTP"), "Step", -4.0..=4.0, 0.0).with_unit("x");
 
     // Granular playback parameters
     pub fn granular_parameters() -> Vec<Box<dyn Parameter>> {
@@ -346,11 +337,10 @@ impl Sampler {
                 .with_display(percent_to_string, string_to_percent)
                 .into_box(),
             Self::GRAIN_PLAYBACK_DIR.into_box(),
-            Self::GRAIN_PLAYHEAD_MODE.into_box(),
             Self::GRAIN_POSITION
                 .with_display(percent_to_string, string_to_percent)
                 .into_box(),
-            Self::GRAIN_SPEED.into_box(),
+            Self::GRAIN_STEP.into_box(),
         ]
     }
 
@@ -401,20 +391,13 @@ impl Sampler {
                 enum_value.apply_update(value);
                 params.playback_direction = enum_value.value();
             }
-            _ if id == Self::GRAIN_PLAYHEAD_MODE.id() => {
-                let mut enum_value = EnumParameterValue::<GrainPlayheadMode>::from_description(
-                    Self::GRAIN_PLAYHEAD_MODE,
-                );
-                enum_value.apply_update(value);
-                params.playhead_mode = enum_value.value();
-            }
             _ if id == Self::GRAIN_POSITION.id() => {
                 let position = Sampler::parameter_update_value(value, &Self::GRAIN_POSITION)?;
-                params.manual_position = position;
+                params.position = position;
             }
-            _ if id == Self::GRAIN_SPEED.id() => {
-                let speed = Sampler::parameter_update_value(value, &Self::GRAIN_SPEED)?;
-                params.playhead_speed = speed;
+            _ if id == Self::GRAIN_STEP.id() => {
+                let step = Sampler::parameter_update_value(value, &Self::GRAIN_STEP)?;
+                params.step = step;
             }
             _ => {
                 return Err(Error::ParameterError(format!(
@@ -487,7 +470,7 @@ impl Sampler {
                 ModulationTarget::new(Self::GRAIN_SPRAY.id(), Self::GRAIN_SPRAY.name()),
                 ModulationTarget::new(Self::GRAIN_PAN_SPREAD.id(), Self::GRAIN_PAN_SPREAD.name()),
                 ModulationTarget::new(Self::GRAIN_POSITION.id(), Self::GRAIN_POSITION.name()),
-                ModulationTarget::new(Self::GRAIN_SPEED.id(), Self::GRAIN_SPEED.name()),
+                ModulationTarget::new(Self::GRAIN_STEP.id(), Self::GRAIN_STEP.name()),
             ],
         }
     }
@@ -810,6 +793,7 @@ impl Sampler {
             self.base_volume,
             self.base_panning,
             &self.envelope_parameters,
+            &self.granular_parameters,
             context,
         );
 
@@ -1182,9 +1166,8 @@ impl Generator for Sampler {
                 || id == Sampler::GRAIN_SPRAY.id()
                 || id == Sampler::GRAIN_PAN_SPREAD.id()
                 || id == Sampler::GRAIN_PLAYBACK_DIR.id()
-                || id == Sampler::GRAIN_PLAYHEAD_MODE.id()
                 || id == Sampler::GRAIN_POSITION.id()
-                || id == Sampler::GRAIN_SPEED.id() =>
+                || id == Sampler::GRAIN_STEP.id() =>
             {
                 if let Some(params) = &mut self.granular_parameters {
                     return Self::apply_granular_playback_parameter_update(id, value, params);
