@@ -174,6 +174,101 @@ pub fn max_abs_sample_with_simd<S: Simd>(simd: S, buffer: &[f32]) -> f32 {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Remaps interleaved audio between channel layouts.
+///
+/// Mono sources are expanded to stereo; stereo+ sources are mixed down
+/// to mono when needed. Extra output channels are zeroed.
+///
+/// Note: Frame counts of input and output buffers must be equal!
+pub fn remap_buffer_channels(
+    input: &[f32],
+    input_channels: usize,
+    mut output: &mut [f32],
+    output_channels: usize,
+) {
+    assert!(input_channels > 0, "Input channel count must be > 0");
+    assert!(output_channels > 0, "Output channel count must be > 0");
+
+    debug_assert!(
+        input.len().is_multiple_of(input_channels),
+        "Input buffer length ({}) must be divisible by input channels ({input_channels})",
+        input.len(),
+    );
+    debug_assert!(
+        output.len().is_multiple_of(output_channels),
+        "Output buffer length ({}) must be divisible by output channels ({output_channels})",
+        output.len(),
+    );
+    debug_assert!(
+        input.len() / input_channels == output.len() / output_channels,
+        "Frame count mismatch: input has {} frames, output has {} frames",
+        input.len() / input_channels,
+        output.len() / output_channels,
+    );
+
+    match (input_channels, output_channels) {
+        // mono to stereo: expand
+        (1, 2) => {
+            let input_frames = input.as_frames::<1>();
+            let output_frames = output.as_frames_mut::<2>();
+            for (i, o) in input_frames.iter().zip(output_frames) {
+                o[0] = i[0];
+                o[1] = i[0];
+            }
+        }
+        // stereo to mono: mix down
+        (2, 1) => {
+            let input_frames = input.as_frames::<2>();
+            let output_frames = output.as_frames_mut::<1>();
+            for (i, o) in input_frames.iter().zip(output_frames) {
+                o[0] = (i[0] + i[1]) / 2.0;
+            }
+        }
+        // no remapping needed: just copy
+        (input_channels, output_channels) if input_channels == output_channels => {
+            copy_buffers(output, input);
+        }
+        // everything else
+        (input_channels, output_channels) => {
+            match input_channels {
+                1 => {
+                    // expand mono to first two channels, zero remaining channels
+                    let input_frames = input.as_frames::<1>();
+                    let output_frames = output.chunks_exact_mut(output_channels);
+                    for (i, o) in input_frames.iter().zip(output_frames) {
+                        o[0] = i[0];
+                        o[1] = i[0];
+                        o[2..].fill(0.0);
+                    }
+                }
+                _ => {
+                    let input_frames = input.chunks_exact(input_channels);
+                    match output_channels {
+                        1 => {
+                            // mix down the first two channels, ignore other input channels
+                            let output_frames = output.as_frames_mut::<1>();
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = (i[0] + i[1]) / 2.0;
+                            }
+                        }
+                        _ => {
+                            // copy first two channels, zero remaining output channels
+                            let output_frames = output.chunks_exact_mut(output_channels);
+                            for (i, o) in input_frames.zip(output_frames) {
+                                o[0] = i[0];
+                                o[1] = i[1];
+                                o[2..].fill(0.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Provides safe and efficient methods to access interleaved audio data, such as iterating over
 /// frames or individual channels, without needing to perform manual index calculations.
 /// It is implemented for common buffer types like `&[f32]` and `Vec<f32>`.

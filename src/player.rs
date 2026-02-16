@@ -23,6 +23,7 @@ use crate::{
         converted::ConvertedSource,
         file::FileSource,
         guarded::GuardedSource,
+        mapped::ChannelMappedSource,
         measured::{CpuLoad, MeasuredSource, SharedMeasurementState},
         mixed::{
             EffectProcessor, MixedSource, MixerMessage, SubMixerProcessor, SubMixerThreadPool,
@@ -123,6 +124,14 @@ struct PlayerEffectInfo {
 /// This allows configuring optional features like parallel mixer processing.
 #[derive(Debug, Clone)]
 pub struct PlayerConfig {
+    /// Whether the player's mixer runs in stereo, regardless of the output device's channel layout.
+    /// The final stereo mix is then remapped to the device's channel count (e.g. expanded to
+    /// surround by duplicating the first two channels, or mixed down to mono).
+    ///
+    /// Enabled by default, so effects and generators can assume a stereo layout without needing
+    /// to handle arbitrary channel counts.
+    pub enforce_stereo_playback: bool,
+
     /// Whether concurrent mixer graph processing is enabled.
     ///
     /// Even when enabled, the player will automatically fall back to sequential processing
@@ -150,9 +159,16 @@ impl PlayerConfig {
     /// Create a new default player configuration.
     pub fn new() -> Self {
         Self {
+            enforce_stereo_playback: true,
             concurrent_processing: true,
             concurrent_worker_threads: None,
         }
+    }
+
+    /// Set if stereo playback is enforced.
+    pub fn enforce_stereo_playback(mut self, enabled: bool) -> Self {
+        self.enforce_stereo_playback = enabled;
+        self
     }
 
     /// Set if parallel mixing is enabled.
@@ -197,6 +213,7 @@ impl PlayerConfig {
 /// to a specific sub-mixer. This allows for parallel processing paths, such as applying different
 /// effects to different groups of sounds.
 pub struct Player {
+    config: PlayerConfig,
     output_device: Box<dyn OutputDevice>,
     playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
     playback_status_sender: SyncSender<PlaybackStatusEvent>,
@@ -253,8 +270,14 @@ impl Player {
         Self::handle_drop_collects(collector, collector_running.clone());
 
         // Create a mixer source and add it to the audio sink
-        let mut main_mixer =
-            MixedSource::new(output_device.channel_count(), output_device.sample_rate());
+        let mut main_mixer = MixedSource::new(
+            if config.enforce_stereo_playback {
+                2
+            } else {
+                output_device.channel_count()
+            },
+            output_device.sample_rate(),
+        );
 
         // Create thread pool main mixer
         let thread_pool = (config.concurrent_processing
@@ -297,10 +320,18 @@ impl Player {
             Arc::clone(&main_mixer_panic_handler),
         );
 
-        // assign the wrapped main mixer as sink source
-        output_device.play(guarded_main_mixer.into_box());
+        // Assign the wrapped main mixer as sink source
+        if config.enforce_stereo_playback && output_device.channel_count() != 2 {
+            // Map the main mixer's enforced stereo output to the output device's channel layout
+            let channel_mapped_source =
+                ChannelMappedSource::new(guarded_main_mixer, output_device.channel_count());
+            output_device.play(channel_mapped_source.into_box());
+        } else {
+            output_device.play(guarded_main_mixer.into_box());
+        }
 
         Self {
+            config,
             output_device,
             playing_sources,
             playback_status_sender,
@@ -313,28 +344,30 @@ impl Player {
         }
     }
 
-    /// Our audio device's suspended state.
+    /// True when the output device is currently suspended,
+    /// e.g. because the app which drives the audio stream is hidden.
     pub fn output_suspended(&self) -> bool {
         self.output_device.is_suspended()
     }
 
-    /// Our audio device's actual sample rate.
+    /// Our main mixers sample rate.
     pub fn output_sample_rate(&self) -> u32 {
         self.output_device.sample_rate()
     }
-    /// Our audio device's actual sample channel count.
+    /// Our main mixer's sample channel count.
     pub fn output_channel_count(&self) -> usize {
-        self.output_device.channel_count()
+        if self.config.enforce_stereo_playback {
+            2
+        } else {
+            self.output_device.channel_count()
+        }
     }
-    /// Our actual playhead pos in samples (NOT sample frames)
-    pub fn output_sample_position(&self) -> u64 {
-        self.output_device.sample_position()
-    }
+
     /// Our actual playhead pos in sample frames
     pub fn output_sample_frame_position(&self) -> u64 {
-        let channel_count = self.output_channel_count();
+        let channel_count = self.output_device.channel_count();
         if channel_count > 0 {
-            self.output_sample_position() / channel_count as u64
+            self.output_device.sample_position() / channel_count as u64
         } else {
             0
         }
@@ -430,8 +463,8 @@ impl Player {
         // convert file to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             file_source,
-            self.output_device.channel_count(),
-            self.output_device.sample_rate(),
+            self.output_channel_count(),
+            self.output_sample_rate(),
             ResamplingQuality::Default,
         );
         // apply volume options
@@ -523,8 +556,8 @@ impl Player {
         // convert synth to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             synth_source,
-            self.output_device.channel_count(),
-            self.output_device.sample_rate(),
+            self.output_channel_count(),
+            self.output_sample_rate(),
             ResamplingQuality::Default, // usually unused
         );
         // apply volume options
@@ -948,8 +981,8 @@ impl Player {
         // convert generator to mixer's rate and channel layout
         let converted_source = ConvertedSource::new(
             generator,
-            self.output_device.channel_count(),
-            self.output_device.sample_rate(),
+            self.output_channel_count(),
+            self.output_sample_rate(),
             ResamplingQuality::Default,
         );
         // apply volume options

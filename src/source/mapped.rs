@@ -1,4 +1,6 @@
-use super::{Source, SourceTime};
+use crate::utils::buffer::remap_buffer_channels;
+
+use super::{mixed::MixedSource, Source, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -15,13 +17,16 @@ impl<InputSource: Source + 'static> ChannelMappedSource<InputSource> {
     where
         InputSource: Source,
     {
-        const BUFFER_SIZE: usize = 256;
         let input_channels = source.channel_count();
+        assert!(input_channels != 0, "Input channel count must be > 0");
+        assert!(output_channels != 0, "Output channel count must be > 0");
+
+        let buffer_size = MixedSource::MAX_MIX_BUFFER_SAMPLES / output_channels * input_channels;
         Self {
             source,
             input_channels,
             output_channels,
-            input_buffer: vec![0.0; BUFFER_SIZE * input_channels],
+            input_buffer: vec![0.0; buffer_size],
         }
     }
 
@@ -54,7 +59,10 @@ impl<InputSource: Source + 'static> Source for ChannelMappedSource<InputSource> 
     }
 
     fn write(&mut self, output: &mut [f32], time: &SourceTime) -> usize {
-        if !output.is_empty() {
+        if output.is_empty() || self.input_channels == self.output_channels {
+            // no mapping needed, or pass empty buffers as they are to process messages only
+            self.source.write(output, time)
+        } else {
             let mut total_written = 0;
             while total_written < output.len() {
                 // read as much input as we can to fill the entire output
@@ -73,63 +81,20 @@ impl<InputSource: Source + 'static> Source for ChannelMappedSource<InputSource> 
                 }
 
                 // convert
-                let input = &self.input_buffer[..written];
-                let target = &mut output[total_written
+                let chunk_input = &self.input_buffer[..written];
+                let chunk_output = &mut output[total_written
                     ..total_written + (written / self.input_channels) * self.output_channels];
 
-                let input_frames = input.chunks_exact(self.input_channels);
-                let output_frames = target.chunks_exact_mut(self.output_channels);
-                total_written += match self.input_channels {
-                    1 => {
-                        match self.output_channels {
-                            1 => {
-                                let mut written = 0_usize;
-                                for (i, o) in input_frames.zip(output_frames) {
-                                    o[0] = i[0];
-                                    written += 1;
-                                }
-                                written
-                            }
-                            c => {
-                                let mut written = 0_usize;
-                                for (i, o) in input_frames.zip(output_frames) {
-                                    o[0] = i[0];
-                                    o[1] = i[0];
-                                    // Assume the rest is is implicitly silence.
-                                    written += c;
-                                }
-                                written
-                            }
-                        }
-                    }
-                    _ => {
-                        match self.output_channels {
-                            1 => {
-                                let mut written = 0_usize;
-                                for (i, o) in input_frames.zip(output_frames) {
-                                    o[0] = i[0];
-                                    written += 1;
-                                }
-                                written
-                            }
-                            c => {
-                                let mut written = 0_usize;
-                                for (i, o) in input_frames.zip(output_frames) {
-                                    o[0] = i[0];
-                                    o[1] = i[1];
-                                    // Assume the rest is is implicitly silence.
-                                    written += c;
-                                }
-                                written
-                            }
-                        }
-                    }
-                }
+                remap_buffer_channels(
+                    chunk_input,
+                    self.input_channels,
+                    chunk_output,
+                    self.output_channels,
+                );
+
+                total_written += chunk_output.len();
             }
             total_written
-        } else {
-            // pass empty buffers as they are, to process messages only
-            self.source.write(output, time)
         }
     }
 }
