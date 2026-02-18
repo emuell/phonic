@@ -94,7 +94,7 @@ impl Sampler {
     pub const PANNING: FloatParameter =
         FloatParameter::new(FourCC(*b"SPAN"), "Panning", -1.0..=1.0, 0.0);
 
-    // Base sampler parameters
+    /// Base sampler parameter descriptors (transpose, finetune, volume, panning).
     pub fn base_parameters() -> Vec<Box<dyn Parameter>> {
         let gain_to_string = |v: f32| {
             let db = linear_to_db(v);
@@ -206,7 +206,7 @@ impl Sampler {
     .with_scaling(ParameterScaling::Exponential(2.0))
     .with_unit("s");
 
-    // Amplitude envelope parameters
+    /// AHDSR envelope parameter descriptors.
     pub fn envelope_parameters() -> Vec<Box<dyn Parameter>> {
         vec![
             Self::AMP_ATTACK.into_box(),
@@ -218,10 +218,10 @@ impl Sampler {
     }
 
     /// Apply given [ParameterValueUpdate] to an [AhdsrParameters] object.
-    pub fn apply_envelope_parameter_update(
+    pub fn set_envelope_parameter(
+        params: &mut AhdsrParameters,
         id: FourCC,
         value: &ParameterValueUpdate,
-        params: &mut AhdsrParameters,
     ) -> Result<(), Error> {
         match id {
             _ if id == Self::AMP_ATTACK.id() => {
@@ -312,7 +312,7 @@ impl Sampler {
     pub const GRAIN_STEP: FloatParameter =
         FloatParameter::new(FourCC(*b"GSTP"), "Step", -4.0..=4.0, 0.0).with_unit("x");
 
-    // Granular playback parameters
+    /// Granular playback parameter descriptors.
     pub fn granular_parameters() -> Vec<Box<dyn Parameter>> {
         let percent_to_string = |v: f32| format!("{:.1} %", v * 100.0);
         let string_to_percent = |s: &str| {
@@ -345,10 +345,10 @@ impl Sampler {
     }
 
     /// Apply given [ParameterValueUpdate] to a [GranularParameters] object.
-    pub fn apply_granular_playback_parameter_update(
+    pub fn set_granular_parameter(
+        params: &mut GranularParameters,
         id: FourCC,
         value: &ParameterValueUpdate,
-        params: &mut GranularParameters,
     ) -> Result<(), Error> {
         match id {
             _ if id == Self::GRAIN_OVERLAP_MODE.id() => {
@@ -1154,7 +1154,7 @@ impl Generator for Sampler {
                 || id == Sampler::AMP_RELEASE.id() =>
             {
                 if let Some(params) = &mut self.envelope_parameters {
-                    return Self::apply_envelope_parameter_update(id, value, params);
+                    return Self::set_envelope_parameter(params, id, value);
                 }
             }
             // Granular parameters
@@ -1170,7 +1170,7 @@ impl Generator for Sampler {
                 || id == Sampler::GRAIN_STEP.id() =>
             {
                 if let Some(params) = &mut self.granular_parameters {
-                    return Self::apply_granular_playback_parameter_update(id, value, params);
+                    return Self::set_granular_parameter(params, id, value);
                 }
             }
             // Modulation Parameters

@@ -99,7 +99,7 @@ impl SamplerVoice {
     }
 
     #[inline]
-    /// Sample frame time when voice started its release mode.
+    /// Returns true if the voice is currently in its release stage.
     pub fn in_release_stage(&self) -> bool {
         self.envelope.stage() == AhdsrStage::Release
     }

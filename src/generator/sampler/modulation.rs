@@ -233,7 +233,7 @@ impl SamplerVoiceModulationState {
         );
     }
 
-    /// Get referneces to the last processed modulation output.
+    /// Get references to the last processed modulation output.
     pub fn output<'a>(&'a self, frame_count: usize) -> GranularParameterModulation<'a> {
         GranularParameterModulation {
             size: &self.size[..frame_count],
