@@ -7,45 +7,43 @@ phonic
 
 phonic is a cross-platform audio playback and DSP library for Rust. It provides a flexible, low-latency audio engine and DSP tools for desktop and web-based music application development.
 
-Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic was created to provide precise playback position monitoring - a feature lacking in other Rust audio libraries at the time. It is now also used in the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns) as the default sample playback engine.
+Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic was created to provide precise playback position monitoring - a feature lacking in other Rust audio libraries at the time. It is now used in the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns) as example playback engine and related audio projects.
 
 > [!NOTE]
 > phonic has not yet reached a stable version, so expect breaking changes.
 
 ### Features
 
-- **Cross-Platform Audio Playback**:
-  - Play audio on Windows, macOS, and Linux via [cpal](https://github.com/RustAudio/cpal).
-  - WebAssembly support for in-browser audio via [emscripten](https://emscripten.org/).
-  - WAV file output for rendering computed audio to a file instead of playing it back.
+- Cross-Platform Audio Output
+  - Play audio on **Windows, macOS, Linux** thanks to [CPAL](https://github.com/RustAudio/cpal).
+  - Play on the web via **WebAssembly** and [Emscripten](https://emscripten.org/).
+  - WAV file output for rendering audio to files thanks to [Hound](https://github.com/ruuda/hound).
 
-- **Flexible Audio Source Handling**:
-  - Play, seek, stop, and mix **preloaded** (buffered) or **streamed** (on-the-fly decoded) audio files.
-  - Support for most common audio formats through [Symphonia](https://github.com/pdeljanov/Symphonia).
-  - Seamless loop playback using loop points from WAV and FLAC files.
+- Audio File Decoding and Playback
+  - Support for most common **audio formats** via [Symphonia](https://github.com/pdeljanov/Symphonia).
   - Automatic resampling and channel mapping via a fast custom resampler and [Rubato](https://github.com/HEnquist/rubato).
+  - Play audio files **preloaded** (buffered) or **streamed** (on-the-fly decoded).
+  - Custom WAV and FLAC file parser to enable looped file playback.
 
-- **Advanced Playback Control**:
-  - Sample-precise **scheduling** of playback events for accurate sequencing.
-  - Real-time **monitoring** of playback position and status for GUI integration.
-  - Dynamic control over volume, panning, and playback speed via `Sync` + `Send` playback handles.
+- Event Scheduling, Sequencing
+  - Thread-safe **`Send + Sync`** handles for controlling playback and parameters from any thread.
+  - Sample-precise scheduling of playback events for accurate sequencing.
+  
+- Sampler and Synthesizer Tooling
+  - Built in polyphonic **sampler** with optional AHDSR envelopes, granular synthesis and glide/portamento.
+  - Create **custom synths** from scratch, or with style and fun via the optional [FunDSP](https://github.com/SamiPerttu/fundsp) integration.
+  - Dynamically route a predefined **modulation** source set (LFOs, Envelopes...) to generators.
 
-- **Custom Synthesis and DSPs**:
-  - Play preloaded sample files via a basic **sampler**.
-  - Play custom-built **synthesizers** or one-shot synth sounds using the optional [fundsp](https://github.com/SamiPerttu/fundsp) feature.
-  - Apply custom-built or use built-in **DSP effects**: gain, filter, eq, reverb, chorus, compressor, limiter, distortion.
-  - Build simple or complex **DSP graphs** by routing audio through optional sub-mixers.
-  - Sub-mixers are automatically processed concurrently across worker threads for improved performance.
-  - DSP effects are automatically bypassed to save CPU cycles when they receive no audible input.
+- DSP Effects and Mixer Graphs
+  - Built-in **DSP effects**: gain, filter, 5-band EQ, reverb, chorus, compressor, limiter, distortion.
+  - Create custom effects or build **DSP graphs** by routing audio through nested sub-mixers.
+  - **DSP parameter** abstraction with normalized or raw value updates, scaling, smoothing, and string formatting.
+  - Sub-mixers are by default processed **concurrently** across multiple audio worker threads.
+  - Effect chains **auto-bypass** when receiving silence to save CPU.
 
-- **Performance Monitoring**:
-  - Measure the CPU load of the main mixer and individual audio sources in real-time.
-  - Access average and peak load metrics to identify performance bottlenecks.
-
-- **Concurrent Processing**:
-  - Automatically distribute the main mixer's sub-mixers across multiple audio worker threads.
-  - Enabled by default with a runtime fallback to sequential processing for simple graphs.
-  - Configure via `PlayerConfig` to disable or use custom thread counts.
+- Playback Monitoring
+  - Real-time average and peak CPU load metrics for the mixer and individual sub-mixers.
+  - Monitoring of file and generator playback positions for GUI integration.
 
 ### Documentation
 
@@ -57,8 +55,7 @@ See [/examples](https://github.com/emuell/phonic/tree/master/examples) directory
 
 #### File Playback with Monitoring
 
-Play, seek, and stop audio files on the default audio output device.
-Monitor playback status of playing files.
+Play audio files on the default audio output device. Monitor playback status of files.
 
 ```rust no_run
 use std::{time::Duration, sync::mpsc::sync_channel};
@@ -71,21 +68,15 @@ use phonic::{
 fn main() -> Result<(), Error> {
     // Create a player with the default output device and a channel to receive playback events.
     let (playback_status_sender, playback_status_receiver) = sync_channel(32);
-    let mut player = Player::new(DefaultOutputDevice::open()?, playback_status_sender);
+    let mut player = Player::new(DefaultOutputDevice::open()?, Some(playback_status_sender));
 
-    // Start playing a file: The file below is going to be "preloaded" because it uses the
-    // default playback options. Preloaded means it's entirely decoded first, then played back
-    // from a decoded buffer. All files played through the player are automatically resampled
-    // and channel-mapped to match the audio output's signal specs.
-    // Preloaded files can also be cheaply cloned, so they can be allocated once and played back
-    // many times too. The returned handle allows changing playback properties of the files.
+    // Start playing a file with default options: preloads the file into RAM, enables loop playback
+    // when loop point chunks are present in the file and uses default resampling options.
     let small_file = player.play_file(
         "PATH_TO/some_small_file.wav",
         FilePlaybackOptions::default())?;
 
-    // The next file is going to be decoded and streamed on the fly, which is especially handy
-    // for long files, as it can start playing right away and won't need to allocate memory
-    // for the entire file.
+    // Playback options allow configuring loop, streaming, resampling and other properties.
     let long_file = player.play_file(
         "PATH_TO/some_long_file.mp3",
         FilePlaybackOptions::default()
@@ -95,12 +86,12 @@ fn main() -> Result<(), Error> {
             .repeat(2),
     )?;
 
-    // You can optionally track playback status events from the player.
+    // Optionally track playback status events from the player.
     std::thread::spawn(move || {
         while let Ok(event) = playback_status_receiver.recv() {
             match event {
                 PlaybackStatusEvent::Position { id, path, context: _, position } => {
-                    // `context` is an optional, user-defined payload, which can be passed
+                    // NB: `context` is an optional, user-defined payload, which can be passed
                     // along to the status with `player.play_file_with_context`
                     println!("Playback pos of source #{id} '{path}': {pos}",
                         pos = position.as_secs_f32()
@@ -190,16 +181,15 @@ fn main() -> Result<(), Error> {
     let generator = player.play_generator(
         Sampler::from_file(
             "path/to/some_sample.wav",
-            None,
-            GeneratorPlaybackOptions::default().target_mixer(sub_mixer.id())
+            GeneratorPlaybackOptions::default().target_mixer(chorus_mixer.id()),
             player.output_channel_count(),
             player.output_sample_rate(),
         )?,
         None
     )?;
     
-    // Trigger a note on the generator. The `generator` handle is `Send + Sync`, so
-    // you could also pass it to some other thread (e.g. a MIDI thread) to trigger
+    // Trigger a note on the generator. The `generator` handle is `Send + Sync` as well,
+    // so you could also pass it to some other thread (e.g. a MIDI thread) to trigger
     // the generator from there.
     generator.note_on(60, Some(1.0f32), None, None)?;
 
