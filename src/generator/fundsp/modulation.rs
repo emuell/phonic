@@ -156,7 +156,7 @@ impl FunDspModulationState {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Sampler modulation state within a FunDspVoice. Holds and processes the modulation matrix.
+/// Modulation state within a FunDspVoice. Holds and processes the modulation matrix.
 pub(crate) struct FunDSpModulationVoiceState {
     matrix: ModulationMatrix,
     shared_buffers: HashMap<FourCC, SharedBuffer>,

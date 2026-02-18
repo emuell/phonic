@@ -12,7 +12,7 @@ use crate::{
 
 /// A generator source which does not produce any samples and ignores all events.
 ///
-/// Can be useful when a temorary placeholder generator is needed.
+/// Can be useful when a temporary placeholder generator is needed.
 #[derive(Debug, Clone)]
 pub struct EmptyGenerator {
     is_transient: bool,

@@ -217,6 +217,11 @@ impl<const N: usize> GrainWindow<N> {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Static, shared lookup table for the envelope window modes
+static GRAIN_WINDOW_LUT: LazyLock<GrainWindow<2048>> = LazyLock::new(GrainWindow::new);
+
+// -------------------------------------------------------------------------------------------------
+
 /// Modulation buffers for block-based parameter modulation.
 /// Contains pre-computed modulation values for a block of samples.
 pub(crate) struct GranularParameterModulation<'a> {
@@ -332,17 +337,11 @@ impl GranularParameters {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Manages granular synthesis playback by spawning and mixing up to `POOL_SIZE` concurrent grains.
+/// Fixed-size pool and playback manager of up to `POOL_SIZE` pre-allocated, reusable [Grain]
+/// instances.
 ///
-/// Each grain is a short windowed segment of audio with its own position, pitch, and envelope.
-/// New grains are triggered at a rate determined by [GranularParameters::grain_density_hz],
-/// with their start positions controlled by the playhead mode:
-/// - [GrainPlayheadMode::Manual]: All grains spawn around a fixed position
-/// - [GrainPlayheadMode::PlayThrough]: Grains spawn from an advancing playhead
-///
-/// The pool reuses inactive [Grain] instances to avoid allocations during real-time processing.
-/// Active grains are processed in parallel each sample, reading from the source buffer and
-/// mixing their output with sine-windowed envelopes applied.
+/// Grains are triggered at a rate set by [GranularParameters]'s `density`, and spawn around a
+/// fixed `position` or from an advancing playhead (when `step` is non-zero).
 pub(crate) struct GrainPool<const POOL_SIZE: usize> {
     /// Current overlap mode (Cloud or Sequential).
     overlap_mode: GrainOverlapMode,
@@ -376,9 +375,6 @@ pub(crate) struct GrainPool<const POOL_SIZE: usize> {
     /// Random number generator for spray and pan spread variations.
     rng: SmallRng,
 }
-
-/// Static, shared lookup table for the envelope window modes
-static GRAIN_WINDOW_LUT: LazyLock<GrainWindow<2048>> = LazyLock::new(GrainWindow::new);
 
 impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
     /// Minimum envelope amplitude threshold below which grains are skipped.
@@ -576,11 +572,8 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         // When playing in loop, fold modulated position into loop range
         if self.playing_loop_range {
             if let Some((loop_start, loop_end)) = self.sample_loop_range {
-                grain_position = Self::fold_into_loop_range(
-                    grain_position,
-                    loop_start as f64,
-                    loop_end as f64,
-                );
+                grain_position =
+                    Self::fold_into_loop_range(grain_position, loop_start as f64, loop_end as f64);
             }
         }
         // either way ensure it's always valid
@@ -957,7 +950,7 @@ struct GrainOutput {
 
 /// Represents a single grain of audio.
 ///
-/// A grain is a short burst of audio with a smooth sine-based amplitude envelope.
+/// A grain is a short burst of audio with a configurable amplitude envelope.
 /// Grains are spawned at regular intervals (density) and processed in parallel,
 /// allowing for polyphonic granular synthesis effects.
 #[derive(Debug, Clone, Copy)]
@@ -1099,8 +1092,7 @@ impl Grain {
         if let Some((loop_start, loop_end)) = self.loop_range {
             let loop_len = loop_end - loop_start;
             if loop_len > 0.0 {
-                self.position =
-                    loop_start + (self.position - loop_start).rem_euclid(loop_len);
+                self.position = loop_start + (self.position - loop_start).rem_euclid(loop_len);
             }
         } else if self.position < 0.0 {
             self.position += 1.0;
