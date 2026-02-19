@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.15.0 - 2025/02/19
+
+- add concurrent sub-mixer processing using a new channel-synced audio worker thread pool impl
+- add options to `Player` and a new `new_with_config` function to configure concurrent processing
+- add optional granular sample playback to `Sampler` (enabled with the `with_granular` builder function)
+- [breaking] removed optional envelope parameter from `Sampler` (use the `with_ahdsr` builder function) 
+- add basic volume, panning, transpose and finetune parameters to `Sampler`
+- add optional parameter modulation support to the `Generator` trait
+- add modulation matrix impls for `Sampler` (for granular parameters only) and `FunDspGenerator` (flexible)
+- add new `play-grains` and `play-multi-threaded` examples
+- correctly handle `nan` values in parameter string formatters 
+- update emscripten example to test and showcase new synth generator modulation system
+
 ## v0.14.0 - 2025/01/14
 
 - [breaking] replaced dasp with fundsp
