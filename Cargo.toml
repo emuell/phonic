@@ -60,7 +60,7 @@ fundsp = { version = "^0.23", optional = true, default-features = false, feature
 ] }
 cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
-bungee-rs = { version = "^0.1", optional = true }
+bungee-rs = { version = "^0.2", optional = true }
 signalsmith-stretch = { version = "^0.1", optional = true }
 
 # Target specific dependencies
