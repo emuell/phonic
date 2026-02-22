@@ -84,9 +84,8 @@ impl Effect for DcFilterEffect {
 
         self.filters.clear();
         for _ in 0..channel_count {
-            let mut filter = DcFilter::new();
-            filter.init(sample_rate, self.mode.value());
-            self.filters.push(filter);
+            self.filters
+                .push(DcFilter::new(sample_rate, self.mode.value()));
         }
         Ok(())
     }
@@ -123,7 +122,7 @@ impl Effect for DcFilterEffect {
             }
         }
         for filter in &mut self.filters {
-            filter.init(self.sample_rate, self.mode.value());
+            filter.set_mode(self.mode.value(), self.sample_rate);
         }
         Ok(())
     }
