@@ -17,6 +17,16 @@ pub enum DcFilterMode {
     Fast,
 }
 
+impl DcFilterMode {
+    fn hz(&self) -> f64 {
+        match self {
+            DcFilterMode::Slow => 1.0,
+            DcFilterMode::Default => 5.0,
+            DcFilterMode::Fast => 20.0,
+        }
+    }
+}
+
 // -------------------------------------------------------------------------------------------------
 
 /// DC blocker filter based on a one-pole high-pass filter.
@@ -28,23 +38,37 @@ pub struct DcFilter {
     r: f64,  // coefficient
 }
 
-impl DcFilter {
+impl Default for DcFilter {
     /// Create a new DC filter with a default cutoff.
-    pub fn new() -> Self {
+    fn default() -> Self {
         Self {
             y1: 0.0,
             x1: 0.0,
             r: 0.999,
         }
     }
+}
 
-    pub fn init(&mut self, sample_rate: u32, mode: DcFilterMode) {
-        let amount_coef = match mode {
-            DcFilterMode::Slow => 1.0,
-            DcFilterMode::Default => 5.0,
-            DcFilterMode::Fast => 20.0,
-        };
-        self.r = 1.0 - (std::f64::consts::TAU * (amount_coef / sample_rate as f64));
+impl DcFilter {
+    /// Create a new DC filter with a default cutoff.
+    pub fn new(sample_rate: u32, mode: DcFilterMode) -> Self {
+        let r = 1.0 - (std::f64::consts::TAU * mode.hz() / sample_rate as f64);
+        Self {
+            y1: 0.0,
+            x1: 0.0,
+            r,
+        }
+    }
+
+    /// Reset filter buffers
+    pub fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.y1 = 0.0;
+    }
+
+    /// Change DC filter mode
+    pub fn set_mode(&mut self, mode: DcFilterMode, sample_rate: u32) {
+        self.r = 1.0 - (std::f64::consts::TAU * mode.hz() / sample_rate as f64);
     }
 
     /// Process helper function that calls `process_sample` for each sample in a buffer
@@ -61,11 +85,5 @@ impl DcFilter {
         self.y1 = sample - self.x1 + self.r * self.y1;
         self.x1 = sample;
         self.y1
-    }
-}
-
-impl Default for DcFilter {
-    fn default() -> Self {
-        Self::new()
     }
 }
