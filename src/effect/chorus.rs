@@ -13,7 +13,7 @@ use crate::{
         buffer::InterleavedBufferMut,
         dsp::{
             delay::InterpolatedDelayLine,
-            filters::biquad::{BiquadFilter, BiquadFilterCoefficients, BiquadFilterType},
+            filters::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
             lfo::{Lfo, LfoWaveform},
         },
         smoothing::LinearSmoothedValue,
@@ -43,30 +43,7 @@ impl EffectMessage for ChorusEffectMessage {
 // -------------------------------------------------------------------------------------------------
 
 /// Filter type used in `ChorusEffect`.
-#[derive(
-    Default, Clone, Copy, PartialEq, strum::Display, strum::EnumString, strum::VariantNames,
-)]
-#[allow(unused)]
-pub enum ChorusEffectFilterType {
-    #[default]
-    None,
-    Lowpass,
-    Bandpass,
-    Bandstop,
-    Highpass,
-}
-
-impl From<ChorusEffectFilterType> for BiquadFilterType {
-    fn from(val: ChorusEffectFilterType) -> Self {
-        match val {
-            ChorusEffectFilterType::None => BiquadFilterType::Allpass,
-            ChorusEffectFilterType::Lowpass => BiquadFilterType::Lowpass,
-            ChorusEffectFilterType::Bandpass => BiquadFilterType::Bandpass,
-            ChorusEffectFilterType::Bandstop => BiquadFilterType::Notch,
-            ChorusEffectFilterType::Highpass => BiquadFilterType::Highpass,
-        }
-    }
-}
+pub type ChorusEffectFilterType = SvfFilterType;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -91,9 +68,9 @@ pub struct ChorusEffect {
     right_osc: Lfo,
     delay_buffer_left: InterpolatedDelayLine<1>,
     delay_buffer_right: InterpolatedDelayLine<1>,
-    filter_coefficients: BiquadFilterCoefficients,
-    filter_left: BiquadFilter,
-    filter_right: BiquadFilter,
+    filter_coefficients: SvfFilterCoefficients,
+    filter_left: SvfFilter,
+    filter_right: SvfFilter,
 }
 
 impl ChorusEffect {
@@ -105,6 +82,7 @@ impl ChorusEffect {
         0.01..=10.0,
         1.0, //
     )
+    .with_scaling(ParameterScaling::Exponential(2.0))
     .with_unit("Hz");
     pub const PHASE: FloatParameter = FloatParameter::new(
         FourCC(*b"phas"), //
@@ -145,22 +123,18 @@ impl ChorusEffect {
         FourCC(*b"fltt"),
         "Filter Type",
         ChorusEffectFilterType::VARIANTS,
-        0,
+        ChorusEffectFilterType::Lowpass as usize,
     );
     pub const FILTER_FREQ: FloatParameter = FloatParameter::new(
         FourCC(*b"fltf"),
         "Filter Freq",
         20.0..=20000.0,
-        400.0, //
+        20000.0, //
     )
     .with_unit("Hz")
     .with_scaling(ParameterScaling::Exponential(2.5));
-    pub const FILTER_Q: FloatParameter = FloatParameter::new(
-        FourCC(*b"fltq"),
-        "Filter Q",
-        0.001..=4.0,
-        0.707, //
-    );
+    pub const FILTER_RESONANCE: FloatParameter =
+        FloatParameter::new(FourCC(*b"fltq"), "Filter Resonance", 0.0..=1.0, 0.);
 
     const MAX_APPLIED_RANGE_IN_SAMPLES: f32 = 256.0;
     const MAX_APPLIED_DELAY_IN_MS: f32 = 100.0;
@@ -204,7 +178,7 @@ impl ChorusEffect {
             ),
             filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
             filter_freq: SmoothedParameterValue::from_description(Self::FILTER_FREQ),
-            filter_resonance: SmoothedParameterValue::from_description(Self::FILTER_Q),
+            filter_resonance: SmoothedParameterValue::from_description(Self::FILTER_RESONANCE),
 
             lfo_range: 0.0,
             current_phase: 0.0,
@@ -215,9 +189,9 @@ impl ChorusEffect {
             delay_buffer_left: InterpolatedDelayLine::default(),
             delay_buffer_right: InterpolatedDelayLine::default(),
 
-            filter_coefficients: BiquadFilterCoefficients::default(),
-            filter_left: BiquadFilter::default(),
-            filter_right: BiquadFilter::default(),
+            filter_coefficients: SvfFilterCoefficients::default(),
+            filter_left: SvfFilter::default(),
+            filter_right: SvfFilter::default(),
         }
     }
 
@@ -340,12 +314,11 @@ impl Effect for ChorusEffect {
         self.delay_buffer_left = InterpolatedDelayLine::new(max_buffer_size);
         self.delay_buffer_right = InterpolatedDelayLine::new(max_buffer_size);
 
-        self.filter_coefficients = BiquadFilterCoefficients::new(
-            self.filter_type.value().into(),
+        self.filter_coefficients = SvfFilterCoefficients::new(
+            self.filter_type.value(),
             sample_rate,
             self.filter_freq.target_value(),
-            self.filter_resonance.target_value() + 0.707,
-            1.0,
+            self.filter_resonance.target_value(),
         )?;
 
         self.reset();
@@ -375,14 +348,13 @@ impl Effect for ChorusEffect {
             let (filtered_left, filtered_right) =
                 if self.filter_freq.value_need_ramp() || self.filter_resonance.value_need_ramp() {
                     let cutoff = self.filter_freq.next_value();
-                    let q = self.filter_resonance.next_value() + 0.707;
+                    let resonance = self.filter_resonance.next_value();
                     self.filter_coefficients
                         .set(
-                            self.filter_type.value().into(),
+                            self.filter_type.value(),
                             self.sample_rate,
                             cutoff,
-                            q,
-                            0.0,
+                            resonance,
                         )
                         .expect("Failed to set chorus filter parameters");
                     let filtered_left = self
@@ -485,7 +457,7 @@ impl Effect for ChorusEffect {
             _ if id == Self::WET_MIX.id() => self.wet_mix.apply_update(value),
             _ if id == Self::FILTER_TYPE.id() => self.filter_type.apply_update(value),
             _ if id == Self::FILTER_FREQ.id() => self.filter_freq.apply_update(value),
-            _ if id == Self::FILTER_Q.id() => self.filter_resonance.apply_update(value),
+            _ if id == Self::FILTER_RESONANCE.id() => self.filter_resonance.apply_update(value),
             _ => {
                 return Err(Error::ParameterError(format!(
                     "Unknown parameter: '{id}' for effect '{}'",
@@ -496,7 +468,7 @@ impl Effect for ChorusEffect {
         match id {
             _ if id == Self::FILTER_TYPE.id() => self
                 .filter_coefficients
-                .set_filter_type(self.filter_type.value().into()),
+                .set_filter_type(self.filter_type.value()),
             _ => Ok(()),
         }
     }
