@@ -15,6 +15,7 @@ pub mod file;
 pub mod guarded;
 pub mod mapped;
 pub mod measured;
+pub mod metered;
 pub mod mixed;
 pub mod panned;
 pub mod resampled;

@@ -311,7 +311,7 @@ impl App {
 
     // Player's current average CPU load
     pub fn cpu_load(&self) -> f32 {
-        self.player.cpu_load().average
+        self.player.cpu_load().unwrap_or_default().average
     }
 
     // Set the active synth type

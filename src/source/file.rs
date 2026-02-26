@@ -70,7 +70,8 @@ pub struct FilePlaybackOptions {
     /// the source will be played on the given mixer instead of the default one.
     pub target_mixer: Option<MixerId>,
 
-    /// By default false. When true, measure the CPU load of the file source.
+    /// By default false. When true and CPU load measuring is enabled in the
+    /// [`PlayerConfig`](crate::PlayerConfig), measure the CPU load of the file source.
     /// CPU load can then be accessed via the source's playback handle.
     pub measure_cpu_load: bool,
 

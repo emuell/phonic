@@ -155,7 +155,8 @@ pub use parameter::{
 
 pub use source::{
     file::{FilePlaybackOptions, FileSource},
-    measured::CpuLoad,
+    measured::{CpuLoad, CpuLoadState, SharedCpuLoadState},
+    metered::{AudioLevel, AudioLevelState, SharedAudioLevelState},
     resampled::ResamplingQuality,
     status::{PlaybackStatusContext, PlaybackStatusEvent},
     synth::{SynthPlaybackMessage, SynthPlaybackOptions, SynthSource},

@@ -14,7 +14,7 @@ use crate::{
     player::PlaybackId,
     source::{
         amplified::AmplifiedSourceMessage,
-        measured::{CpuLoad, SharedMeasurementState},
+        measured::{CpuLoad, SharedCpuLoadState},
         mixed::MixerMessage,
         panned::PannedSourceMessage,
         playback::PlaybackMessageQueue,
@@ -34,7 +34,7 @@ pub struct GeneratorPlaybackHandle {
     playback_message_queue: PlaybackMessageQueue,
     mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
     collector_handle: Handle,
-    measurement_state: Option<SharedMeasurementState>,
+    measurement_state: Option<SharedCpuLoadState>,
 }
 
 impl GeneratorPlaybackHandle {
@@ -44,7 +44,7 @@ impl GeneratorPlaybackHandle {
         playback_message_queue: PlaybackMessageQueue,
         mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
         collector_handle: Handle,
-        measurement_state: Option<SharedMeasurementState>,
+        measurement_state: Option<SharedCpuLoadState>,
     ) -> Self {
         Self {
             is_playing,
@@ -68,8 +68,8 @@ impl GeneratorPlaybackHandle {
 
     /// Get the CPU load data for this source.
     ///
-    /// Returns `None` if CPU measurement was not enabled for this source, or if the
-    /// measurement is not available at this time.
+    /// Only available when CPU measurement was enabled in the playback options
+    /// and the player's [`PlayerConfig`](crate::PlayerConfig).
     pub fn cpu_load(&self) -> Option<CpuLoad> {
         self.measurement_state
             .as_ref()

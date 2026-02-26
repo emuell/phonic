@@ -24,8 +24,8 @@ impl SourcePlaybackHandle {
 
     /// Get the CPU load data for this source.
     ///
-    /// Returns `None` if CPU measurement was not enabled for this source, or if the
-    /// measurement is not available at this time.
+    /// Only available when CPU measurement was enabled in the playback options
+    /// and the player's [`PlayerConfig`](crate::PlayerConfig).
     pub fn cpu_load(&self) -> Option<CpuLoad> {
         match self {
             SourcePlaybackHandle::File(handle) => handle.cpu_load(),

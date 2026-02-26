@@ -1,6 +1,7 @@
 use crate::{
     source::{
         measured::MeasuredSource,
+        metered::MeteredSource,
         mixed::{EffectProcessor, MixedSource},
     },
     utils::buffer::{add_buffers, max_abs_sample},
@@ -22,14 +23,14 @@ pub(crate) use thread_pool::{SubMixerProcessingResult, SubMixerThreadPool};
 /// Tracks silence duration to determine if the sub-mixer is producing audible output,
 /// allowing the parent mixer to optimize effect processing.
 pub(crate) struct SubMixerProcessor {
-    mixer: Box<MeasuredSource<MixedSource>>,
+    mixer: Box<MeasuredSource<MeteredSource<MixedSource>>>,
     silence_counter: usize,
     /// Temporary output buffer for parallel processing.
     pub(super) output_buffer: Vec<f32>,
 }
 
 impl SubMixerProcessor {
-    pub fn new(mixer: Box<MeasuredSource<MixedSource>>) -> Self {
+    pub fn new(mixer: Box<MeasuredSource<MeteredSource<MixedSource>>>) -> Self {
         Self {
             mixer,
             silence_counter: 0,

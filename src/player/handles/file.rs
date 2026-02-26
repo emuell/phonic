@@ -11,7 +11,7 @@ use crate::{
     source::{
         amplified::AmplifiedSourceMessage,
         file::FilePlaybackMessage,
-        measured::{CpuLoad, SharedMeasurementState},
+        measured::{CpuLoad, SharedCpuLoadState},
         mixed::MixerMessage,
         panned::PannedSourceMessage,
         playback::PlaybackMessageQueue,
@@ -33,7 +33,7 @@ pub struct FilePlaybackHandle {
     playback_id: PlaybackId,
     playback_message_queue: PlaybackMessageQueue,
     mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
-    measurement_state: Option<SharedMeasurementState>,
+    measurement_state: Option<SharedCpuLoadState>,
 }
 
 impl FilePlaybackHandle {
@@ -42,7 +42,7 @@ impl FilePlaybackHandle {
         playback_id: PlaybackId,
         playback_message_queue: crate::source::playback::PlaybackMessageQueue,
         mixer_event_queue: Arc<ArrayQueue<MixerMessage>>,
-        measurement_state: Option<SharedMeasurementState>,
+        measurement_state: Option<SharedCpuLoadState>,
     ) -> Self {
         Self {
             is_playing,
@@ -63,10 +63,10 @@ impl FilePlaybackHandle {
         self.is_playing.load(Ordering::Relaxed)
     }
 
-    /// Get the CPU load data for this source.
+    /// Get the CPU load data for this generator.
     ///
-    /// Returns `None` if CPU measurement was not enabled for this source, or if the
-    /// measurement is not available at this time.
+    /// Only available when CPU measurement was enabled in the playback options
+    /// and the player's [`PlayerConfig`](crate::PlayerConfig).
     pub fn cpu_load(&self) -> Option<CpuLoad> {
         self.measurement_state
             .as_ref()

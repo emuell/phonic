@@ -43,7 +43,7 @@ Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Expl
 
 - Playback Monitoring
   - Real-time average and peak CPU load metrics for the mixer and individual sub-mixers.
-  - Monitoring of file and generator playback positions for GUI integration.
+  - Monitoring of audio levels, file and generator playback positions for GUI integration.
 
 ### Documentation
 

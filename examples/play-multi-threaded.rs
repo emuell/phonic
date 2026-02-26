@@ -444,16 +444,15 @@ fn main() -> Result<(), Error> {
         // Print stats every 2 seconds
         if last_stats_time.elapsed().as_secs() >= 2 {
             let elapsed = start_time.elapsed().as_secs();
-            let cpu_load = player.cpu_load();
-
-            println!(
-                "[{:2}s] CPU: {:.1}% (peak: {:.1}%)",
-                elapsed,
-                cpu_load.average * 100.0,
-                cpu_load.peak * 100.0
-            );
-
             last_stats_time = std::time::Instant::now();
+            if let Some(cpu_load) = player.cpu_load() {
+                println!(
+                    "[{:2}s] CPU: {:.1}% (peak: {:.1}%)",
+                    elapsed,
+                    cpu_load.average * 100.0,
+                    cpu_load.peak * 100.0
+                );
+            }
         }
     }
 

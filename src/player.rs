@@ -24,7 +24,8 @@ use crate::{
         file::FileSource,
         guarded::GuardedSource,
         mapped::ChannelMappedSource,
-        measured::{CpuLoad, MeasuredSource, SharedMeasurementState},
+        measured::{CpuLoad, MeasuredSource, SharedCpuLoadState},
+        metered::{AudioLevel, MeteredSource, SharedAudioLevelState},
         mixed::{
             EffectProcessor, MixedSource, MixerMessage, SubMixerProcessor, SubMixerThreadPool,
         },
@@ -147,6 +148,22 @@ pub struct PlayerConfig {
     /// `None` will auto-detect based on available CPU cores.
     /// Default: `None` (auto)
     pub concurrent_worker_threads: Option<usize>,
+
+    /// How often mixer CPU loads are updated.
+    ///
+    /// `None` disables CPU tracking entirely.
+    /// `Some` values enable tracking with the given update rate.
+    ///
+    /// Default: `Some(250_ms)`
+    pub measuring_interval: Option<Duration>,
+
+    /// How often mixer audio levels (peak/RMS) are updated.
+    ///
+    /// `None` disables metering entirely.
+    /// `Some` values enable metering with the given meter update rate.
+    ///
+    /// Default: `None` (avoid processing overhead)
+    pub metering_interval: Option<Duration>,
 }
 
 impl Default for PlayerConfig {
@@ -162,6 +179,8 @@ impl PlayerConfig {
             enforce_stereo_playback: true,
             concurrent_processing: true,
             concurrent_worker_threads: None,
+            measuring_interval: Some(Duration::from_millis(250)),
+            metering_interval: None,
         }
     }
 
@@ -180,6 +199,22 @@ impl PlayerConfig {
     /// Set parallel mixer thread count.
     pub fn concurrent_worker_threads(mut self, count: usize) -> Self {
         self.concurrent_worker_threads = Some(count);
+        self
+    }
+
+    /// Set the audio CPU load update interval for all mixers.
+    ///
+    /// Pass `None` to disable measuring entirely (with zero overhead).
+    pub fn measuring_interval(mut self, interval: Option<Duration>) -> Self {
+        self.measuring_interval = interval;
+        self
+    }
+
+    /// Set the audio metering update interval for all mixers.
+    ///
+    /// Pass `None` to disable metering entirely (with zero overhead).
+    pub fn metering_interval(mut self, interval: Option<Duration>) -> Self {
+        self.metering_interval = interval;
         self
     }
 
@@ -221,15 +256,14 @@ pub struct Player {
     collector_running: Arc<AtomicBool>,
     mixers: DashMap<MixerId, PlayerMixerInfo>,
     effects: DashMap<EffectId, PlayerEffectInfo>,
-    main_mixer_measurement_state: SharedMeasurementState,
+    main_mixer_measurement_state: Option<SharedCpuLoadState>,
+    main_mixer_metering_state: Option<SharedAudioLevelState>,
     main_mixer_panic_handler: Arc<Mutex<Option<PanicHandler>>>,
 }
 
 impl Player {
     /// The ID of the main mixer, which is always present.
     const MAIN_MIXER_ID: MixerId = 0;
-    /// Source and main mixer's default CPU measure interval
-    const CPU_MEASUREMENT_INTERVAL: Duration = Duration::from_millis(250);
 
     /// Create a new player for the given [`OutputDevice`]. Param `playback_status_sender` is an optional
     /// channel which can be used to receive playback status events for the currently playing sources.
@@ -296,10 +330,14 @@ impl Player {
 
         let mixer_event_queue = main_mixer.message_queue();
 
-        // Wrap main mixer in MeasuredSource for CPU load tracking
+        // Wrap main mixer in MeteredSource for audio level tracking
+        let metered_main_mixer = MeteredSource::new(main_mixer, config.metering_interval);
+        let main_mixer_metering_state = metered_main_mixer.state();
+
+        // Wrap in MeasuredSource for CPU load tracking
         let measured_main_mixer =
-            MeasuredSource::new(main_mixer, Some(Self::CPU_MEASUREMENT_INTERVAL));
-        let main_mixer_measurement_state = measured_main_mixer.state().unwrap();
+            MeasuredSource::new(metered_main_mixer, config.measuring_interval);
+        let main_mixer_measurement_state = measured_main_mixer.state();
 
         let mixers = DashMap::new();
         mixers.insert(
@@ -341,6 +379,7 @@ impl Player {
             effects,
             main_mixer_panic_handler,
             main_mixer_measurement_state,
+            main_mixer_metering_state,
         }
     }
 
@@ -384,16 +423,37 @@ impl Player {
     }
 
     /// Get the current CPU load for the player's main mixer.
-    pub fn cpu_load(&self) -> CpuLoad {
+    ///
+    /// Only available when CPU measurement is enabled in the player's [`PlayerConfig`].
+    pub fn cpu_load(&self) -> Option<CpuLoad> {
         self.main_mixer_measurement_state
-            .try_lock()
+            .as_ref()
+            .and_then(|s| s.try_lock().ok())
             .map(|state| state.cpu_load())
-            .unwrap_or_default()
     }
 
     /// Get the shared CPU load data for the player's main mixer.
-    pub fn cpu_load_state(&self) -> SharedMeasurementState {
-        Arc::clone(&self.main_mixer_measurement_state)
+    ///
+    /// Only available when CPU measurement is enabled in the player's [`PlayerConfig`].
+    pub fn cpu_load_state(&self) -> Option<SharedCpuLoadState> {
+        self.main_mixer_measurement_state.as_ref().map(Arc::clone)
+    }
+
+    /// Get the current audio level for the player's main mixer.
+    ///
+    /// Only available when audio metering is enabled in the player's [`PlayerConfig`].
+    pub fn audio_level(&self) -> Option<AudioLevel> {
+        self.main_mixer_metering_state
+            .as_ref()
+            .and_then(|s| s.try_lock().ok())
+            .map(|state| state.audio_level().clone())
+    }
+
+    /// Get the shared audio level data for the player's main mixer, if metering is enabled.
+    ///
+    /// Only available when audio metering is enabled in the player's [`PlayerConfig`].
+    pub fn audio_level_state(&self) -> Option<SharedAudioLevelState> {
+        self.main_mixer_metering_state.as_ref().map(Arc::clone)
     }
 
     /// Get a copy of our playback status sender channel.
@@ -412,7 +472,10 @@ impl Player {
     /// Use `panic::set_hook` to override default panic behavior of external threads in order to
     /// e.g. shut down the process after a panic in the audio threads.
     pub fn set_panic_handler(&mut self, handler: Option<PanicHandler>) {
-        *self.main_mixer_panic_handler.lock().unwrap() = handler;
+        *self
+            .main_mixer_panic_handler
+            .lock()
+            .expect("Failed access panic handler lock") = handler;
     }
 
     /// Start audio playback.
@@ -474,9 +537,11 @@ impl Player {
         let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = playback_options
-            .measure_cpu_load
-            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = if playback_options.measure_cpu_load {
+            self.config.measuring_interval
+        } else {
+            None
+        };
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources
@@ -567,9 +632,11 @@ impl Player {
         let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = playback_options
-            .measure_cpu_load
-            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = if playback_options.measure_cpu_load {
+            self.config.measuring_interval
+        } else {
+            None
+        };
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources
@@ -701,9 +768,13 @@ impl Player {
         let mixer_queue = mixer.message_queue();
         let mixer_id = Self::unique_mixer_id();
 
-        // Wrap in MeasuredSource
-        let measured_mixer = MeasuredSource::new(mixer, Some(Self::CPU_MEASUREMENT_INTERVAL));
-        let measurement_state = measured_mixer.state().unwrap();
+        // Wrap in MeteredSource for audio level tracking
+        let metered_mixer = MeteredSource::new(mixer, self.config.metering_interval);
+        let metering_state = metered_mixer.state();
+
+        // Wrap in MeasuredSource for CPU load tracking
+        let measured_mixer = MeasuredSource::new(metered_mixer, self.config.measuring_interval);
+        let measurement_state = measured_mixer.state();
 
         // Wrap into an owned processor
         let mixer_processor = Owned::new(
@@ -729,7 +800,11 @@ impl Player {
                 },
             );
 
-            Ok(MixerHandle::new(mixer_id, measurement_state))
+            Ok(MixerHandle::new(
+                mixer_id,
+                measurement_state,
+                metering_state,
+            ))
         }
     }
 
@@ -992,9 +1067,11 @@ impl Player {
         let panned_source = PannedSource::new(amplified_source, playback_options.panning);
         let panning_message_queue = panned_source.message_queue();
         // apply measure options
-        let measure_interval = playback_options
-            .measure_cpu_load
-            .then_some(Self::CPU_MEASUREMENT_INTERVAL);
+        let measure_interval = if playback_options.measure_cpu_load {
+            self.config.measuring_interval
+        } else {
+            None
+        };
         let measured_source = MeasuredSource::new(panned_source, measure_interval);
         let measurement_state = measured_source.state();
         // add to playing sources

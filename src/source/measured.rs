@@ -8,7 +8,7 @@ use super::{super::utils::time::SampleTimeClock, Source, SourceTime};
 
 // -------------------------------------------------------------------------------------------------
 
-/// CPU load of a playing source, typically accessed via the source's playback handle.
+/// CPU load of a playing source.
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CpuLoad {
     /// Average CPU load over the measurement interval.
@@ -34,7 +34,7 @@ impl Display for CpuLoad {
 /// measure duration. When no measure duration is set, it only runs the inner source.
 pub struct MeasuredSource<S: Source> {
     source: S,
-    state: Option<SharedMeasurementState>,
+    state: Option<SharedCpuLoadState>,
 }
 
 impl<S: Source> MeasuredSource<S> {
@@ -42,8 +42,11 @@ impl<S: Source> MeasuredSource<S> {
     pub fn new(source: S, update_interval: Option<Duration>) -> Self {
         if let Some(update_interval) = update_interval {
             Self {
+                state: Some(Arc::new(Mutex::new(CpuLoadState::new(
+                    update_interval,
+                    source.sample_rate(),
+                )))),
                 source,
-                state: Some(Arc::new(Mutex::new(MeasurementState::new(update_interval)))),
             }
         } else {
             Self {
@@ -61,7 +64,7 @@ impl<S: Source> MeasuredSource<S> {
     }
 
     /// Returns a thread-safe handle to the measurement state, when measuring is enabled.
-    pub(crate) fn state(&self) -> Option<SharedMeasurementState> {
+    pub(crate) fn state(&self) -> Option<SharedCpuLoadState> {
         self.state.clone()
     }
 }
@@ -92,8 +95,7 @@ impl<S: Source> Source for MeasuredSource<S> {
             if written_samples > 0 {
                 if let Ok(mut state) = state.try_lock() {
                     let frames_written = written_samples as u64 / self.channel_count() as u64;
-                    let sample_rate = self.sample_rate();
-                    state.record(processing_time, frames_written, sample_rate);
+                    state.record(processing_time, frames_written);
                 }
             }
 
@@ -106,23 +108,25 @@ impl<S: Source> Source for MeasuredSource<S> {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A thread-safe handle to a `MeasurementState`.
-pub type SharedMeasurementState = Arc<Mutex<MeasurementState>>;
+/// A thread-safe handle to a [`CpuLoadState`].
+pub type SharedCpuLoadState = Arc<Mutex<CpuLoadState>>;
 
 // -------------------------------------------------------------------------------------------------
 
+/// CPU load state, shared between a `MeasuredSource` and its handle.
 #[derive(Debug)]
-pub struct MeasurementState {
+pub struct CpuLoadState {
     total_processing_time: Duration,
     total_frames_processed: u64,
     peak_load_in_interval: f32,
     last_update: Instant,
     cpu_load: CpuLoad,
     update_interval: Duration,
+    sample_rate: u32,
 }
 
-impl MeasurementState {
-    pub fn new(update_interval: Duration) -> Self {
+impl CpuLoadState {
+    pub fn new(update_interval: Duration, sample_rate: u32) -> Self {
         Self {
             total_processing_time: Duration::from_secs(0),
             total_frames_processed: 0,
@@ -130,6 +134,7 @@ impl MeasurementState {
             last_update: Instant::now(),
             cpu_load: CpuLoad::default(),
             update_interval,
+            sample_rate,
         }
     }
 
@@ -137,18 +142,14 @@ impl MeasurementState {
         self.cpu_load
     }
 
-    pub(self) fn record(
-        &mut self,
-        processing_time: Duration,
-        frames_processed: u64,
-        sample_rate: u32,
-    ) {
+    /// Update CPU load state.
+    pub fn record(&mut self, processing_time: Duration, frames_processed: u64) {
         self.total_processing_time += processing_time;
         self.total_frames_processed += frames_processed;
 
         if frames_processed > 0 {
             let audio_time_secs =
-                SampleTimeClock::sample_time_to_duration(frames_processed, sample_rate)
+                SampleTimeClock::sample_time_to_duration(frames_processed, self.sample_rate)
                     .as_secs_f32();
             let processing_time_secs = processing_time.as_secs_f32();
             if audio_time_secs > 0.0 {
@@ -163,7 +164,7 @@ impl MeasurementState {
         if now.duration_since(self.last_update) >= self.update_interval {
             let avg_load = if self.total_frames_processed > 0 {
                 let total_audio_duration = Duration::from_secs_f64(
-                    self.total_frames_processed as f64 / sample_rate as f64,
+                    self.total_frames_processed as f64 / self.sample_rate as f64,
                 );
                 if total_audio_duration.as_secs_f64() > 0.0 {
                     (self.total_processing_time.as_secs_f64() / total_audio_duration.as_secs_f64())
