@@ -89,7 +89,9 @@ impl Sampler {
         "Volume",
         0.000001..=15.848932, // db_to_linear(-60.0)..=db_to_linear(24.0)
         1.0,                  // 0dB
-    );
+    )
+    .with_scaling(ParameterScaling::Decibel(-60.0, 24.0))
+    .with_unit("dB");
 
     pub const PANNING: FloatParameter =
         FloatParameter::new(FourCC(*b"SPAN"), "Panning", -1.0..=1.0, 0.0);
@@ -153,8 +155,6 @@ impl Sampler {
             Self::TRANSPOSE.into_box(),
             Self::FINETUNE.into_box(),
             Self::VOLUME
-                .with_unit("dB")
-                .with_scaling(ParameterScaling::Decibel(-60.0, 24.0))
                 .with_display(gain_to_string, string_to_gain)
                 .into_box(),
             Self::PANNING

@@ -30,8 +30,8 @@ impl GainEffect {
         0.000001..=15.848932, // Self::MIN_DB..=Self::MAX_DB,
         1.0,                  // 0dB
     )
-    .with_unit("dB")
-    .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB));
+    .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB))
+    .with_unit("dB");
 
     /// Creates a new `GainEffect` with default gain (0dB = unity gain).
     pub fn new() -> Self {
