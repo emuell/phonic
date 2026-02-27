@@ -3,7 +3,8 @@ use four_cc::FourCC;
 use crate::{
     effect::{Effect, EffectTime},
     parameter::{
-        FloatParameter, FloatParameterValue, ParameterValueUpdate, SmoothedParameterValue,
+        formatters, FloatParameter, FloatParameterValue, ParameterValueUpdate,
+        SmoothedParameterValue,
     },
     utils::{
         buffer::{copy_buffers, InterleavedBuffer, InterleavedBufferMut},
@@ -52,7 +53,8 @@ impl CompressorEffect {
         "Ratio",
         1.0..=20.0,
         8.0, //
-    );
+    )
+    .with_formatter(formatters::RATIO);
     pub const KNEE_WIDTH: FloatParameter = FloatParameter::new(
         FourCC(*b"knee"), //
         "Knee",
@@ -92,33 +94,11 @@ impl CompressorEffect {
 
     /// Creates a new `CompressorEffect` with the default parameters.
     pub fn new_compressor() -> Self {
-        let ratio_to_string = |value: f32| {
-            if value >= 20.0 {
-                "LIMIT".to_string()
-            } else {
-                format!("1:{:.2}", value)
-            }
-        };
-        let string_to_ratio = |string: &str| {
-            let trimmed = string.trim();
-            if trimmed.eq_ignore_ascii_case("LIMIT") {
-                Some(20.0)
-            } else if let Some(ratio_str) = trimmed.strip_prefix("1:") {
-                ratio_str.parse::<f32>().ok()
-            } else {
-                trimmed.parse::<f32>().ok()
-            }
-        };
-
         Self {
             sample_rate: 0,
             channel_count: 0,
             threshold: FloatParameterValue::from_description(Self::THRESHOLD),
-            ratio: FloatParameterValue::from_description(
-                Self::RATIO
-                    .clone()
-                    .with_display(ratio_to_string, string_to_ratio),
-            ),
+            ratio: FloatParameterValue::from_description(Self::RATIO),
             knee_width: FloatParameterValue::from_description(Self::KNEE_WIDTH),
             attack_time: FloatParameterValue::from_description(Self::ATTACK_TIME),
             release_time: FloatParameterValue::from_description(Self::RELEASE_TIME),

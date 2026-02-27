@@ -80,40 +80,40 @@ impl Eq5Effect {
             20.0..=20000.0,
             100.0,
         )
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.5)),
+        .with_scaling(ParameterScaling::Exponential(2.5))
+        .with_unit("Hz"),
         FloatParameter::new(
             FourCC(*b"frq2"), //
             "Frequency 2",
             20.0..=20000.0,
             1000.0,
         )
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.5)),
+        .with_scaling(ParameterScaling::Exponential(2.5))
+        .with_unit("Hz"),
         FloatParameter::new(
             FourCC(*b"frq3"), //
             "Frequency 3",
             20.0..=20000.0,
             4000.0,
         )
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.5)),
+        .with_scaling(ParameterScaling::Exponential(2.5))
+        .with_unit("Hz"),
         FloatParameter::new(
             FourCC(*b"frq4"), //
             "Frequency 4",
             20.0..=20000.0,
             8000.0,
         )
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.5)),
+        .with_scaling(ParameterScaling::Exponential(2.5))
+        .with_unit("Hz"),
         FloatParameter::new(
             FourCC(*b"frq5"), //
             "Frequency 5",
             20.0..=20000.0,
             12000.0,
         )
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.5)),
+        .with_scaling(ParameterScaling::Exponential(2.5))
+        .with_unit("Hz"),
     ];
 
     pub const BANDWIDTHS: [FloatParameter; 5] = [

@@ -2,7 +2,7 @@ use std::{fmt::Debug, fmt::Display, str::FromStr, sync::Arc};
 
 use four_cc::FourCC;
 
-use super::{Parameter, ParameterType, ParameterValueUpdate};
+use super::{formatters, Parameter, ParameterType, ParameterValueUpdate};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -13,10 +13,8 @@ pub struct EnumParameter {
     name: &'static str,
     values: &'static [&'static str],
     default_index: usize,
-    #[allow(clippy::type_complexity)]
-    value_to_string: Option<Arc<dyn Fn(&String) -> String + Send + Sync>>,
-    #[allow(clippy::type_complexity)]
-    string_to_value: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    value_to_string: Option<fn(&str) -> String>,
+    string_to_value: Option<fn(&str) -> Option<String>>,
 }
 
 impl Debug for EnumParameter {
@@ -77,20 +75,15 @@ impl EnumParameter {
     }
 
     /// Optional custom conversion functions to convert a plain value to a string and string
-    /// to a plain value.
+    /// to a plain value. Formatters usually contain a unit as well.
     ///
     /// If strings cannot be parsed, the callback should return `None`. returned values will be
     /// clamped automatically, so the converted does not need to clamp them.
-    pub fn with_display<
-        ValueToString: Fn(&String) -> String + Send + Sync + 'static,
-        StringToValue: Fn(&str) -> Option<String> + Send + Sync + 'static,
-    >(
-        mut self,
-        value_to_string: ValueToString,
-        string_to_value: StringToValue,
-    ) -> Self {
-        self.value_to_string = Some(Arc::new(value_to_string));
-        self.string_to_value = Some(Arc::new(string_to_value));
+    ///
+    /// See [`formatters`] for a set of common formatters.
+    pub const fn with_formatter(mut self, formatter: formatters::EnumFormatter) -> Self {
+        self.value_to_string = Some(formatter.0);
+        self.string_to_value = Some(formatter.1);
         self
     }
 
@@ -165,7 +158,7 @@ impl EnumParameter {
     /// Convert the given plain value to a string, using a custom conversion function if provided.
     pub fn value_to_string(&self, value: &str) -> String {
         match &self.value_to_string {
-            Some(f) => f(&value.to_owned()),
+            Some(f) => f(value),
             None => value.to_owned(),
         }
     }

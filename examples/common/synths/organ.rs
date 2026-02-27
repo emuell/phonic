@@ -43,12 +43,12 @@ pub const TUNE_2: FloatParameter =
 // Envelope
 pub const ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"attk"), "Attack", 0.001..=2.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"rels"), "Release", 0.001..=2.0, 1.0)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // Vibrato
 pub const LFO_RATE: FloatParameter =

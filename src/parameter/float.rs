@@ -6,7 +6,9 @@ use std::{
 
 use four_cc::FourCC;
 
-use super::{Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate};
+use super::{
+    formatters, Parameter, ParameterPolarity, ParameterScaling, ParameterType, ParameterValueUpdate,
+};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -19,10 +21,8 @@ pub struct FloatParameter {
     default: f32,
     scaling: ParameterScaling,
     unit: &'static str,
-    #[allow(clippy::type_complexity)]
-    value_to_string: Option<Arc<dyn Fn(f32) -> String + Send + Sync>>,
-    #[allow(clippy::type_complexity)]
-    string_to_value: Option<Arc<dyn Fn(&str) -> Option<f32> + Send + Sync>>,
+    value_to_string: Option<fn(f32) -> String>,
+    string_to_value: Option<fn(&str) -> Option<f32>>,
 }
 
 impl Debug for FloatParameter {
@@ -76,22 +76,15 @@ impl FloatParameter {
     }
 
     /// Optional custom conversion functions to convert a plain value to a string and string
-    /// to a plain value.
-    ///
-    /// Returned strings should not contain a unit, if a unit already was set for this parameter.
+    /// to a plain value. Formatters usually contain a unit as well.
     ///
     /// If strings cannot be parsed, the callback should return `None`. returned values will be
     /// clamped automatically, so the converted does not need to clamp them.
-    pub fn with_display<
-        ValueToString: Fn(f32) -> String + Send + Sync + 'static,
-        StringToValue: Fn(&str) -> Option<f32> + Send + Sync + 'static,
-    >(
-        mut self,
-        value_to_string: ValueToString,
-        string_to_value: StringToValue,
-    ) -> Self {
-        self.value_to_string = Some(Arc::new(value_to_string));
-        self.string_to_value = Some(Arc::new(string_to_value));
+    ///
+    /// See [`formatters`] for a set of common formatters.
+    pub const fn with_formatter(mut self, formatter: formatters::FloatFormatter) -> Self {
+        self.value_to_string = Some(formatter.0);
+        self.string_to_value = Some(formatter.1);
         self
     }
 

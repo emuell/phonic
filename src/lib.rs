@@ -232,8 +232,9 @@ pub mod parameters {
     //! Effect [`Parameter`](super::Parameter) implementations.
 
     pub use super::parameter::{
-        BooleanParameter, BooleanParameterValue, EnumParameter, EnumParameterValue, FloatParameter,
-        FloatParameterValue, IntegerParameter, IntegerParameterValue, SmoothedParameterValue,
+        formatters, BooleanParameter, BooleanParameterValue, EnumParameter, EnumParameterValue,
+        FloatParameter, FloatParameterValue, IntegerParameter, IntegerParameterValue,
+        SmoothedParameterValue,
     };
 }
 

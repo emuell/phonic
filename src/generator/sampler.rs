@@ -14,7 +14,7 @@ use crate::{
     },
     modulation::{ModulationConfig, ModulationSource, ModulationTarget},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, IntegerParameter, Parameter,
+        formatters, EnumParameter, EnumParameterValue, FloatParameter, IntegerParameter, Parameter,
         ParameterScaling, ParameterValueUpdate,
     },
     source::{
@@ -25,9 +25,7 @@ use crate::{
     utils::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
-        db_to_linear,
         dsp::lfo::LfoWaveform,
-        linear_to_db,
     },
     Error, FilePlaybackOptions, FileSource, NotePlaybackId, PlaybackId, PlaybackStatusContext,
     PlaybackStatusEvent, ResamplingQuality,
@@ -76,6 +74,8 @@ pub struct Sampler {
 
 // -------------------------------------------------------------------------------------------------
 
+// -------------------------------------------------------------------------------------------------
+
 impl Sampler {
     // Base sampler parameters (always active)
     pub const TRANSPOSE: IntegerParameter =
@@ -91,75 +91,19 @@ impl Sampler {
         1.0,                  // 0dB
     )
     .with_scaling(ParameterScaling::Decibel(-60.0, 24.0))
-    .with_unit("dB");
+    .with_formatter(formatters::GAIN);
 
     pub const PANNING: FloatParameter =
-        FloatParameter::new(FourCC(*b"SPAN"), "Panning", -1.0..=1.0, 0.0);
+        FloatParameter::new(FourCC(*b"SPAN"), "Panning", -1.0..=1.0, 0.0)
+            .with_formatter(formatters::PAN);
 
     /// Base sampler parameter descriptors (transpose, finetune, volume, panning).
     pub fn base_parameters() -> Vec<Box<dyn Parameter>> {
-        let gain_to_string = |v: f32| {
-            let db = linear_to_db(v);
-            if db <= -60.0 {
-                "-INF".to_string()
-            } else {
-                format!("{:.2}", db)
-            }
-        };
-        let string_to_gain = |s: &str| {
-            if s.trim().eq_ignore_ascii_case("-inf") || s.trim().eq_ignore_ascii_case("inf") {
-                Some(*Self::VOLUME.range().start())
-            } else {
-                let s = s.trim_start().trim_end_matches(|c: char| {
-                    c.eq_ignore_ascii_case(&'d')
-                        || c.eq_ignore_ascii_case(&'b')
-                        || c.is_whitespace()
-                });
-                s.parse::<f32>().ok().map(db_to_linear)
-            }
-        };
-
-        let pan_to_string = |v: f32| {
-            let v = v * 50.0;
-            if v.abs() < 0.1 {
-                "C".to_string()
-            } else if v < 0.0 {
-                format!("{:.0}L", v.abs())
-            } else {
-                format!("{:.0}R", v)
-            }
-        };
-        let string_to_pan = |s: &str| {
-            let s = s.trim();
-            if s.eq_ignore_ascii_case("c") {
-                Some(0.0)
-            } else {
-                let last_char = s.trim_end().chars().last().unwrap_or(' ');
-                if last_char.eq_ignore_ascii_case(&'l') {
-                    let s = s.trim_start().trim_end_matches(|c: char| {
-                        c.eq_ignore_ascii_case(&'l') || c.is_whitespace()
-                    });
-                    s.parse::<f32>().ok().map(|v| -v / 50.0)
-                } else if last_char.eq_ignore_ascii_case(&'r') {
-                    let s = s.trim_start().trim_end_matches(|c: char| {
-                        c.eq_ignore_ascii_case(&'r') || c.is_whitespace()
-                    });
-                    s.parse::<f32>().ok().map(|v| v / 50.0)
-                } else {
-                    None
-                }
-            }
-        };
-
         vec![
             Self::TRANSPOSE.into_box(),
             Self::FINETUNE.into_box(),
-            Self::VOLUME
-                .with_display(gain_to_string, string_to_gain)
-                .into_box(),
-            Self::PANNING
-                .with_display(pan_to_string, string_to_pan)
-                .into_box(),
+            Self::VOLUME.into_box(),
+            Self::PANNING.into_box(),
         ]
     }
 
@@ -292,13 +236,16 @@ impl Sampler {
     .with_unit("Hz");
 
     pub const GRAIN_VARIATION: FloatParameter =
-        FloatParameter::new(FourCC(*b"GVAR"), "Variation", 0.0..=1.0, 0.0);
+        FloatParameter::new(FourCC(*b"GVAR"), "Variation", 0.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
 
     pub const GRAIN_SPRAY: FloatParameter =
-        FloatParameter::new(FourCC(*b"GSPY"), "Spray", 0.0..=1.0, 0.0);
+        FloatParameter::new(FourCC(*b"GSPY"), "Spray", 0.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
 
     pub const GRAIN_PAN_SPREAD: FloatParameter =
-        FloatParameter::new(FourCC(*b"GPAN"), "Pan Spread", 0.0..=1.0, 0.0);
+        FloatParameter::new(FourCC(*b"GPAN"), "Pan Spread", 0.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
 
     pub const GRAIN_PLAYBACK_DIR: EnumParameter = EnumParameter::new(
         FourCC(*b"GDIR"),
@@ -307,39 +254,24 @@ impl Sampler {
         GrainPlaybackDirection::Forward as usize,
     );
     pub const GRAIN_POSITION: FloatParameter =
-        FloatParameter::new(FourCC(*b"GPOS"), "Position", 0.0..=1.0, 0.5);
+        FloatParameter::new(FourCC(*b"GPOS"), "Position", 0.0..=1.0, 0.5)
+            .with_formatter(formatters::PERCENT);
 
     pub const GRAIN_STEP: FloatParameter =
         FloatParameter::new(FourCC(*b"GSTP"), "Step", -4.0..=4.0, 0.0).with_unit("x");
 
     /// Granular playback parameter descriptors.
     pub fn granular_parameters() -> Vec<Box<dyn Parameter>> {
-        let percent_to_string = |v: f32| format!("{:.1} %", v * 100.0);
-        let string_to_percent = |s: &str| {
-            let s = s
-                .trim_start()
-                .trim_end_matches(|c: char| c == '%' || c.is_whitespace());
-            s.parse::<f32>().ok().map(|v| v / 100.0)
-        };
-
         vec![
             Self::GRAIN_OVERLAP_MODE.into_box(),
             Self::GRAIN_WINDOW.into_box(),
             Self::GRAIN_SIZE.into_box(),
             Self::GRAIN_DENSITY.into_box(),
-            Self::GRAIN_VARIATION
-                .with_display(percent_to_string, string_to_percent)
-                .into_box(),
-            Self::GRAIN_SPRAY
-                .with_display(percent_to_string, string_to_percent)
-                .into_box(),
-            Self::GRAIN_PAN_SPREAD
-                .with_display(percent_to_string, string_to_percent)
-                .into_box(),
+            Self::GRAIN_VARIATION.into_box(),
+            Self::GRAIN_SPRAY.into_box(),
+            Self::GRAIN_PAN_SPREAD.into_box(),
             Self::GRAIN_PLAYBACK_DIR.into_box(),
-            Self::GRAIN_POSITION
-                .with_display(percent_to_string, string_to_percent)
-                .into_box(),
+            Self::GRAIN_POSITION.into_box(),
             Self::GRAIN_STEP.into_box(),
         ]
     }

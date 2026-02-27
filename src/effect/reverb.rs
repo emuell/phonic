@@ -5,7 +5,7 @@ use std::any::Any;
 
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
-    parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
+    parameter::{formatters, FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
         buffer::InterleavedBufferMut,
         dsp::{
@@ -81,14 +81,14 @@ impl ReverbEffect {
         0.0..=1.0,
         0.6, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
     pub const WET: FloatParameter = FloatParameter::new(
         FourCC(*b"wet "),
         "Wet",
         0.0..=1.0,
         0.35, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
 
     /// Creates a new `ReverbEffect` with default parameter values.
     pub fn new() -> Self {
@@ -101,9 +101,6 @@ impl ReverbEffect {
         while fpd_r < 16386 {
             fpd_r = rng.random();
         }
-
-        let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
-        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
 
         /// Max Delay line sizes
         const A_SIZE: usize = 8111;
@@ -123,17 +120,9 @@ impl ReverbEffect {
         Self {
             sample_rate: 0,
             channel_count: 0,
-            room_size: SmoothedParameterValue::from_description(
-                Self::ROOM_SIZE
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            )
-            .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
-            wet: SmoothedParameterValue::from_description(
-                Self::WET
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            room_size: SmoothedParameterValue::from_description(Self::ROOM_SIZE)
+                .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
+            wet: SmoothedParameterValue::from_description(Self::WET),
             biquad_a_coefficients: BiquadFilterCoefficients::default(),
             biquad_a_l: BiquadFilter::default(),
             biquad_a_r: BiquadFilter::default(),
