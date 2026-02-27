@@ -70,8 +70,8 @@ impl FilterEffect {
         20.0..=20000.0,
         20000.0, //
     )
-    .with_unit("Hz")
-    .with_scaling(ParameterScaling::Exponential(2.5));
+    .with_scaling(ParameterScaling::Exponential(2.5))
+    .with_unit("Hz");
 
     pub const Q: FloatParameter = FloatParameter::new(
         FourCC(*b"fltq"),

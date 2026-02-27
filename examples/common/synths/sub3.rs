@@ -103,8 +103,8 @@ pub const RING_LEVEL: FloatParameter =
 
 pub const FILTER_FREQ: FloatParameter =
     FloatParameter::new(FourCC(*b"flFr"), "Filter Freq", 20.0..=20000.0, 20000.0)
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(3.0));
+        .with_scaling(ParameterScaling::Exponential(3.0))
+        .with_unit("Hz");
 
 pub const FILTER_RES: FloatParameter =
     FloatParameter::new(FourCC(*b"flRs"), "Filter Res", 0.0..=1.0, 0.0);
@@ -116,27 +116,27 @@ pub const FILTER_DRIVE: FloatParameter =
 
 pub const AENV_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"aeAt"), "AmpEnv Attack", 0.001..=5.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const AENV_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"aeHo"), "AmpEnv Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const AENV_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"aeDc"), "AmpEnv Decay", 0.001..=5.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const AENV_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"aeSu"), "AmpEnv Sustain", 0.0..=1.0, 1.0);
 pub const AENV_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"aeRl"), "AmpEnv Release", 0.001..=5.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // MODULATION LFO
 
 pub const LFO1_SPEED: FloatParameter =
     FloatParameter::new(FourCC(*b"l1Sp"), "LFO1 Speed", 0.01..=200.0, 5.0)
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(4.0));
+        .with_scaling(ParameterScaling::Exponential(4.0))
+        .with_unit("Hz");
 
 pub const LFO1_WAVEFORM: EnumParameter = EnumParameter::new(
     FourCC(*b"l1Wv"),
@@ -147,8 +147,8 @@ pub const LFO1_WAVEFORM: EnumParameter = EnumParameter::new(
 
 pub const LFO2_SPEED: FloatParameter =
     FloatParameter::new(FourCC(*b"l2Sp"), "LFO2 Speed", 0.01..=200.0, 5.0)
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(4.0));
+        .with_scaling(ParameterScaling::Exponential(4.0))
+        .with_unit("Hz");
 
 pub const LFO2_WAVEFORM: EnumParameter = EnumParameter::new(
     FourCC(*b"l2Wv"),
@@ -161,20 +161,20 @@ pub const LFO2_WAVEFORM: EnumParameter = EnumParameter::new(
 
 pub const MENV_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"meAt"), "ModEnv Attack", 0.001..=5.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const MENV_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"meHo"), "ModEnv Hold", 0.0..=5.0, 0.0).with_unit("s");
 pub const MENV_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"meDc"), "ModEnv Decay", 0.001..=5.0, 0.5)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const MENV_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"meSu"), "ModEnv Sustain", 0.0..=1.0, 0.5);
 pub const MENV_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"meRl"), "ModEnv Release", 0.001..=5.0, 0.5)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // -------------------------------------------------------------------------------------------------
 

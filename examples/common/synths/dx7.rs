@@ -62,8 +62,8 @@ pub const FEEDBACK: FloatParameter =
 
 pub const LFO_RATE: FloatParameter =
     FloatParameter::new(FourCC(*b"lfoR"), "LFO Rate", 0.1..=20.0, 6.0)
-        .with_unit("Hz")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("Hz");
 
 pub const LFO_PITCH_DEPTH: FloatParameter =
     FloatParameter::new(FourCC(*b"lfoP"), "LFO Pitch Depth", 0.0..=12.0, 0.0).with_unit("st");
@@ -81,20 +81,20 @@ pub const OP1_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o1Fn"), "Op1 Fine", 0.0..=1.0, 0.0);
 pub const OP1_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o1At"), "Op1 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP1_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o1Ho"), "Op1 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP1_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o1Dc"), "Op1 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP1_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o1Su"), "Op1 Sustain", 0.0..=1.0, 1.0);
 pub const OP1_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o1Rl"), "Op1 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // OPERATOR 2
 
@@ -106,20 +106,20 @@ pub const OP2_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o2Fn"), "Op2 Fine", 0.0..=1.0, 0.0);
 pub const OP2_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o2At"), "Op2 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP2_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o2Ho"), "Op2 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP2_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o2Dc"), "Op2 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP2_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o2Su"), "Op2 Sustain", 0.0..=1.0, 1.0);
 pub const OP2_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o2Rl"), "Op2 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // OPERATOR 3
 
@@ -131,20 +131,20 @@ pub const OP3_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o3Fn"), "Op3 Fine", 0.0..=1.0, 0.0);
 pub const OP3_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o3At"), "Op3 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP3_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o3Ho"), "Op3 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP3_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o3Dc"), "Op3 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP3_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o3Su"), "Op3 Sustain", 0.0..=1.0, 1.0);
 pub const OP3_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o3Rl"), "Op3 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // OPERATOR 4
 
@@ -156,20 +156,20 @@ pub const OP4_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o4Fn"), "Op4 Fine", 0.0..=1.0, 0.0);
 pub const OP4_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o4At"), "Op4 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP4_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o4Ho"), "Op4 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP4_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o4Dc"), "Op4 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP4_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o4Su"), "Op4 Sustain", 0.0..=1.0, 1.0);
 pub const OP4_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o4Rl"), "Op4 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // OPERATOR 5
 
@@ -181,20 +181,20 @@ pub const OP5_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o5Fn"), "Op5 Fine", 0.0..=1.0, 0.0);
 pub const OP5_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o5At"), "Op5 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP5_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o5Ho"), "Op5 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP5_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o5Dc"), "Op5 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP5_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o5Su"), "Op5 Sustain", 0.0..=1.0, 1.0);
 pub const OP5_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o5Rl"), "Op5 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // OPERATOR 6
 
@@ -206,20 +206,20 @@ pub const OP6_FINE: FloatParameter =
     FloatParameter::new(FourCC(*b"o6Fn"), "Op6 Fine", 0.0..=1.0, 0.0);
 pub const OP6_ATTACK: FloatParameter =
     FloatParameter::new(FourCC(*b"o6At"), "Op6 Attack", 0.0..=10.0, 0.01)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP6_HOLD: FloatParameter =
     FloatParameter::new(FourCC(*b"o6Ho"), "Op6 Hold", 0.0..=10.0, 0.0).with_unit("s");
 pub const OP6_DECAY: FloatParameter =
     FloatParameter::new(FourCC(*b"o6Dc"), "Op6 Decay", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 pub const OP6_SUSTAIN: FloatParameter =
     FloatParameter::new(FourCC(*b"o6Su"), "Op6 Sustain", 0.0..=1.0, 1.0);
 pub const OP6_RELEASE: FloatParameter =
     FloatParameter::new(FourCC(*b"o6Rl"), "Op6 Release", 0.0..=10.0, 0.1)
-        .with_unit("s")
-        .with_scaling(ParameterScaling::Exponential(2.0));
+        .with_scaling(ParameterScaling::Exponential(2.0))
+        .with_unit("s");
 
 // -------------------------------------------------------------------------------------------------
 

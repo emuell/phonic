@@ -4,7 +4,7 @@ use strum::VariantNames;
 use crate::{
     effect::{Effect, EffectTime},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
+        formatters, EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
         SmoothedParameterValue,
     },
     utils::{
@@ -79,28 +79,19 @@ impl DistortionEffect {
         0.0..=1.0,
         1.0, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
 
     /// Creates a new `DistortionEffect` with default parameter values.
     pub fn new() -> Self {
-        let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
-        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
-
         let channel_count = 0;
 
         let distortion_type = EnumParameterValue::from_description(Self::TYPE);
 
-        let drive = SmoothedParameterValue::from_description(
-            Self::DRIVE, //
-        )
-        .with_smoother(LinearSmoothedValue::default().with_step(0.01));
+        let drive = SmoothedParameterValue::from_description(Self::DRIVE)
+            .with_smoother(LinearSmoothedValue::default().with_step(0.01));
 
-        let mix = SmoothedParameterValue::from_description(
-            Self::MIX
-                .clone()
-                .with_display(to_string_percent, from_string_percent),
-        )
-        .with_smoother(ExponentialSmoothedValue::default().with_inertia(0.1));
+        let mix = SmoothedParameterValue::from_description(Self::MIX)
+            .with_smoother(ExponentialSmoothedValue::default().with_inertia(0.1));
 
         Self {
             channel_count,

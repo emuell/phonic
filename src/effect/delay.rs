@@ -6,7 +6,7 @@ use strum::VariantNames;
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
+        formatters, EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
         SmoothedParameterValue,
     },
     utils::{
@@ -131,7 +131,8 @@ impl DelayEffect {
         FloatParameter::new(FourCC(*b"dlay"), "Delay", 1.0..=Self::MAX_DELAY_MS, 375.0)
             .with_unit("ms");
     pub const FEEDBACK: FloatParameter =
-        FloatParameter::new(FourCC(*b"fdbk"), "Feedback", 0.0..=1.0, 0.5).with_unit("%");
+        FloatParameter::new(FourCC(*b"fdbk"), "Feedback", 0.0..=1.0, 0.5)
+            .with_formatter(formatters::PERCENT);
 
     pub const FILTER_TYPE: EnumParameter = EnumParameter::new(
         FourCC(*b"ftyp"),
@@ -144,13 +145,16 @@ impl DelayEffect {
             .with_scaling(ParameterScaling::Exponential(2.5))
             .with_unit("Hz");
     pub const DRIVE: FloatParameter =
-        FloatParameter::new(FourCC(*b"driv"), "Drive", 0.0..=1.0, 0.0).with_unit("%");
+        FloatParameter::new(FourCC(*b"driv"), "Drive", 0.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
 
     pub const WET_MIX: FloatParameter =
-        FloatParameter::new(FourCC(*b"wet_"), "Wet", 0.0..=1.0, 0.5).with_unit("%");
+        FloatParameter::new(FourCC(*b"wet_"), "Wet", 0.0..=1.0, 0.5)
+            .with_formatter(formatters::PERCENT);
 
     pub const STEREO_WIDTH: FloatParameter =
-        FloatParameter::new(FourCC(*b"wdth"), "Width", 0.0..=1.0, 0.5).with_unit("%");
+        FloatParameter::new(FourCC(*b"wdth"), "Width", 0.0..=1.0, 0.5)
+            .with_formatter(formatters::PERCENT);
 
     pub const LFO_RATE: FloatParameter =
         FloatParameter::new(FourCC(*b"lfor"), "LFO Rate", 0.01..=10.0, 1.0)
@@ -163,62 +167,34 @@ impl DelayEffect {
         LfoWaveform::Sine as usize,
     );
     pub const LFO_DEPTH_TIME: FloatParameter =
-        FloatParameter::new(FourCC(*b"lfdt"), "LFO -> Time", -1.0..=1.0, 0.0).with_unit("%");
+        FloatParameter::new(FourCC(*b"lfdt"), "LFO -> Time", -1.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
     pub const LFO_DEPTH_FEEDBACK: FloatParameter =
-        FloatParameter::new(FourCC(*b"ldfb"), "LFO -> Feedback", -1.0..=1.0, 0.0).with_unit("%");
+        FloatParameter::new(FourCC(*b"ldfb"), "LFO -> Feedback", -1.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
     pub const LFO_DEPTH_FILTER: FloatParameter =
-        FloatParameter::new(FourCC(*b"lfdf"), "LFO -> Filter", -1.0..=1.0, 0.0).with_unit("%");
+        FloatParameter::new(FourCC(*b"lfdf"), "LFO -> Filter", -1.0..=1.0, 0.0)
+            .with_formatter(formatters::PERCENT);
 
     /// Creates a new `DelayEffect` with default parameter values.
     pub fn new() -> Self {
-        let to_string_percent = |v: f32| format!("{:.1}", v * 100.0);
-        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
-
         Self {
             sample_rate: 0,
 
             mode: EnumParameterValue::from_description(Self::MODE),
             delay_time: SmoothedParameterValue::from_description(Self::DELAY_TIME)
                 .with_smoother(SigmoidSmoothedValue::default().with_duration(44100 / 2)),
-            feedback: SmoothedParameterValue::from_description(
-                Self::FEEDBACK
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            feedback: SmoothedParameterValue::from_description(Self::FEEDBACK),
             filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
             filter_cutoff: SmoothedParameterValue::from_description(Self::FILTER_CUTOFF),
-            drive: SmoothedParameterValue::from_description(
-                Self::DRIVE
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
-            wet_mix: SmoothedParameterValue::from_description(
-                Self::WET_MIX
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
-            stereo_width: SmoothedParameterValue::from_description(
-                Self::STEREO_WIDTH
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            drive: SmoothedParameterValue::from_description(Self::DRIVE),
+            wet_mix: SmoothedParameterValue::from_description(Self::WET_MIX),
+            stereo_width: SmoothedParameterValue::from_description(Self::STEREO_WIDTH),
             lfo_rate: SmoothedParameterValue::from_description(Self::LFO_RATE),
             lfo_shape: EnumParameterValue::from_description(Self::LFO_SHAPE),
-            lfo_depth_time: SmoothedParameterValue::from_description(
-                Self::LFO_DEPTH_TIME
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
-            lfo_depth_feedback: SmoothedParameterValue::from_description(
-                Self::LFO_DEPTH_FEEDBACK
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
-            lfo_depth_filter: SmoothedParameterValue::from_description(
-                Self::LFO_DEPTH_FILTER
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            lfo_depth_time: SmoothedParameterValue::from_description(Self::LFO_DEPTH_TIME),
+            lfo_depth_feedback: SmoothedParameterValue::from_description(Self::LFO_DEPTH_FEEDBACK),
+            lfo_depth_filter: SmoothedParameterValue::from_description(Self::LFO_DEPTH_FILTER),
 
             delay_left: InterpolatedDelayLine::default(),
             delay_right: InterpolatedDelayLine::default(),

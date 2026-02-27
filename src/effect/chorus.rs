@@ -6,7 +6,7 @@ use strum::VariantNames;
 use crate::{
     effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime},
     parameter::{
-        EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
+        formatters, EnumParameter, EnumParameterValue, FloatParameter, ParameterValueUpdate,
         SmoothedParameterValue,
     },
     utils::{
@@ -90,21 +90,21 @@ impl ChorusEffect {
         0.0..=PI as f32,
         PI as f32 / 2.0,
     )
-    .with_unit("°");
+    .with_formatter(formatters::DEGREES);
     pub const DEPTH: FloatParameter = FloatParameter::new(
         FourCC(*b"dpth"),
         "Depth",
         0.0..=1.0,
         0.25, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
     pub const FEEDBACK: FloatParameter = FloatParameter::new(
         FourCC(*b"fdbk"),
         "Feedback",
         -1.0..=1.0,
         0.5, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
     pub const DELAY: FloatParameter = FloatParameter::new(
         FourCC(*b"dlay"),
         "Delay",
@@ -118,7 +118,7 @@ impl ChorusEffect {
         0.0..=1.0,
         0.5, //
     )
-    .with_unit("%");
+    .with_formatter(formatters::PERCENT);
     pub const FILTER_TYPE: EnumParameter = EnumParameter::new(
         FourCC(*b"fltt"),
         "Filter Type",
@@ -131,8 +131,8 @@ impl ChorusEffect {
         20.0..=20000.0,
         20000.0, //
     )
-    .with_unit("Hz")
-    .with_scaling(ParameterScaling::Exponential(2.5));
+    .with_scaling(ParameterScaling::Exponential(2.5))
+    .with_unit("Hz");
     pub const FILTER_RESONANCE: FloatParameter =
         FloatParameter::new(FourCC(*b"fltq"), "Filter Resonance", 0.0..=1.0, 0.);
 
@@ -141,41 +141,19 @@ impl ChorusEffect {
 
     /// Creates a new `ChorusEffect` with default parameter values.
     pub fn new() -> Self {
-        let to_string_percent = |v: f32| format!("{:.2}", v * 100.0);
-        let from_string_percent = |v: &str| v.parse::<f32>().map(|f| f / 100.0).ok();
-
-        let to_string_degrees = |v: f32| v.to_degrees().round().to_string();
-        let from_string_degrees = |v: &str| v.parse::<f32>().map(|f| f.to_radians()).ok();
-
         Self {
             sample_rate: 0,
             channel_count: 0,
 
             rate: SmoothedParameterValue::from_description(Self::RATE) //
                 .with_smoother(LinearSmoothedValue::default().with_step(0.005)),
-            phase: SmoothedParameterValue::from_description(
-                Self::PHASE
-                    .clone()
-                    .with_display(to_string_degrees, from_string_degrees),
-            )
-            .with_smoother(LinearSmoothedValue::default().with_step(0.001)),
-            depth: SmoothedParameterValue::from_description(
-                Self::DEPTH
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
-            feedback: SmoothedParameterValue::from_description(
-                Self::FEEDBACK
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            phase: SmoothedParameterValue::from_description(Self::PHASE)
+                .with_smoother(LinearSmoothedValue::default().with_step(0.001)),
+            depth: SmoothedParameterValue::from_description(Self::DEPTH),
+            feedback: SmoothedParameterValue::from_description(Self::FEEDBACK),
             delay: SmoothedParameterValue::from_description(Self::DELAY)
                 .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
-            wet_mix: SmoothedParameterValue::from_description(
-                Self::WET_MIX
-                    .clone()
-                    .with_display(to_string_percent, from_string_percent),
-            ),
+            wet_mix: SmoothedParameterValue::from_description(Self::WET_MIX),
             filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
             filter_freq: SmoothedParameterValue::from_description(Self::FILTER_FREQ),
             filter_resonance: SmoothedParameterValue::from_description(Self::FILTER_RESONANCE),

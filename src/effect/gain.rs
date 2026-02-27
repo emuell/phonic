@@ -2,10 +2,10 @@ use four_cc::FourCC;
 
 use crate::{
     effect::{Effect, EffectTime},
-    parameter::{FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
+    parameter::{formatters, FloatParameter, ParameterValueUpdate, SmoothedParameterValue},
     utils::{
         buffer::{scale_buffer, InterleavedBufferMut},
-        db_to_linear, linear_to_db,
+        db_to_linear,
     },
     Error, Parameter, ParameterScaling,
 };
@@ -31,31 +31,13 @@ impl GainEffect {
         1.0,                  // 0dB
     )
     .with_scaling(ParameterScaling::Decibel(Self::MIN_DB, Self::MAX_DB))
-    .with_unit("dB");
+    .with_formatter(formatters::GAIN);
 
     /// Creates a new `GainEffect` with default gain (0dB = unity gain).
     pub fn new() -> Self {
-        let gain_to_string = |v: f32| {
-            let db = linear_to_db(v);
-            if db <= -59.0 {
-                "-INF".to_string()
-            } else {
-                format!("{:.2}", db)
-            }
-        };
-        let string_to_gain = |s: &str| {
-            if s.trim().eq_ignore_ascii_case("-inf") || s.trim().eq_ignore_ascii_case("inf") {
-                Some(db_to_linear(Self::MIN_DB))
-            } else {
-                s.parse::<f32>().ok().map(db_to_linear)
-            }
-        };
-
         Self {
             channel_count: 0,
-            gain: SmoothedParameterValue::from_description(
-                Self::GAIN.with_display(gain_to_string, string_to_gain),
-            ),
+            gain: SmoothedParameterValue::from_description(Self::GAIN),
         }
     }
 
