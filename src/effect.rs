@@ -13,6 +13,7 @@ pub mod distortion;
 pub mod eq5;
 pub mod filter;
 pub mod gain;
+pub mod gate;
 pub mod pan;
 pub mod reverb;
 

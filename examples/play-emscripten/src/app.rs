@@ -553,12 +553,13 @@ impl App {
     pub fn get_available_effects() -> Vec<String> {
         vec![
             "Gain".to_string(),
-            "DcFilter".to_string(),
+            "Panning".to_string(),
             "Filter".to_string(),
             "Eq5".to_string(),
             "Reverb".to_string(),
             "Chorus".to_string(),
             "Compressor".to_string(),
+            "Gate".to_string(),
             "Distortion".to_string(),
         ]
     }
@@ -567,12 +568,13 @@ impl App {
     pub fn add_effect_with_name(&mut self, effect_name: &str) -> Result<(EffectId, String), Error> {
         match effect_name {
             "Gain" => self.add_effect(effects::GainEffect::new()),
-            "DcFilter" => self.add_effect(effects::DcFilterEffect::new()),
+            "Panning" => self.add_effect(effects::PanningEffect::new()),
             "Filter" => self.add_effect(effects::FilterEffect::new()),
             "Eq5" => self.add_effect(effects::Eq5Effect::new()),
             "Reverb" => self.add_effect(effects::ReverbEffect::new()),
             "Chorus" => self.add_effect(effects::ChorusEffect::new()),
             "Compressor" => self.add_effect(effects::CompressorEffect::new_compressor()),
+            "Gate" => self.add_effect(effects::GateEffect::new()),
             "Distortion" => self.add_effect(effects::DistortionEffect::new()),
             _ => {
                 return Err(Error::ParameterError(format!(

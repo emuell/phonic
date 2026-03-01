@@ -249,6 +249,7 @@ pub mod effects {
         eq5::Eq5Effect,
         filter::{FilterEffect, FilterEffectType},
         gain::{GainEffect, GainEffectDcFilterMode},
+        gate::GateEffect,
         pan::PanningEffect,
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
