@@ -63,6 +63,32 @@ pub const GAIN: FloatFormatter = (gain_to_string, gain_from_string);
 
 // -------------------------------------------------------------------------------------------------
 
+fn decibels_to_string(v: f32) -> String {
+    if v <= -60.0 {
+        "-INF dB".to_string()
+    } else {
+        format!("{:.2} dB", v)
+    }
+}
+
+fn decibels_from_string(s: &str) -> Option<f32> {
+    if s.trim().eq_ignore_ascii_case("-inf") || s.trim().eq_ignore_ascii_case("inf") {
+        Some(-60.0)
+    } else {
+        let s = s.trim_start().trim_end_matches(|c: char| {
+            c.eq_ignore_ascii_case(&'d') || c.eq_ignore_ascii_case(&'b') || c.is_whitespace()
+        });
+        s.parse::<f32>().ok()
+    }
+}
+
+/// Formats a dB value directly (e.g. `"-INF dB"` at -60 dB or below, `"-12.00 dB"`).
+///
+/// Unlike [`GAIN`], this formatter expects values already in dB (not linear).
+pub const DECIBELS: FloatFormatter = (decibels_to_string, decibels_from_string);
+
+// -------------------------------------------------------------------------------------------------
+
 fn pan_to_string(v: f32) -> String {
     let v = v * 50.0;
     if v.abs() < 0.1 {
