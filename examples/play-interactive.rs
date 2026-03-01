@@ -12,7 +12,7 @@ use std::{
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 
 use phonic::{
-    effects,
+    effects::{FilterEffect, FilterEffectType, GainEffect, GainEffectDcFilterMode, ReverbEffect},
     generators::{FunDspGenerator, Sampler},
     utils::ahdsr::AhdsrParameters,
     Error, FilePlaybackOptions, GeneratorPlaybackHandle, GeneratorPlaybackOptions, NotePlaybackId,
@@ -62,12 +62,12 @@ fn main() -> Result<(), Error> {
         loop_mixer = player.add_mixer(None)?;
 
         // add a filter effect
-        const DEFAULT_FILTER_TYPE: effects::FilterEffectType = effects::FilterEffectType::Lowpass;
+        const DEFAULT_FILTER_TYPE: FilterEffectType = FilterEffectType::Lowpass;
         const DEFAULT_FILTER_CUTOFF: f32 = 20000.0;
         const DEFAULT_FILTER_Q: f32 = 0.707;
 
         loop_filter_effect = player.add_effect(
-            effects::FilterEffect::with_parameters(
+            FilterEffect::with_parameters(
                 DEFAULT_FILTER_TYPE,
                 DEFAULT_FILTER_CUTOFF,
                 DEFAULT_FILTER_Q,
@@ -82,14 +82,14 @@ fn main() -> Result<(), Error> {
         // create a new mixer
         tone_mixer = player.add_mixer(None)?;
         // add a reverb effect
-        player.add_effect(
-            effects::ReverbEffect::with_parameters(0.6, 0.5),
-            tone_mixer.id(),
-        )?;
+        player.add_effect(ReverbEffect::with_parameters(0.6, 0.5), tone_mixer.id())?;
     }
 
-    // add a dc filter effect to the main mixer
-    player.add_effect(effects::DcFilterEffect::default(), None)?;
+    // add a gain effect with DC filter to the main mixer
+    player.add_effect(
+        GainEffect::with_parameters(0.0, GainEffectDcFilterMode::Default),
+        None,
+    )?;
 
     // start playing the background loop
     let loop_file = player.play_file(
@@ -211,15 +211,15 @@ fn main() -> Result<(), Error> {
                 }
                 Keycode::Key1 | Keycode::Key2 | Keycode::Key3 | Keycode::Key4 if alt_key => {
                     let filter_type = match key {
-                        Keycode::Key1 => effects::FilterEffectType::Lowpass,
-                        Keycode::Key2 => effects::FilterEffectType::Bandpass,
-                        Keycode::Key3 => effects::FilterEffectType::Bandstop,
-                        Keycode::Key4 => effects::FilterEffectType::Highpass,
+                        Keycode::Key1 => FilterEffectType::Lowpass,
+                        Keycode::Key2 => FilterEffectType::Bandpass,
+                        Keycode::Key3 => FilterEffectType::Bandstop,
+                        Keycode::Key4 => FilterEffectType::Highpass,
                         _ => unreachable!(),
                     };
                     println!("Filter type: {filter_type}");
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::TYPE.value_update(filter_type), None)
+                        .set_parameter(FilterEffect::TYPE.value_update(filter_type), None)
                         .unwrap_or_default();
                 }
                 Keycode::Key1 => {
@@ -251,7 +251,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff * 1.1_f32).min(20000.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF.value_update(*cutoff), None)
+                        .set_parameter(FilterEffect::CUTOFF.value_update(*cutoff), None)
                         .unwrap_or_default();
                 }
                 Keycode::Left if alt_key => {
@@ -259,7 +259,7 @@ fn main() -> Result<(), Error> {
                     *cutoff = (*cutoff / 1.1_f32).max(20.0);
                     println!("Filter cutoff: {:.0} Hz", *cutoff);
                     loop_filter_effect
-                        .set_parameter(effects::FilterEffect::CUTOFF.value_update(*cutoff), None)
+                        .set_parameter(FilterEffect::CUTOFF.value_update(*cutoff), None)
                         .unwrap_or_default();
                 }
                 Keycode::Left => {

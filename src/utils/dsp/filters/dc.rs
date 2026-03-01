@@ -18,7 +18,7 @@ pub enum DcFilterMode {
 }
 
 impl DcFilterMode {
-    fn hz(&self) -> f64 {
+    pub fn hz(&self) -> f64 {
         match self {
             DcFilterMode::Slow => 1.0,
             DcFilterMode::Default => 5.0,

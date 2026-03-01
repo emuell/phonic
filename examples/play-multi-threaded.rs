@@ -18,7 +18,7 @@ use std::{ops::RangeInclusive, path::PathBuf, time::Duration};
 
 use arg::{parse_args, Args};
 use phonic::{
-    effects::{CompressorEffect, GainEffect, ReverbEffect},
+    effects::{CompressorEffect, GainEffect, GainEffectDcFilterMode, ReverbEffect},
     four_cc::FourCC,
     fundsp::shared::Shared,
     generators::{FunDspGenerator, ModulationConfig, Sampler},
@@ -400,7 +400,10 @@ fn main() -> Result<(), Error> {
             match rng.random_range(0..3) {
                 0 => {
                     let gain_db = rng.random_range(-6.0..0.0);
-                    player.add_effect(GainEffect::with_gain_db(gain_db), mixer.id())?;
+                    player.add_effect(
+                        GainEffect::with_parameters(gain_db, GainEffectDcFilterMode::Off),
+                        mixer.id(),
+                    )?;
                 }
                 1 => {
                     let wet = rng.random_range(0.2..0.5);

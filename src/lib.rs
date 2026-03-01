@@ -244,12 +244,12 @@ pub mod effects {
     pub use super::effect::{
         chorus::{ChorusEffect, ChorusEffectFilterType, ChorusEffectMessage},
         compressor::CompressorEffect,
-        dcfilter::{DcFilterEffect, DcFilterEffectMode},
         delay::{DelayEffect, DelayEffectFilterType, DelayEffectMessage, DelayEffectMode},
         distortion::{DistortionEffect, DistortionType},
         eq5::Eq5Effect,
         filter::{FilterEffect, FilterEffectType},
-        gain::GainEffect,
+        gain::{GainEffect, GainEffectDcFilterMode},
+        pan::PanningEffect,
         reverb::{ReverbEffect, ReverbEffectMessage},
     };
 }
