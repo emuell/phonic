@@ -5,53 +5,29 @@ phonic
 [![docs.rs](https://docs.rs/phonic/badge.svg)](https://docs.rs/phonic)
 [![license](https://img.shields.io/crates/l/phonic.svg)](https://choosealicense.com/licenses/agpl-3.0/)
 
-phonic is a cross-platform audio playback and DSP library for Rust. It provides a flexible, low-latency audio engine and DSP tools for desktop and web-based music application development.
+**phonic** is a cross-platform audio playback and DSP library for Rust. It provides a flexible, low-latency audio engine for playing back audio files, synthesizing sounds, applying real-time effects, and building complex audio processing graphs:
 
-Originally developed for the [AFEC-Explorer](https://github.com/emuell/AFEC-Explorer) app, phonic was created to provide precise playback position monitoring - a feature lacking in other Rust audio libraries at the time. It is now used in the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns) as example playback engine and related audio projects.
+- Plays audio on Windows, macOS, Linux via [CPAL](https://github.com/RustAudio/cpal), on the web via WebAssembly and
+ [Emscripten](https://emscripten.org/), or offline to WAV files.
+- Decodes most common audio formats via [Symphonia](https://github.com/pdeljanov/Symphonia), wth playback preloaded from RAM or streamed on-the-fly.
+- Processes mixer graphs concurrently with custom or built-in DSP effects (gain, panning, filter, 5-band EQ, delay, reverb, chorus, compressor/limiter, gate, distortion) and sample-accurate event scheduling.
+- Allows creating custom synths via the optional [FunDSP](https://github.com/SamiPerttu/fundsp) integration.
+- Includes a basic polyphonic sampler with AHDSR envelopes, granular synthesis, and glide/portamento.
+- `Send + Sync` playback handles allow monitoring and controlling components from any thread.
+
+Originally developed for the [afec-explorer](https://github.com/emuell/AFEC-Explorer) app, phonic is now used in the experimental algorithmic sequencer [pattrns](https://github.com/renoise/pattrns) as example playback engine and related projects.
+
+### Docs
+
+Rust docs for the last published versions are available at <https://docs.rs/phonic>
 
 > [!NOTE]
 > phonic has not yet reached a stable version, so expect breaking changes.
 
-### Features
-
-- Cross-Platform Audio Output
-  - Play audio on **Windows, macOS, Linux** thanks to [CPAL](https://github.com/RustAudio/cpal).
-  - Play on the web via **WebAssembly** and [Emscripten](https://emscripten.org/).
-  - WAV file output for rendering audio to files thanks to [Hound](https://github.com/ruuda/hound).
-
-- Audio File Decoding and Playback
-  - Support for most common **audio formats** via [Symphonia](https://github.com/pdeljanov/Symphonia).
-  - Automatic resampling and channel mapping via a fast custom resampler and [Rubato](https://github.com/HEnquist/rubato).
-  - Play audio files **preloaded** (buffered) or **streamed** (on-the-fly decoded).
-  - Custom WAV and FLAC file parser to enable looped file playback.
-
-- Event Scheduling, Sequencing
-  - Thread-safe **`Send + Sync`** handles for controlling playback and parameters from any thread.
-  - Sample-precise scheduling of playback events for accurate sequencing.
-  
-- Sampler and Synthesizer Tooling
-  - Built in polyphonic **sampler** with optional AHDSR envelopes, granular synthesis and glide/portamento.
-  - Create **custom synths** from scratch, or with style and fun via the optional [FunDSP](https://github.com/SamiPerttu/fundsp) integration.
-  - Dynamically route a predefined **modulation** source set (LFOs, Envelopes...) to generators.
-
-- DSP Effects and Mixer Graphs
-  - Built-in **DSP effects**: gain, filter, 5-band EQ, reverb, chorus, compressor, limiter, distortion.
-  - Create custom effects or build **DSP graphs** by routing audio through nested sub-mixers.
-  - **DSP parameter** abstraction with normalized or raw value updates, scaling, smoothing, and string formatting.
-  - Sub-mixers are by default processed **concurrently** across multiple audio worker threads.
-  - Effect chains **auto-bypass** when receiving silence to save CPU.
-
-- Playback Monitoring
-  - Real-time average and peak CPU load metrics for the mixer and individual sub-mixers.
-  - Monitoring of audio levels, file and generator playback positions for GUI integration.
-
-### Documentation
-
-Rust docs for the last published versions are available at <https://docs.rs/phonic>
-
 ### Examples
 
 See [/examples](https://github.com/emuell/phonic/tree/master/examples) directory for more examples.
+
 
 #### File Playback with Monitoring
 
@@ -207,6 +183,10 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 ```
+
+### Compiling for WebAssembly
+
+The [play-emscripten Example](https://github.com/emuell/phonic/tree/master/examples/play-emscripten) shows how to compile for WebAssembly with Emscripten and includes an example webpage with custom FunDSP synths, DSP effects and sequenced sample file playback.
 
 ## Contributing
 
