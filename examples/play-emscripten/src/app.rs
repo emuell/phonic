@@ -1,11 +1,11 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use emscripten_rs_sys::emscripten_request_animation_frame_loop;
-use four_cc::FourCC;
 use serde::Serialize;
 
 use phonic::{
     effects,
+    four_cc::FourCC,
     generators::{FunDspGenerator, ModulationConfig, ModulationSource, ModulationTarget},
     sources::PreloadedFileSource,
     utils::{db_to_linear, speed_from_note},
@@ -556,6 +556,7 @@ impl App {
             "Panning".to_string(),
             "Filter".to_string(),
             "Eq5".to_string(),
+            "Delay".to_string(),
             "Reverb".to_string(),
             "Chorus".to_string(),
             "Compressor".to_string(),
@@ -571,6 +572,7 @@ impl App {
             "Panning" => self.add_effect(effects::PanningEffect::new()),
             "Filter" => self.add_effect(effects::FilterEffect::new()),
             "Eq5" => self.add_effect(effects::Eq5Effect::new()),
+            "Delay" => self.add_effect(effects::DelayEffect::new()),
             "Reverb" => self.add_effect(effects::ReverbEffect::new()),
             "Chorus" => self.add_effect(effects::ChorusEffect::new()),
             "Compressor" => self.add_effect(effects::CompressorEffect::new_compressor()),

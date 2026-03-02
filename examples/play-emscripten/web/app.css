@@ -56,14 +56,16 @@
 	--key-white-active-end: #bbbbbb;
 
 	/* Effect Type Colors */
+	--eff-gain: #af4c50;
+	--eff-panning: #4caf50;
+	--eff-delay: #279cb0;
 	--eff-reverb: #9c27b0;
 	--eff-chorus: #2196f3;
 	--eff-filter: #ff9800;
-	--eff-distortion: #f44336;
-	--eff-gain: #4caf50;
 	--eff-eq5: #e91e63;
-	--eff-compressor: #00bcd4;
-	--eff-dcfilter: #9e9e9e;
+	--eff-compressor: #828282;
+	--eff-gate: #9e9e9e;
+	--eff-distortion: #f44336;
 
 	/* Modulation Source Colors */
 	--mod-lfo: #2196f3;
@@ -460,6 +462,15 @@ select:disabled {
 }
 
 /* Colored top borders for effect types */
+.effect-card.gain {
+	border-top: 3px solid var(--eff-gain);
+}
+.effect-card.panning {
+	border-top: 3px solid var(--eff-panning);
+}
+.effect-card.delay {
+	border-top: 3px solid var(--eff-delay);
+}
 .effect-card.reverb {
 	border-top: 3px solid var(--eff-reverb);
 }
@@ -469,20 +480,17 @@ select:disabled {
 .effect-card.filter {
 	border-top: 3px solid var(--eff-filter);
 }
-.effect-card.distortion {
-	border-top: 3px solid var(--eff-distortion);
-}
-.effect-card.gain {
-	border-top: 3px solid var(--eff-gain);
-}
 .effect-card.eq5 {
 	border-top: 3px solid var(--eff-eq5);
 }
 .effect-card.compressor {
 	border-top: 3px solid var(--eff-compressor);
 }
-.effect-card.dcfilter {
-	border-top: 3px solid var(--eff-dcfilter);
+.effect-card.gate {
+	border-top: 3px solid var(--eff-gate);
+}
+.effect-card.distortion {
+	border-top: 3px solid var(--eff-distortion);
 }
 
 .effect-header {

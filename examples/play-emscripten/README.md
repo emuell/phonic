@@ -1,9 +1,8 @@
 # Emscripten Demo
 
-This example crate shows how to build and serve a simple website which is using phonic via Emscripten.
+Shows how to build and serve a website which is using phonic via [Emscripten](https://emscripten.org). 
 
-It creates a webpage which plays a metronome sample file and allows playing a simple synth sound with the computer keyboard.
-
+This example plays two sample files as metronome and allows playing FunDSP synth sounds with phonic's built-in DSP effects using the computer keyboard or MIDI.
 
 ## Build Instructions
 
