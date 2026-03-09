@@ -154,7 +154,7 @@ pub use parameter::{
 };
 
 pub use source::{
-    file::{FilePlaybackOptions, FileSource},
+    file::{AudioFileBuffer, AudioFileInfo, FilePlaybackOptions, FileSource},
     measured::{CpuLoad, CpuLoadState, SharedCpuLoadState},
     metered::{AudioLevel, AudioLevelState, SharedAudioLevelState},
     resampled::ResamplingQuality,
@@ -192,9 +192,7 @@ pub mod sources {
     pub use super::source::empty::EmptySource;
 
     pub use super::source::file::{
-        common::FileSourceImpl,
-        preloaded::{PreloadedFileBuffer, PreloadedFileSource},
-        streamed::StreamedFileSource,
+        common::FileSourceImpl, preloaded::PreloadedFileSource, streamed::StreamedFileSource,
         FilePlaybackMessage,
     };
     pub use super::source::synth::{

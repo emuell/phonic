@@ -21,14 +21,13 @@ use crate::{
         file::preloaded::PreloadedFileSource, mixed::MixedSource, unique_source_id, Source,
         SourceTime,
     },
-    sources::PreloadedFileBuffer,
     utils::{
         ahdsr::AhdsrParameters,
         buffer::{add_buffers, clear_buffer},
         dsp::lfo::LfoWaveform,
     },
-    Error, FilePlaybackOptions, FileSource, NotePlaybackId, PlaybackId, PlaybackStatusContext,
-    PlaybackStatusEvent, ResamplingQuality,
+    AudioFileBuffer, Error, FilePlaybackOptions, FileSource, NotePlaybackId, PlaybackId,
+    PlaybackStatusContext, PlaybackStatusEvent, ResamplingQuality,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -866,7 +865,7 @@ impl Sampler {
     }
 
     fn create_granular_sample_buffer(
-        file_buffer: Arc<PreloadedFileBuffer>,
+        file_buffer: Arc<AudioFileBuffer>,
         output_sample_rate: u32,
     ) -> Result<Arc<Box<[f32]>>, Error> {
         if file_buffer.channel_count() == 1 && file_buffer.sample_rate() == output_sample_rate {

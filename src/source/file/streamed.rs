@@ -16,7 +16,7 @@ use rb::{Consumer, Producer, RbConsumer, RbProducer, SpscRb, RB};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
 
 use super::{
-    common::FileSourceImpl, decoder::AudioDecoder, FilePlaybackMessage, FilePlaybackOptions,
+    common::FileSourceImpl, decoder::AudioFileDecoder, FilePlaybackMessage, FilePlaybackOptions,
     FileSource,
 };
 
@@ -43,6 +43,12 @@ pub enum StreamedFileSourceMessage {
     Stop,
     /// Stop the decoder by force, immediately.
     Kill,
+    /// Override the loop range in sample frames. Pass `None` to revert to the embedded loop.
+    SetLoopRange(Option<(u64, u64)>),
+    /// Disable looping entirely (clears loop range and sets repeat count to zero).
+    DisableLooping,
+    /// Re-enable looping, reverting to the file's embedded loop (if any).
+    ResetLooping,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -69,7 +75,7 @@ impl StreamedFileSource {
         let file_path = Arc::new(path.as_ref().to_string_lossy().to_string());
 
         // Create decoder
-        let decoder = AudioDecoder::from_file(path)?;
+        let decoder = AudioFileDecoder::from_file(path)?;
 
         // Get repeat option
         let repeat = options.repeat.unwrap_or(if !decoder.loops().is_empty() {
@@ -135,6 +141,32 @@ impl StreamedFileSource {
             worker_state,
             file_source,
         })
+    }
+
+    /// Override the loop range in sample frames.
+    /// Pass `None` to revert to the file's embedded loop range.
+    pub fn set_loop_range_override(&self, frames: Option<std::ops::Range<u64>>) {
+        let range = frames.map(|r| (r.start, r.end));
+        let _ = self
+            .stream_thread
+            .sender
+            .try_send(StreamedFileSourceMessage::SetLoopRange(range));
+    }
+
+    /// Disable looping entirely. Clears any range override and sets the repeat count to zero.
+    pub fn disable_looping(&self) {
+        let _ = self
+            .stream_thread
+            .sender
+            .try_send(StreamedFileSourceMessage::DisableLooping);
+    }
+
+    /// Re-enable looping, reverting to the file's embedded loop (if any).
+    pub fn reset_looping(&self) {
+        let _ = self
+            .stream_thread
+            .sender
+            .try_send(StreamedFileSourceMessage::ResetLooping);
     }
 
     pub(crate) fn total_samples(&self) -> Option<u64> {
@@ -458,7 +490,7 @@ struct StreamThread {
     /// Sending part of our own actor channel.
     sender: SyncSender<StreamedFileSourceMessage>,
     /// Decoder we are reading packets/samples from.
-    decoder: AudioDecoder,
+    decoder: AudioFileDecoder,
     /// Audio properties of the decoded signal.
     input_spec: SignalSpec,
     /// Sample buffer containing samples read in the last packet.
@@ -480,8 +512,12 @@ struct StreamThread {
     is_reading: bool,
     /// Number of times we should repeat the source
     repeat: usize,
+    /// Original repeat count, restored on `reset_looping`.
+    original_repeat: usize,
     /// Loop range in samples
     loop_range: Option<Range<u64>>,
+    /// Original embedded loop range, restored on `reset_looping`.
+    original_loop_range: Option<Range<u64>>,
 }
 
 impl StreamThread {
@@ -492,7 +528,7 @@ impl StreamThread {
 
     fn new(
         sender: SyncSender<StreamedFileSourceMessage>,
-        decoder: AudioDecoder,
+        decoder: AudioFileDecoder,
         output: SpscRb<f32>,
         shared_state: SharedStreamThreadState,
         repeat: usize,
@@ -520,6 +556,9 @@ impl StreamThread {
             }
         }
 
+        let original_loop_range = loop_range.clone();
+        let original_repeat = repeat;
+
         let samples_written = 0;
         let samples_to_write = 0..0;
         let samples_to_skip = 0;
@@ -544,7 +583,9 @@ impl StreamThread {
             samples_to_skip,
             is_reading,
             repeat,
+            original_repeat,
             loop_range,
+            original_loop_range,
         }
     }
 
@@ -599,6 +640,9 @@ impl StreamThread {
                 StreamedFileSourceMessage::Read => self.on_read(),
                 StreamedFileSourceMessage::Stop => self.on_stop(),
                 StreamedFileSourceMessage::Kill => self.on_stop_forced(),
+                StreamedFileSourceMessage::SetLoopRange(range) => self.on_set_loop_range(range),
+                StreamedFileSourceMessage::DisableLooping => self.on_disable_looping(),
+                StreamedFileSourceMessage::ResetLooping => self.on_reset_looping(),
             };
             action = match result {
                 Ok(action) => action,
@@ -634,6 +678,29 @@ impl StreamThread {
         self.is_reading = false;
         self.shared_state.is_playing.store(false, Ordering::Relaxed);
         Ok(StreamThreadAction::Shutdown)
+    }
+
+    fn on_set_loop_range(
+        &mut self,
+        range: Option<(u64, u64)>,
+    ) -> Result<StreamThreadAction, Error> {
+        self.loop_range = range.map(|(start, end)| {
+            let ch = self.input_spec.channels.count() as u64;
+            (start * ch)..(end * ch)
+        });
+        Ok(StreamThreadAction::Continue)
+    }
+
+    fn on_disable_looping(&mut self) -> Result<StreamThreadAction, Error> {
+        self.loop_range = None;
+        self.repeat = 0;
+        Ok(StreamThreadAction::Continue)
+    }
+
+    fn on_reset_looping(&mut self) -> Result<StreamThreadAction, Error> {
+        self.loop_range = self.original_loop_range.clone();
+        self.repeat = self.original_repeat;
+        Ok(StreamThreadAction::Continue)
     }
 
     fn on_seek(&mut self, time: Duration) -> Result<StreamThreadAction, Error> {

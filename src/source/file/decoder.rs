@@ -26,7 +26,7 @@ use crate::error::Error;
 
 /// Loop mode direction from a decoded audio file
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AudioDecoderLoopMode {
+pub enum AudioFileDecoderLoopMode {
     Forward,
     Alternating,
     Backward,
@@ -35,21 +35,21 @@ pub enum AudioDecoderLoopMode {
 
 /// Loop info from a decoded audio file
 #[derive(Debug, Clone)]
-pub struct AudioDecoderLoopInfo {
+pub struct AudioFileDecoderLoop {
     #[allow(unused)]
-    pub mode: AudioDecoderLoopMode,
+    pub mode: AudioFileDecoderLoopMode,
     pub start: u32,
     pub end: u32,
 }
 
-pub struct AudioDecoder {
+pub struct AudioFileDecoder {
     track_id: u32, // Internal track index.
     decoder: Box<dyn Decoder>,
     format: Box<dyn FormatReader>,
-    loops: Vec<AudioDecoderLoopInfo>,
+    loops: Vec<AudioFileDecoderLoop>,
 }
 
-impl AudioDecoder {
+impl AudioFileDecoder {
     /// Create a new decoder from the given file path.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let mut file = File::open(path.as_ref())?;
@@ -133,7 +133,7 @@ impl AudioDecoder {
         }
     }
 
-    pub fn loops(&self) -> &[AudioDecoderLoopInfo] {
+    pub fn loops(&self) -> &[AudioFileDecoderLoop] {
         &self.loops
     }
 
@@ -154,7 +154,7 @@ impl AudioDecoder {
     /// Detect file container and parse loop metadata accordingly.
     fn parse_loop_metadata<R: io::Read + io::Seek>(
         reader: &mut R,
-    ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+    ) -> Result<Vec<AudioFileDecoderLoop>, Error> {
         let mut magic = [0u8; 4];
         let read = reader
             .read(&mut magic)
@@ -172,7 +172,7 @@ impl AudioDecoder {
 
     fn parse_riff_loops<R: io::Read + io::Seek>(
         reader: &mut R,
-    ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+    ) -> Result<Vec<AudioFileDecoderLoop>, Error> {
         const RIFF_ID: ChunkId = ChunkId { value: *b"RIFF" };
         const WAVE_ID: ChunkId = ChunkId { value: *b"WAVE" };
         const SMPL_ID: ChunkId = ChunkId { value: *b"smpl" };
@@ -220,7 +220,7 @@ impl AudioDecoder {
     /// Minimal FLAC metadata parser that scans Application blocks for embedded RIFF "smpl" data.
     fn parse_flac_loops<R: io::Read + io::Seek>(
         reader: &mut R,
-    ) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+    ) -> Result<Vec<AudioFileDecoderLoop>, Error> {
         // Expect "fLaC" marker at start.
         let mut marker = [0u8; 4];
         reader
@@ -231,7 +231,7 @@ impl AudioDecoder {
         }
 
         // Iterate metadata blocks.
-        let mut loops: Vec<AudioDecoderLoopInfo> = Vec::new();
+        let mut loops: Vec<AudioFileDecoderLoop> = Vec::new();
         loop {
             // METADATA_BLOCK_HEADER:
             // 1 byte: [is_last(1 bit) | block_type(7 bits)]
@@ -291,7 +291,7 @@ impl AudioDecoder {
     }
 
     /// Parse the contents of a RIFF "smpl" chunk body (without the 8-byte RIFF chunk header).
-    fn parse_smpl_body(data: &[u8]) -> Result<Vec<AudioDecoderLoopInfo>, Error> {
+    fn parse_smpl_body(data: &[u8]) -> Result<Vec<AudioFileDecoderLoop>, Error> {
         // The smpl chunk header must be >= 36 bytes long.
         if data.len() < 36 {
             return Err(Error::MediaFileProbeError);
@@ -309,15 +309,15 @@ impl AudioDecoder {
 
             let loop_type = LittleEndian::read_u32(&loop_slice[4..8]);
             let loop_mode = match loop_type {
-                0 => AudioDecoderLoopMode::Forward,
-                1 => AudioDecoderLoopMode::Alternating,
-                2 => AudioDecoderLoopMode::Backward,
-                _ => AudioDecoderLoopMode::Unknown,
+                0 => AudioFileDecoderLoopMode::Forward,
+                1 => AudioFileDecoderLoopMode::Alternating,
+                2 => AudioFileDecoderLoopMode::Backward,
+                _ => AudioFileDecoderLoopMode::Unknown,
             };
             let loop_start = LittleEndian::read_u32(&loop_slice[8..12]);
             let loop_end = LittleEndian::read_u32(&loop_slice[12..16]);
 
-            loops.push(AudioDecoderLoopInfo {
+            loops.push(AudioFileDecoderLoop {
                 mode: loop_mode,
                 start: loop_start,
                 end: loop_end,
@@ -327,6 +327,20 @@ impl AudioDecoder {
         }
 
         Ok(loops)
+    }
+
+    /// Count total frames by iterating all container packets without decoding any PCM data.
+    ///
+    /// This is exact for all container formats that store per-packet durations (WAV, AIFF,
+    /// FLAC, MP3, OGG). Call before any `read_packet` calls — seeking is not performed.
+    pub fn count_frames(&mut self) -> u64 {
+        let mut total = 0u64;
+        while let Ok(packet) = self.format.next_packet() {
+            if packet.track_id() == self.track_id {
+                total += packet.dur()
+            }
+        }
+        total
     }
 
     /// Read a next packet of audio from this decoder.  Returns `None` in case

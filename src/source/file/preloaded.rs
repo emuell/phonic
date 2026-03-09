@@ -6,106 +6,17 @@ use std::{
 };
 
 use crossbeam_queue::ArrayQueue;
-use symphonia::core::audio::SampleBuffer;
 
-use super::{
-    common::FileSourceImpl, decoder::AudioDecoder, FilePlaybackMessage, FilePlaybackOptions,
-    FileSource,
-};
+use super::{common::FileSourceImpl, FilePlaybackMessage, FilePlaybackOptions, FileSource};
 
 use crate::{
     error::Error,
     source::{
-        file::{PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
+        file::{AudioFileBuffer, PlaybackId, PlaybackStatusContext, PlaybackStatusEvent},
         Source, SourceTime,
     },
     utils::{buffer::clear_buffer, fader::FaderState},
 };
-
-// -------------------------------------------------------------------------------------------------
-
-/// Shared, decoded audio file buffer as used in [`PreloadedFileSource`].
-#[derive(PartialEq)]
-pub struct PreloadedFileBuffer {
-    buffer: Vec<f32>,
-    channel_count: usize,
-    sample_rate: u32,
-    loop_range: Option<Range<usize>>,
-}
-
-impl PreloadedFileBuffer {
-    /// Create a new shared sample buffer. Returns an error if buffer properties are invalid.
-    pub fn new(
-        buffer: Vec<f32>,
-        channel_count: usize,
-        sample_rate: u32,
-        loop_range: Option<Range<usize>>,
-    ) -> Result<Self, Error> {
-        if sample_rate == 0 {
-            return Err(Error::ParameterError(
-                "file buffer sample rate must be > 0".to_owned(),
-            ));
-        }
-        if channel_count == 0 {
-            return Err(Error::ParameterError(
-                "file buffer channel count must be > 0".to_owned(),
-            ));
-        }
-        if buffer.is_empty() {
-            return Err(Error::ParameterError(
-                "file buffer must not be empty".to_owned(),
-            ));
-        }
-        if !buffer.len().is_multiple_of(channel_count) {
-            return Err(Error::ParameterError(
-                "file buffer length must be a multiple of the channel count".to_owned(),
-            ));
-        }
-        if let Some(loop_range) = &loop_range {
-            if loop_range.start >= loop_range.end || loop_range.end > buffer.len() {
-                return Err(Error::ParameterError(
-                    "file buffer loop range is out of bounds".to_owned(),
-                ));
-            }
-        }
-        Ok(Self {
-            buffer,
-            channel_count,
-            sample_rate,
-            loop_range,
-        })
-    }
-
-    /// Access to the shared sample buffer's raw interleaved sample data.
-    #[inline]
-    pub fn buffer(&self) -> &[f32] {
-        &self.buffer
-    }
-
-    /// Shared sample buffer's channel layout.
-    #[inline]
-    pub fn channel_count(&self) -> usize {
-        self.channel_count
-    }
-
-    /// Shared sample buffer's number of frames.
-    #[inline]
-    pub fn frame_count(&self) -> usize {
-        self.buffer.len() / self.channel_count
-    }
-
-    /// Shared sample buffer's sampling rate.
-    #[inline]
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    /// Shared sample embedded loop points, if any.
-    #[inline]
-    pub fn loop_range(&self) -> Option<Range<usize>> {
-        self.loop_range.clone()
-    }
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -116,15 +27,17 @@ impl PreloadedFileBuffer {
 /// very cheap as this only copies a buffer reference and not the buffer itself. This way a file
 /// can be pre-loaded once and can then be cloned and reused as often as necessary.
 pub struct PreloadedFileSource {
-    file_buffer: Arc<PreloadedFileBuffer>,
+    file_buffer: Arc<AudioFileBuffer>,
     file_source: FileSourceImpl,
     playback_repeat: usize,
     playback_repeat_count: usize,
     playback_pos: usize,
     playback_pos_eof: bool,
+    loop_range_override: Option<Range<usize>>,
 }
 
 impl PreloadedFileSource {
+    /// Create a new preloaded file source with the given audio file path.
     pub fn from_file<P: AsRef<Path>>(
         path: P,
         options: FilePlaybackOptions,
@@ -132,8 +45,8 @@ impl PreloadedFileSource {
     ) -> Result<Self, Error> {
         // Memorize file path for progress
         let file_path = path.as_ref().to_string_lossy().to_string();
-        Self::from_audio_decoder(
-            AudioDecoder::from_file(path)?,
+        Self::from_shared_buffer(
+            Arc::new(AudioFileBuffer::from_file(path)?),
             &file_path,
             options,
             output_sample_rate,
@@ -147,76 +60,17 @@ impl PreloadedFileSource {
         options: FilePlaybackOptions,
         output_sample_rate: u32,
     ) -> Result<Self, Error> {
-        Self::from_audio_decoder(
-            AudioDecoder::from_buffer(file_buffer)?,
+        Self::from_shared_buffer(
+            Arc::new(AudioFileBuffer::from_file_buffer(file_buffer)?),
             file_path,
             options,
             output_sample_rate,
         )
     }
 
-    fn from_audio_decoder(
-        mut audio_decoder: AudioDecoder,
-        file_path: &str,
-        options: FilePlaybackOptions,
-        output_sample_rate: u32,
-    ) -> Result<Self, Error> {
-        // validate options
-        options.validate()?;
-
-        // get buffer signal specs
-        let sample_rate = audio_decoder.signal_spec().rate;
-        let channel_count = audio_decoder.signal_spec().channels.count();
-
-        // prealloc entire buffer, when the decoder gives us a frame hint
-        let buffer_capacity =
-            audio_decoder.codec_params().n_frames.unwrap_or(0) as usize * channel_count + 1;
-        let mut buffer = Vec::with_capacity(buffer_capacity);
-
-        // decode the entire file into our buffer in chunks of max_frames_per_packet sizes
-        let decode_buffer_capacity = audio_decoder
-            .codec_params()
-            .max_frames_per_packet
-            .unwrap_or(16 * 1024 * channel_count as u64);
-        let mut decode_buffer =
-            SampleBuffer::<f32>::new(decode_buffer_capacity, audio_decoder.signal_spec());
-
-        while audio_decoder.read_packet(&mut decode_buffer).is_some() {
-            buffer.append(&mut decode_buffer.samples().to_vec());
-        }
-        if buffer.is_empty() {
-            // TODO: should pass a proper error here
-            return Err(Error::AudioDecodingError(Box::new(
-                symphonia::core::errors::Error::DecodeError("failed to decode file"),
-            )));
-        } else {
-            // add one extra empty sample at the end for the cubic resamplers
-            buffer.extend(std::iter::repeat_n(0.0, channel_count));
-        }
-
-        let mut loop_range = None;
-        if let Some(loop_info) = audio_decoder.loops().first() {
-            // TODO: for now we only support forward loops
-            let loop_start = (loop_info.start as usize * channel_count).min(buffer.len());
-            let loop_end = (loop_info.end as usize * channel_count).min(buffer.len());
-            if loop_end > loop_start {
-                loop_range = Some(loop_start..loop_end);
-            }
-        }
-
-        let file_buffer = Arc::new(PreloadedFileBuffer::new(
-            buffer,
-            channel_count,
-            sample_rate,
-            loop_range,
-        )?);
-
-        Self::from_shared_buffer(file_buffer, file_path, options, output_sample_rate)
-    }
-
     /// Create a new preloaded file source from the given shared, **decoded** file buffer.
     pub fn from_shared_buffer(
-        file_buffer: Arc<PreloadedFileBuffer>,
+        file_buffer: Arc<AudioFileBuffer>,
         file_path: &str,
         options: FilePlaybackOptions,
         output_sample_rate: u32,
@@ -228,14 +82,14 @@ impl PreloadedFileSource {
         let file_source = FileSourceImpl::new(
             file_path,
             options,
-            file_buffer.sample_rate,
-            file_buffer.channel_count,
+            file_buffer.sample_rate(),
+            file_buffer.channel_count(),
             output_sample_rate,
         )?;
 
         let playback_repeat = options
             .repeat
-            .unwrap_or(if file_buffer.loop_range.is_some() {
+            .unwrap_or(if file_buffer.loop_range().is_some() {
                 usize::MAX
             } else {
                 0
@@ -251,6 +105,7 @@ impl PreloadedFileSource {
             playback_repeat,
             playback_pos,
             playback_pos_eof,
+            loop_range_override: None,
         })
     }
 
@@ -270,7 +125,7 @@ impl PreloadedFileSource {
     }
 
     /// Access to the shared file buffer.
-    pub fn file_buffer(&self) -> Arc<PreloadedFileBuffer> {
+    pub fn file_buffer(&self) -> Arc<AudioFileBuffer> {
         Arc::clone(&self.file_buffer)
     }
 
@@ -278,11 +133,36 @@ impl PreloadedFileSource {
     pub fn seek(&mut self, position: Duration) {
         if !self.is_exhausted() {
             let buffer_pos = position.as_secs_f64()
-                * self.file_buffer.sample_rate as f64
-                * self.file_buffer.channel_count as f64;
-            self.playback_pos = (buffer_pos as usize).clamp(0, self.file_buffer.buffer.len());
+                * self.file_buffer.sample_rate() as f64
+                * self.file_buffer.channel_count() as f64;
+            self.playback_pos = (buffer_pos as usize).clamp(0, self.file_buffer.buffer().len());
             self.file_source.resampler.reset();
         }
+    }
+
+    /// Override the loop range in sample frames.
+    /// Pass `None` to revert to the file's embedded loop range.
+    pub fn set_loop_range_override(&mut self, frames: Option<Range<u64>>) {
+        self.loop_range_override = frames.map(|r| {
+            let ch = self.file_buffer.channel_count();
+            (r.start as usize * ch)..(r.end as usize * ch)
+        });
+    }
+
+    /// Disable looping entirely. Clears any range override and sets the repeat count to zero.
+    pub fn disable_looping(&mut self) {
+        self.loop_range_override = None;
+        self.playback_repeat_count = 0;
+    }
+
+    /// Re-enable looping, reverting to the file's embedded loop (if any).
+    pub fn reset_looping(&mut self) {
+        self.loop_range_override = None;
+        self.playback_repeat_count = if self.file_buffer.loop_range().is_some() {
+            usize::MAX
+        } else {
+            0
+        };
     }
 
     /// Set the playback speed (pitch) for this source.
@@ -293,7 +173,8 @@ impl PreloadedFileSource {
             self.file_source.speed_glide_rate = glide.unwrap_or(0.0);
             if self.file_source.speed_glide_rate == 0.0 {
                 self.file_source.current_speed = speed;
-                self.file_source.update_speed(self.file_buffer.sample_rate);
+                self.file_source
+                    .update_speed(self.file_buffer.sample_rate());
             }
         }
     }
@@ -377,10 +258,10 @@ impl PreloadedFileSource {
         let mut written = 0;
 
         let loop_range = self
-            .file_buffer
-            .loop_range
+            .loop_range_override
             .clone()
-            .unwrap_or(0..self.file_buffer.buffer.len());
+            .or_else(|| self.file_buffer.loop_range().clone())
+            .unwrap_or(0..self.file_buffer.buffer().len());
 
         let resampler = &mut self.file_source.resampler;
         let resampler_input_buffer = &mut self.file_source.resampler_input_buffer;
@@ -393,11 +274,11 @@ impl PreloadedFileSource {
                 loop_range.end.saturating_sub(self.playback_pos)
             } else {
                 self.file_buffer
-                    .buffer
+                    .buffer()
                     .len()
                     .saturating_sub(self.playback_pos)
             };
-            let remaining_input_buffer = &self.file_buffer.buffer
+            let remaining_input_buffer = &self.file_buffer.buffer()
                 [self.playback_pos..self.playback_pos + remaining_input_len];
             let remaining_output = &mut output[written..];
             let (input_consumed, output_written) = {
@@ -474,7 +355,7 @@ impl FileSource for PreloadedFileSource {
     }
 
     fn total_frames(&self) -> Option<u64> {
-        Some(self.file_buffer.buffer.len() as u64 / self.file_buffer.channel_count as u64)
+        Some(self.file_buffer.buffer().len() as u64 / self.file_buffer.channel_count() as u64)
     }
 
     fn current_frame_position(&self) -> u64 {
@@ -520,8 +401,8 @@ impl Source for PreloadedFileSource {
                 time,
                 is_start_event,
                 self.playback_pos as u64,
-                self.file_buffer.channel_count,
-                self.file_buffer.sample_rate,
+                self.file_buffer.channel_count(),
+                self.file_buffer.sample_rate(),
             );
         }
 
@@ -531,7 +412,8 @@ impl Source for PreloadedFileSource {
             while total_written < output.len() {
                 if self.file_source.samples_to_next_speed_update == 0 {
                     if self.file_source.current_speed != self.file_source.target_speed {
-                        self.file_source.update_speed(self.file_buffer.sample_rate);
+                        self.file_source
+                            .update_speed(self.file_buffer.sample_rate());
                     }
                     self.file_source.samples_to_next_speed_update =
                         FileSourceImpl::SPEED_UPDATE_CHUNK_SIZE
@@ -566,8 +448,8 @@ impl Source for PreloadedFileSource {
             time,
             is_start_event,
             self.playback_pos as u64,
-            self.file_buffer.channel_count,
-            self.file_buffer.sample_rate,
+            self.file_buffer.channel_count(),
+            self.file_buffer.sample_rate(),
         );
 
         // check if we've finished playing and send Stopped events
@@ -599,8 +481,7 @@ mod tests {
 
         // NB add extra tailing 0.0 sample for the cubic resampler
         let file_buffer = Arc::new(
-            PreloadedFileBuffer::new(vec![0.2, 1.0, 0.5, 0.0], 1, source_sample_rate, None)
-                .unwrap(),
+            AudioFileBuffer::new(vec![0.2, 1.0, 0.5, 0.0], 1, source_sample_rate, None).unwrap(),
         );
 
         // Default
@@ -622,7 +503,7 @@ mod tests {
 
         // HighQuality
         let file_buffer =
-            Arc::new(PreloadedFileBuffer::new(vec![0.2, 1.0, 0.5], 1, 48000, None).unwrap());
+            Arc::new(AudioFileBuffer::new(vec![0.2, 1.0, 0.5], 1, 48000, None).unwrap());
 
         let mut preloaded = PreloadedFileSource::from_shared_buffer(
             Arc::clone(&file_buffer),

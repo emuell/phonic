@@ -16,11 +16,16 @@ use self::{preloaded::PreloadedFileSource, streamed::StreamedFileSource};
 
 // -------------------------------------------------------------------------------------------------
 
+pub(crate) mod buffer;
+pub(crate) mod decoder;
+pub(crate) mod info;
+
 pub mod common;
 pub mod preloaded;
 pub mod streamed;
 
-pub(crate) mod decoder;
+pub use buffer::AudioFileBuffer;
+pub use info::AudioFileInfo;
 
 // -------------------------------------------------------------------------------------------------
 
