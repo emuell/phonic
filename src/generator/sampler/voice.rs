@@ -1,4 +1,7 @@
-use std::sync::{mpsc::SyncSender, Arc};
+use std::{
+    ops::Range,
+    sync::{mpsc::SyncSender, Arc},
+};
 
 use crate::{
     modulation::{matrix::ModulationMatrix, processor::MODULATION_PROCESSOR_BLOCK_SIZE},
@@ -303,6 +306,41 @@ impl SamplerVoice {
         self.panned_source_mut().set_panning(effective_panning);
         if let Some(grain_pool) = &mut self.grain_pool {
             grain_pool.set_panning(effective_panning);
+        }
+    }
+
+    /// Set loop range in sample frames. Pass `None` to revert to the file's embedded loop points.
+    pub fn set_loop_range(&mut self, frames: Option<Range<u64>>) {
+        // Compute normalized range for grain pool before taking the mutable borrow below
+        let normalized = frames.as_ref().map(|r| {
+            let buf = self.file_source().file_buffer();
+            let total_frames = buf.frame_count() as f32;
+            (r.start as f32 / total_frames, r.end as f32 / total_frames)
+        });
+        self.file_source_mut().set_loop_range_override(frames);
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_loop_range(normalized);
+        }
+    }
+
+    /// Disable looping for this voice entirely.
+    pub fn disable_loop(&mut self) {
+        self.file_source_mut().disable_looping();
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_loop_range(None);
+        }
+    }
+
+    /// Re-enable looping, reverting to the file's embedded loop (if any).
+    pub fn reset_loop(&mut self) {
+        // Compute normalized embedded loop range for the grain pool before borrowing mutably
+        let normalized = self.file_source().file_buffer().loop_range().map(|r| {
+            let total = self.file_source().file_buffer().buffer().len();
+            (r.start as f32 / total as f32, r.end as f32 / total as f32)
+        });
+        self.file_source_mut().reset_looping();
+        if let Some(grain_pool) = &mut self.grain_pool {
+            grain_pool.set_loop_range(normalized);
         }
     }
 

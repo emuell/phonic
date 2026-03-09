@@ -219,6 +219,7 @@ pub mod generators {
         empty::EmptyGenerator,
         sampler::{
             GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters, Sampler,
+            SamplerMessage,
         },
         GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
         GeneratorPlaybackMessage,

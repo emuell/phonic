@@ -10,7 +10,8 @@ use strum::VariantNames;
 
 use crate::{
     generator::{
-        Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
+        Generator, GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
+        GeneratorPlaybackMessage, GeneratorPlaybackOptions,
     },
     modulation::{ModulationConfig, ModulationSource, ModulationTarget},
     parameter::{
@@ -43,6 +44,28 @@ pub use granular::{GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, Gr
 
 // -------------------------------------------------------------------------------------------------
 
+/// Generator-specific messages for [`Sampler`].
+///
+/// Send via [`GeneratorPlaybackHandle::send_message`](crate::GeneratorPlaybackHandle::send_message).
+pub enum SamplerMessage {
+    /// Set custom loop start and end in sample frames.
+    /// Pass `None` to disable looping entirely.
+    SetLoopPoints(Option<(u64, u64)>),
+    /// Revert to the file's embedded loop points, undoing a previous `SetLoopPoints`.
+    ResetLoopPoints,
+}
+
+impl GeneratorMessage for SamplerMessage {
+    fn generator_name(&self) -> &'static str {
+        "Sampler"
+    }
+    fn payload(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Basic sampler which plays a single audio file with optional AHDSR envelope and/or
 /// granular playback on a predefined number of voices.
 ///
@@ -62,16 +85,16 @@ pub struct Sampler {
     modulation_state: Option<SamplerModulationState>,
     active_parameters: Vec<Box<dyn Parameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-    transient: bool, // True if the generator can exhaust
-    stopping: bool,  // True if stop has been called and we are waiting for voices to decay
-    stopped: bool,   // True if all voices have decayed after a stop call
+    loop_points: Option<(u64, u64)>, // Custom loop start/end in sample frames. None = no custom override
+    loop_disabled: bool, // True when looping is explicitly disabled via SetLoopPoints(None)
+    transient: bool,     // True if the generator can exhaust
+    stopping: bool,      // True if stop has been called and we are waiting for voices to decay
+    stopped: bool,       // True if all voices have decayed after a stop call
     options: GeneratorPlaybackOptions,
     output_sample_rate: u32,
     output_channel_count: usize,
     temp_buffer: Vec<f32>,
 }
-
-// -------------------------------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------------------------------
 
@@ -526,6 +549,10 @@ impl Sampler {
         // Base parameters are always active. Envelope and granular parameters are added when enabled.
         let active_parameters = Self::base_parameters();
 
+        // Loop points: None = no custom override (use embedded loop from file)
+        let loop_points = None;
+        let loop_disabled = false;
+
         // Initial playback state
         let transient = false;
         let stopping = false;
@@ -545,6 +572,8 @@ impl Sampler {
             base_finetune,
             base_volume,
             base_panning,
+            loop_points,
+            loop_disabled,
             envelope_parameters,
             granular_parameters,
             modulation_state,
@@ -616,6 +645,47 @@ impl Sampler {
         Ok(self)
     }
 
+    /// Returns the active loop start and end in sample frames.
+    /// Returns the file's embedded loop points if no override is set, or `None` if there are none.
+    pub fn loop_points(&self) -> Option<(u64, u64)> {
+        if let Some(points) = self.loop_points {
+            return Some(points);
+        }
+        self.voices.first().and_then(|v| {
+            let buf = v.file_source().file_buffer();
+            buf.loop_range().map(|r| {
+                let ch = buf.channel_count();
+                ((r.start / ch) as u64, (r.end / ch) as u64)
+            })
+        })
+    }
+
+    /// Set loop start and end in sample frames. Pass `None` to disable looping entirely.
+    /// Affects all voices (active and future) immediately.
+    pub fn set_loop_points(&mut self, points: Option<(u64, u64)>) {
+        self.loop_points = points;
+        self.loop_disabled = points.is_none();
+        if let Some((start, end)) = points {
+            for voice in &mut self.voices {
+                voice.set_loop_range(Some(start..end));
+            }
+        } else {
+            for voice in &mut self.voices {
+                voice.disable_loop();
+            }
+        }
+    }
+
+    /// Revert to the file's embedded loop points, undoing a previous `set_loop_points`.
+    /// Affects all voices (active and future) immediately.
+    pub fn reset_loop_points(&mut self) {
+        self.loop_points = None;
+        self.loop_disabled = false;
+        for voice in &mut self.voices {
+            voice.reset_loop();
+        }
+    }
+
     /// Process pending playback messages from the queue.
     fn process_playback_messages(&mut self, current_sample_frame: u64) {
         while let Some(message) = self.playback_message_queue.pop() {
@@ -682,10 +752,10 @@ impl Sampler {
                                     log::warn!("Failed to clear modulation: {err}");
                                 }
                             }
-                            GeneratorPlaybackEvent::ProcessMessage { .. } => {
-                                log::error!(
-                                    "Received unexpected generator message in Sampler"
-                                );
+                            GeneratorPlaybackEvent::ProcessMessage { message } => {
+                                if let Err(err) = self.process_message(message.as_ref()) {
+                                    log::warn!("Failed to process sampler message: {err}");
+                                }
                             }
                         }
                     }
@@ -732,6 +802,13 @@ impl Sampler {
             &self.granular_parameters,
             context,
         );
+
+        // Apply loop override (if any) to the newly started voice
+        if let Some((start, end)) = self.loop_points {
+            voice.set_loop_range(Some(start..end));
+        } else if self.loop_disabled {
+            voice.disable_loop();
+        }
 
         // Ensure we're checking in the upcoming `write` if any voice needs processing.
         self.active_voices += 1;
@@ -1204,6 +1281,26 @@ impl Generator for Sampler {
             Err(Error::ParameterError(
                 "Modulation routing only available when granular playback is enabled".to_string(),
             ))
+        }
+    }
+
+    fn process_message(&mut self, message: &GeneratorMessagePayload) -> Result<(), Error> {
+        if let Some(msg) = message.payload().downcast_ref::<SamplerMessage>() {
+            match msg {
+                SamplerMessage::SetLoopPoints(points) => {
+                    self.set_loop_points(*points);
+                    Ok(())
+                }
+                SamplerMessage::ResetLoopPoints => {
+                    self.reset_loop_points();
+                    Ok(())
+                }
+            }
+        } else {
+            Err(Error::ParameterError(format!(
+                "Sampler: Received unexpected message payload from '{}'.",
+                message.generator_name()
+            )))
         }
     }
 }

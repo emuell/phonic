@@ -513,6 +513,11 @@ impl<const POOL_SIZE: usize> GrainPool<POOL_SIZE> {
         self.panning = panning;
     }
 
+    /// Update the loop range (normalized 0.0..1.0). Pass `None` to disable loop range.
+    pub fn set_loop_range(&mut self, loop_range: Option<(f32, f32)>) {
+        self.sample_loop_range = loop_range;
+    }
+
     /// Try to trigger a new grain if the trigger phase indicates it's time.
     /// Returns true if a grain was triggered.
     #[inline]
