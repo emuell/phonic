@@ -63,7 +63,7 @@ impl AudioFileInfo {
         self.channel_count
     }
 
-    /// Embedded audio file's loop points as sample indices (NOT frames), if any.
+    /// Embedded audio file's loop points as frame indices, if any.
     #[inline]
     pub fn loop_range(&self) -> Option<Range<usize>> {
         self.loop_range.clone()

@@ -85,11 +85,10 @@ pub struct Sampler {
     modulation_state: Option<SamplerModulationState>,
     active_parameters: Vec<Box<dyn Parameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-    loop_points: Option<(u64, u64)>, // Custom loop start/end in sample frames. None = no custom override
-    loop_disabled: bool, // True when looping is explicitly disabled via SetLoopPoints(None)
-    transient: bool,     // True if the generator can exhaust
-    stopping: bool,      // True if stop has been called and we are waiting for voices to decay
-    stopped: bool,       // True if all voices have decayed after a stop call
+    loop_points_override: Option<(u64, u64)>,
+    transient: bool, // True if the generator can exhaust
+    stopping: bool,  // True if stop has been called and we are waiting for voices to decay
+    stopped: bool,   // True if all voices have decayed after a stop call
     options: GeneratorPlaybackOptions,
     output_sample_rate: u32,
     output_channel_count: usize,
@@ -550,8 +549,7 @@ impl Sampler {
         let active_parameters = Self::base_parameters();
 
         // Loop points: None = no custom override (use embedded loop from file)
-        let loop_points = None;
-        let loop_disabled = false;
+        let loop_points_override = None;
 
         // Initial playback state
         let transient = false;
@@ -572,8 +570,7 @@ impl Sampler {
             base_finetune,
             base_volume,
             base_panning,
-            loop_points,
-            loop_disabled,
+            loop_points_override,
             envelope_parameters,
             granular_parameters,
             modulation_state,
@@ -645,17 +642,20 @@ impl Sampler {
         Ok(self)
     }
 
-    /// Returns the active loop start and end in sample frames.
-    /// Returns the file's embedded loop points if no override is set, or `None` if there are none.
+    /// Returns the file's embedded loop points in sample frames if no override is set, 
+    /// or `None` if there are none.
     pub fn loop_points(&self) -> Option<(u64, u64)> {
-        if let Some(points) = self.loop_points {
+        if let Some(points) = self.loop_points_override {
             return Some(points);
         }
         self.voices.first().and_then(|v| {
-            let buf = v.file_source().file_buffer();
-            buf.loop_range().map(|r| {
-                let ch = buf.channel_count();
-                ((r.start / ch) as u64, (r.end / ch) as u64)
+            let buffer = v.file_source().file_buffer();
+            let channel_count = buffer.channel_count();
+            buffer.loop_range().map(|r| {
+                (
+                    (r.start / channel_count) as u64,
+                    (r.end / channel_count) as u64,
+                )
             })
         })
     }
@@ -663,11 +663,10 @@ impl Sampler {
     /// Set loop start and end in sample frames. Pass `None` to disable looping entirely.
     /// Affects all voices (active and future) immediately.
     pub fn set_loop_points(&mut self, points: Option<(u64, u64)>) {
-        self.loop_points = points;
-        self.loop_disabled = points.is_none();
+        self.loop_points_override = points;
         if let Some((start, end)) = points {
             for voice in &mut self.voices {
-                voice.set_loop_range(Some(start..end));
+                voice.set_loop_range_override(Some(start..end));
             }
         } else {
             for voice in &mut self.voices {
@@ -679,8 +678,7 @@ impl Sampler {
     /// Revert to the file's embedded loop points, undoing a previous `set_loop_points`.
     /// Affects all voices (active and future) immediately.
     pub fn reset_loop_points(&mut self) {
-        self.loop_points = None;
-        self.loop_disabled = false;
+        self.loop_points_override = None;
         for voice in &mut self.voices {
             voice.reset_loop();
         }
@@ -802,13 +800,6 @@ impl Sampler {
             &self.granular_parameters,
             context,
         );
-
-        // Apply loop override (if any) to the newly started voice
-        if let Some((start, end)) = self.loop_points {
-            voice.set_loop_range(Some(start..end));
-        } else if self.loop_disabled {
-            voice.disable_loop();
-        }
 
         // Ensure we're checking in the upcoming `write` if any voice needs processing.
         self.active_voices += 1;

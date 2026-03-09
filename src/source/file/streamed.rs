@@ -512,11 +512,11 @@ struct StreamThread {
     is_reading: bool,
     /// Number of times we should repeat the source
     repeat: usize,
-    /// Original repeat count, restored on `reset_looping`.
-    original_repeat: usize,
-    /// Loop range in samples
+    /// Whether looping is enabled (false when `disable_looping` was called).
+    loop_range_enabled: bool,
+    /// Loop range in frames
     loop_range: Option<Range<u64>>,
-    /// Original embedded loop range, restored on `reset_looping`.
+    /// Original embedded loop range in frames, restored on `reset_looping`.
     original_loop_range: Option<Range<u64>>,
 }
 
@@ -544,20 +544,19 @@ impl StreamThread {
         let input_packet = SampleBuffer::new(max_input_frames, decoder.signal_spec());
 
         let input_spec = decoder.signal_spec();
-        let channel_count = input_spec.channels.count() as u64;
 
+        let loop_range_enabled = true;
         let mut loop_range = None;
         if let Some(loop_info) = decoder.loops().first() {
             // TODO: for now we only support forward loops
-            let loop_start = loop_info.start as u64 * channel_count;
-            let loop_end = loop_info.end as u64 * channel_count;
+            let loop_start = loop_info.start as u64;
+            let loop_end = loop_info.end as u64;
             if loop_end > loop_start {
                 loop_range = Some(loop_start..loop_end);
             }
         }
 
         let original_loop_range = loop_range.clone();
-        let original_repeat = repeat;
 
         let samples_written = 0;
         let samples_to_write = 0..0;
@@ -583,7 +582,7 @@ impl StreamThread {
             samples_to_skip,
             is_reading,
             repeat,
-            original_repeat,
+            loop_range_enabled,
             loop_range,
             original_loop_range,
         }
@@ -684,22 +683,19 @@ impl StreamThread {
         &mut self,
         range: Option<(u64, u64)>,
     ) -> Result<StreamThreadAction, Error> {
-        self.loop_range = range.map(|(start, end)| {
-            let ch = self.input_spec.channels.count() as u64;
-            (start * ch)..(end * ch)
-        });
+        self.loop_range_enabled = true;
+        self.loop_range = range.map(|(start, end)| start..end);
         Ok(StreamThreadAction::Continue)
     }
 
     fn on_disable_looping(&mut self) -> Result<StreamThreadAction, Error> {
-        self.loop_range = None;
-        self.repeat = 0;
+        self.loop_range_enabled = false;
         Ok(StreamThreadAction::Continue)
     }
 
     fn on_reset_looping(&mut self) -> Result<StreamThreadAction, Error> {
+        self.loop_range_enabled = true;
         self.loop_range = self.original_loop_range.clone();
-        self.repeat = self.original_repeat;
         Ok(StreamThreadAction::Continue)
     }
 
@@ -770,11 +766,14 @@ impl StreamThread {
         let mut samples_to_write_now = samples_in_packet;
 
         // Don't write past the loop end
-        if let Some(loop_range) = &self.loop_range {
-            let remaining_samples_in_loop =
-                loop_range.end.saturating_sub(self.samples_written) as usize;
-            if samples_to_write_now.len() > remaining_samples_in_loop {
-                samples_to_write_now = &samples_to_write_now[..remaining_samples_in_loop];
+        if self.loop_range_enabled {
+            if let Some(loop_range) = &self.loop_range {
+                let channel_count = self.input_spec.channels.count() as u64;
+                let remaining_samples_in_loop =
+                    (loop_range.end * channel_count).saturating_sub(self.samples_written) as usize;
+                if samples_to_write_now.len() > remaining_samples_in_loop {
+                    samples_to_write_now = &samples_to_write_now[..remaining_samples_in_loop];
+                }
             }
         }
 
@@ -782,13 +781,16 @@ impl StreamThread {
             self.samples_written += written as u64;
             self.samples_to_write.start += written;
 
-            if let Some(loop_range) = &self.loop_range {
-                if self.samples_written >= loop_range.end {
-                    if self.continue_on_loop_boundary() {
-                        // continue playing from loop start
-                    } else {
-                        // reached end of file
-                        return Ok(StreamThreadAction::Continue);
+            if self.loop_range_enabled {
+                if let Some(loop_range) = &self.loop_range {
+                    let channel_count = self.input_spec.channels.count() as u64;
+                    if self.samples_written >= loop_range.end * channel_count {
+                        if self.continue_on_loop_boundary() {
+                            // continue playing from loop start
+                        } else {
+                            // reached end of file
+                            return Ok(StreamThreadAction::Continue);
+                        }
                     }
                 }
             }
@@ -808,22 +810,21 @@ impl StreamThread {
     }
 
     fn continue_on_loop_boundary(&mut self) -> bool {
-        if self.repeat > 0 {
+        if self.loop_range_enabled && self.repeat > 0 {
             // continue reading at the loop start
             if self.repeat != usize::MAX {
                 self.repeat -= 1;
             }
             // seek to loop_start
+            let channel_count = self.input_spec.channels.count() as u64;
             let loop_start = self.loop_range.as_ref().map(|r| r.start).unwrap_or(0);
-            let seek_frames = loop_start / self.input_spec.channels.count() as u64;
-            let seek_secs = seek_frames as f64 / self.input_spec.rate as f64;
+            let seek_secs = loop_start as f64 / self.input_spec.rate as f64;
             match self.decoder.seek(Duration::from_secs_f64(seek_secs)) {
                 Ok(actual_frame_time) => {
                     // seeking may move to previous packet boundaries:
                     // compensate by skipping samples until we reach the desired exact time
-                    if actual_frame_time < seek_frames {
-                        self.samples_to_skip = (seek_frames - actual_frame_time)
-                            * self.input_spec.channels.count() as u64;
+                    if actual_frame_time < loop_start {
+                        self.samples_to_skip = (loop_start - actual_frame_time) * channel_count;
                     } else {
                         self.samples_to_skip = 0;
                     }
@@ -833,11 +834,11 @@ impl StreamThread {
                     return false;
                 }
             }
-            self.samples_written = loop_start;
+            self.samples_written = loop_start * channel_count;
             self.samples_to_write = 0..0;
             self.shared_state
                 .position
-                .store(loop_start, Ordering::Relaxed);
+                .store(loop_start * channel_count, Ordering::Relaxed);
             true
         } else {
             // stop reading and mark as exhausted

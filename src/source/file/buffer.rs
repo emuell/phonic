@@ -47,7 +47,8 @@ impl AudioFileBuffer {
             ));
         }
         if let Some(loop_range) = &loop_range {
-            if loop_range.start >= loop_range.end || loop_range.end > buffer.len() {
+            let frame_count = buffer.len() / channel_count;
+            if loop_range.start >= loop_range.end || loop_range.end > frame_count {
                 return Err(Error::ParameterError(
                     "file buffer loop range is out of bounds".to_owned(),
                 ));
@@ -106,8 +107,9 @@ impl AudioFileBuffer {
         let mut loop_range = None;
         if let Some(loop_info) = audio_decoder.loops().first() {
             // TODO: for now we only support forward loops
-            let loop_start = (loop_info.start as usize * channel_count).min(buffer.len());
-            let loop_end = (loop_info.end as usize * channel_count).min(buffer.len());
+            let frame_count = buffer.len() / channel_count;
+            let loop_start = (loop_info.start as usize).min(frame_count);
+            let loop_end = (loop_info.end as usize).min(frame_count);
             if loop_end > loop_start {
                 loop_range = Some(loop_start..loop_end);
             }
@@ -140,7 +142,7 @@ impl AudioFileBuffer {
         self.sample_rate
     }
 
-    /// Embedded audio file's loop points as sample indices (NOT frames), if any.
+    /// Embedded audio file's loop points as frame indices, if any.
     #[inline]
     pub fn loop_range(&self) -> Option<Range<usize>> {
         self.loop_range.clone()

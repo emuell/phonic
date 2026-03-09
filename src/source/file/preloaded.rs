@@ -33,6 +33,7 @@ pub struct PreloadedFileSource {
     playback_repeat_count: usize,
     playback_pos: usize,
     playback_pos_eof: bool,
+    loop_range_enabled: bool,
     loop_range_override: Option<Range<usize>>,
 }
 
@@ -98,6 +99,9 @@ impl PreloadedFileSource {
         let playback_pos = 0;
         let playback_pos_eof = false;
 
+        let loop_range_enabled = true;
+        let loop_range_override = None;
+
         Ok(Self {
             file_buffer,
             file_source,
@@ -105,7 +109,8 @@ impl PreloadedFileSource {
             playback_repeat,
             playback_pos,
             playback_pos_eof,
-            loop_range_override: None,
+            loop_range_enabled,
+            loop_range_override,
         })
     }
 
@@ -143,26 +148,20 @@ impl PreloadedFileSource {
     /// Override the loop range in sample frames.
     /// Pass `None` to revert to the file's embedded loop range.
     pub fn set_loop_range_override(&mut self, frames: Option<Range<u64>>) {
-        self.loop_range_override = frames.map(|r| {
-            let ch = self.file_buffer.channel_count();
-            (r.start as usize * ch)..(r.end as usize * ch)
-        });
+        self.loop_range_override = frames.map(|r| r.start as usize..r.end as usize);
+        self.loop_range_enabled = true;
     }
 
-    /// Disable looping entirely. Clears any range override and sets the repeat count to zero.
+    /// Disable looping entirely. Clears any range override too.
     pub fn disable_looping(&mut self) {
         self.loop_range_override = None;
-        self.playback_repeat_count = 0;
+        self.loop_range_enabled = false;
     }
 
     /// Re-enable looping, reverting to the file's embedded loop (if any).
     pub fn reset_looping(&mut self) {
         self.loop_range_override = None;
-        self.playback_repeat_count = if self.file_buffer.loop_range().is_some() {
-            usize::MAX
-        } else {
-            0
-        };
+        self.loop_range_enabled = true;
     }
 
     /// Set the playback speed (pitch) for this source.
@@ -257,11 +256,16 @@ impl PreloadedFileSource {
     fn write_buffer(&mut self, output: &mut [f32]) -> usize {
         let mut written = 0;
 
-        let loop_range = self
-            .loop_range_override
-            .clone()
-            .or_else(|| self.file_buffer.loop_range().clone())
-            .unwrap_or(0..self.file_buffer.buffer().len());
+        let channel_count = self.file_buffer.channel_count();
+        let loop_range = if self.loop_range_enabled {
+            self.loop_range_override
+                .clone()
+                .or_else(|| self.file_buffer.loop_range())
+                .map(|r| r.start * channel_count..r.end * channel_count)
+                .unwrap_or(0..self.file_buffer.buffer().len())
+        } else {
+            0..self.file_buffer.buffer().len()
+        };
 
         let resampler = &mut self.file_source.resampler;
         let resampler_input_buffer = &mut self.file_source.resampler_input_buffer;
@@ -270,7 +274,7 @@ impl PreloadedFileSource {
 
         while written < output.len() {
             // write from resampled buffer into output and apply volume
-            let remaining_input_len = if self.playback_repeat_count > 0 {
+            let remaining_input_len = if self.loop_range_enabled && self.playback_repeat_count > 0 {
                 loop_range.end.saturating_sub(self.playback_pos)
             } else {
                 self.file_buffer
@@ -305,7 +309,7 @@ impl PreloadedFileSource {
 
             // loop or stop when reaching end of file or end of loop
             if self.playback_pos >= loop_range.end {
-                if self.playback_repeat_count > 0 {
+                if self.loop_range_enabled && self.playback_repeat_count > 0 {
                     if self.playback_repeat_count != usize::MAX {
                         self.playback_repeat_count -= 1;
                     }
