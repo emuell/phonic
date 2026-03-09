@@ -553,6 +553,11 @@ impl FunDspGenerator {
                                     );
                                 }
                             }
+                            GeneratorPlaybackEvent::ProcessMessage { .. } => {
+                                log::error!(
+                                    "Received unexpected generator message in FunDspGenerator"
+                                );
+                            }
                         }
                     }
                 }

@@ -1,7 +1,10 @@
 //! Generator trait for sources that can be driven by sequencers.
 
-use std::sync::{mpsc::SyncSender, Arc};
-use std::time::Duration;
+use std::{
+    any::Any,
+    sync::{mpsc::SyncSender, Arc},
+    time::Duration,
+};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -139,6 +142,32 @@ impl GeneratorPlaybackOptions {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Carries [`Generator`]-specific payloads which can't or should not be expressed as
+/// [`Parameter`](crate::Parameter).
+///
+/// This trait is implemented by message enums specific to each generator. It provides a way to
+/// identify the target generator and access the message payload as a `dyn Any`, which can then
+/// be downcast to the concrete message type within the generator's `process_message` implementation.
+///
+/// Messages are always applied in the generator's DSP real-time thread.
+pub trait GeneratorMessage: Any + Send + Sync {
+    /// The static name of the target generator for this message.
+    ///
+    /// This should match the `generator_name()` of the target `Generator` implementation. It is
+    /// used to prevent sending messages to the wrong generator type.
+    fn generator_name(&self) -> &'static str;
+
+    /// Returns the message payload as a `dyn Any` reference.
+    ///
+    /// This allows the generator to downcast the payload to its specific message enum type.
+    fn payload(&self) -> &dyn Any;
+}
+
+/// Type used in [`Generator::process_message`] to receive messages.
+pub type GeneratorMessagePayload = dyn GeneratorMessage;
+
+// -------------------------------------------------------------------------------------------------
+
 /// Events to start/stop, change playback properties or parameters **within** a [`Generator`].
 pub enum GeneratorPlaybackEvent {
     /// Trigger a note on event.
@@ -189,6 +218,11 @@ pub enum GeneratorPlaybackEvent {
     },
     /// Remove a modulation routing.
     ClearModulation { source: FourCC, target: FourCC },
+
+    /// Send a generator-specific message payload.
+    ProcessMessage {
+        message: Box<GeneratorMessagePayload>,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -365,6 +399,20 @@ pub trait Generator: Source {
             "Modulation routing not supported by this generator".to_string(),
         ))
     }
+
+    /// Handles optional generator-specific messages in the real-time thread. This can be used to
+    /// pass payloads to the generator, which can or should not be expressed as a parameter change.
+    ///
+    /// The implementation should downcast the `message` payload to its specific message enum type
+    /// and update its internal state accordingly.
+    ///
+    /// Like `write`, this method must not block, allocate memory, or do other time-consuming tasks.
+    fn process_message(&mut self, _message: &GeneratorMessagePayload) -> Result<(), Error> {
+        Err(Error::ParameterError(format!(
+            "{}: Received unexpected message payload.",
+            self.generator_name()
+        )))
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -468,5 +516,9 @@ impl Generator for Box<dyn Generator> {
 
     fn clear_modulation(&mut self, source: FourCC, target: FourCC) -> Result<(), Error> {
         (**self).clear_modulation(source, target)
+    }
+
+    fn process_message(&mut self, message: &GeneratorMessagePayload) -> Result<(), Error> {
+        (**self).process_message(message)
     }
 }

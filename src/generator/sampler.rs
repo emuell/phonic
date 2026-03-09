@@ -682,6 +682,11 @@ impl Sampler {
                                     log::warn!("Failed to clear modulation: {err}");
                                 }
                             }
+                            GeneratorPlaybackEvent::ProcessMessage { .. } => {
+                                log::error!(
+                                    "Received unexpected generator message in Sampler"
+                                );
+                            }
                         }
                     }
                 }

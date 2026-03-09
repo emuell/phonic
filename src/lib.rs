@@ -164,7 +164,8 @@ pub use source::{
 };
 
 pub use generator::{
-    Generator, GeneratorPlaybackEvent, GeneratorPlaybackMessage, GeneratorPlaybackOptions,
+    Generator, GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
+    GeneratorPlaybackMessage, GeneratorPlaybackOptions,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -219,7 +220,8 @@ pub mod generators {
         sampler::{
             GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters, Sampler,
         },
-        GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+        GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
+        GeneratorPlaybackMessage,
     };
 
     #[cfg(feature = "fundsp")]

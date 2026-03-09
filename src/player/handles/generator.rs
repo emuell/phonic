@@ -9,7 +9,9 @@ use four_cc::FourCC;
 
 use crate::{
     error::Error,
-    generator::{unique_note_id, GeneratorPlaybackEvent, GeneratorPlaybackMessage},
+    generator::{
+        unique_note_id, GeneratorMessage, GeneratorPlaybackEvent, GeneratorPlaybackMessage,
+    },
     parameter::ParameterValueUpdate,
     player::PlaybackId,
     source::{
@@ -222,7 +224,7 @@ impl GeneratorPlaybackHandle {
             return Err(Error::SourceNotPlaying);
         }
         let note_id = unique_note_id();
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::NoteOn {
                 note_id,
@@ -246,7 +248,7 @@ impl GeneratorPlaybackHandle {
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::NoteOff { note_id },
             "note_off",
@@ -265,7 +267,7 @@ impl GeneratorPlaybackHandle {
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetSpeed {
                 note_id,
@@ -283,7 +285,7 @@ impl GeneratorPlaybackHandle {
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::AllNotesOff,
             "all_notes_off",
@@ -301,7 +303,7 @@ impl GeneratorPlaybackHandle {
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetVolume { note_id, volume },
             "set_note_volume",
@@ -319,7 +321,7 @@ impl GeneratorPlaybackHandle {
         if !self.is_playing() {
             return Err(Error::SourceNotPlaying);
         }
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetPanning { note_id, panning },
             "set_note_panning",
@@ -347,7 +349,7 @@ impl GeneratorPlaybackHandle {
         let sample_time = sample_time.into();
         let id = parameter_id;
         let value = Owned::new(&self.collector_handle, update);
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetParameter { id, value },
             "set_parameter",
@@ -367,7 +369,7 @@ impl GeneratorPlaybackHandle {
     ) -> Result<(), Error> {
         let sample_time = sample_time.into();
         let values = Owned::new(&self.collector_handle, values);
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetParameters { values },
             "set_parameters",
@@ -397,7 +399,7 @@ impl GeneratorPlaybackHandle {
             return Err(Error::SourceNotPlaying);
         }
 
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::SetModulation {
                 source,
@@ -421,14 +423,36 @@ impl GeneratorPlaybackHandle {
             return Err(Error::SourceNotPlaying);
         }
 
-        self.send_generator_event(
+        self.send_playback_event(
             sample_time,
             GeneratorPlaybackEvent::ClearModulation { source, target },
             "clear_modulation",
         )
     }
 
-    fn send_generator_event(
+    /// Send a generator-specific message payload at the given sample time or immediately.
+    ///
+    /// Use this for state changes that cannot be expressed as a simple parameter update
+    /// (e.g. loop point overrides, sample buffer swaps).
+    pub fn send_message<M: GeneratorMessage + 'static, T: Into<Option<u64>>>(
+        &self,
+        message: M,
+        sample_time: T,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into();
+        if !self.is_playing() {
+            return Err(Error::SourceNotPlaying);
+        }
+        self.send_playback_event(
+            sample_time,
+            GeneratorPlaybackEvent::ProcessMessage {
+                message: Box::new(message),
+            },
+            "send_message",
+        )
+    }
+
+    fn send_playback_event(
         &self,
         sample_time: Option<u64>,
         event: GeneratorPlaybackEvent,
