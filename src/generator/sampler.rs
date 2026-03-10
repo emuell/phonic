@@ -1,4 +1,5 @@
 use std::{
+    ops::Range,
     path::Path,
     sync::{mpsc::SyncSender, Arc},
     time::Duration,
@@ -50,9 +51,7 @@ pub use granular::{GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, Gr
 pub enum SamplerMessage {
     /// Set custom loop start and end in sample frames.
     /// Pass `None` to disable looping entirely.
-    SetLoopPoints(Option<(u64, u64)>),
-    /// Revert to the file's embedded loop points, undoing a previous `SetLoopPoints`.
-    ResetLoopPoints,
+    SetLoopRange(Option<Range<u64>>),
 }
 
 impl GeneratorMessage for SamplerMessage {
@@ -85,7 +84,6 @@ pub struct Sampler {
     modulation_state: Option<SamplerModulationState>,
     active_parameters: Vec<Box<dyn Parameter>>,
     playback_status_send: Option<SyncSender<PlaybackStatusEvent>>,
-    loop_points_override: Option<(u64, u64)>,
     transient: bool, // True if the generator can exhaust
     stopping: bool,  // True if stop has been called and we are waiting for voices to decay
     stopped: bool,   // True if all voices have decayed after a stop call
@@ -548,9 +546,6 @@ impl Sampler {
         // Base parameters are always active. Envelope and granular parameters are added when enabled.
         let active_parameters = Self::base_parameters();
 
-        // Loop points: None = no custom override (use embedded loop from file)
-        let loop_points_override = None;
-
         // Initial playback state
         let transient = false;
         let stopping = false;
@@ -570,7 +565,6 @@ impl Sampler {
             base_finetune,
             base_volume,
             base_panning,
-            loop_points_override,
             envelope_parameters,
             granular_parameters,
             modulation_state,
@@ -642,45 +636,19 @@ impl Sampler {
         Ok(self)
     }
 
-    /// Returns the file's embedded loop points in sample frames if no override is set, 
-    /// or `None` if there are none.
-    pub fn loop_points(&self) -> Option<(u64, u64)> {
-        if let Some(points) = self.loop_points_override {
-            return Some(points);
-        }
-        self.voices.first().and_then(|v| {
-            let buffer = v.file_source().file_buffer();
-            let channel_count = buffer.channel_count();
-            buffer.loop_range().map(|r| {
-                (
-                    (r.start / channel_count) as u64,
-                    (r.end / channel_count) as u64,
-                )
-            })
-        })
+    /// Returns the file's currently applied loop point range in sample frames
+    /// or `None` if there is no loop range set.
+    pub fn loop_range(&self) -> Option<Range<u64>> {
+        self.voices
+            .first()
+            .and_then(|v| v.file_source().loop_range())
     }
 
     /// Set loop start and end in sample frames. Pass `None` to disable looping entirely.
     /// Affects all voices (active and future) immediately.
-    pub fn set_loop_points(&mut self, points: Option<(u64, u64)>) {
-        self.loop_points_override = points;
-        if let Some((start, end)) = points {
-            for voice in &mut self.voices {
-                voice.set_loop_range_override(Some(start..end));
-            }
-        } else {
-            for voice in &mut self.voices {
-                voice.disable_loop();
-            }
-        }
-    }
-
-    /// Revert to the file's embedded loop points, undoing a previous `set_loop_points`.
-    /// Affects all voices (active and future) immediately.
-    pub fn reset_loop_points(&mut self) {
-        self.loop_points_override = None;
+    pub fn set_loop_range(&mut self, range: Option<Range<u64>>) {
         for voice in &mut self.voices {
-            voice.reset_loop();
+            voice.set_loop_range(range.clone());
         }
     }
 
@@ -1278,13 +1246,27 @@ impl Generator for Sampler {
     fn process_message(&mut self, message: &GeneratorMessagePayload) -> Result<(), Error> {
         if let Some(msg) = message.payload().downcast_ref::<SamplerMessage>() {
             match msg {
-                SamplerMessage::SetLoopPoints(points) => {
-                    self.set_loop_points(*points);
-                    Ok(())
-                }
-                SamplerMessage::ResetLoopPoints => {
-                    self.reset_loop_points();
-                    Ok(())
+                SamplerMessage::SetLoopRange(range) => {
+                    // validate range: this comes from a message
+                    let frame_count = self
+                        .voices
+                        .first()
+                        .map(|v| v.file_source().file_buffer().frame_count() as u64)
+                        .unwrap_or(0);
+                    if range.is_none()
+                        || range
+                            .as_ref()
+                            .is_some_and(|r| r.start < frame_count && r.end <= frame_count)
+                    {
+                        self.set_loop_range(range.clone());
+                        Ok(())
+                    } else {
+                        Err(Error::ParameterError(format!(
+                            "Invalid loop range {:?}. Loop must be in range {:?}",
+                            range,
+                            0..frame_count
+                        )))
+                    }
                 }
             }
         } else {

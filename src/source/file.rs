@@ -1,4 +1,4 @@
-use std::{path::Path, sync::mpsc::SyncSender, sync::Arc, time::Duration};
+use std::{ops::Range, path::Path, sync::mpsc::SyncSender, sync::Arc, time::Duration};
 
 use crossbeam_queue::ArrayQueue;
 
@@ -54,6 +54,10 @@ pub struct FilePlaybackOptions {
     /// except when explicitly disabled via `Some(0)`.
     pub repeat: Option<usize>,
 
+    /// By default `None`. When set, overrides any embedded loop points in the file.
+    /// Range start and end are specified in sample frames.
+    pub loop_range: Option<(u64, u64)>,
+
     /// By default None: when set, the source should start playing at the given
     /// sample frame time in the audio output stream.
     pub start_time: Option<u64>,
@@ -96,6 +100,7 @@ impl Default for FilePlaybackOptions {
             panning: 0.0,
             speed: 1.0,
             repeat: None,
+            loop_range: None,
             start_time: None,
             fade_in_duration: None,
             fade_out_duration: Some(Duration::from_millis(50)),
@@ -151,6 +156,10 @@ impl FilePlaybackOptions {
     }
     pub fn repeat_forever(mut self) -> Self {
         self.repeat = Some(usize::MAX);
+        self
+    }
+    pub fn loop_range(mut self, range: Range<u64>) -> Self {
+        self.loop_range = Some((range.start, range.end));
         self
     }
 
@@ -277,14 +286,15 @@ impl Player {
         context: Option<PlaybackStatusContext>,
     ) -> Result<FilePlaybackHandle, Error> {
         // create a streamed or preloaded source, depending on the options and play it
+        let start_time = options.start_time;
         if options.stream {
             let streamed_source =
                 StreamedFileSource::from_file(path, options, self.output_sample_rate())?;
-            self.play_file_source_with_context(streamed_source, options.start_time, context)
+            self.play_file_source_with_context(streamed_source, start_time, context)
         } else {
             let preloaded_source =
                 PreloadedFileSource::from_file(path, options, self.output_sample_rate())?;
-            self.play_file_source_with_context(preloaded_source, options.start_time, context)
+            self.play_file_source_with_context(preloaded_source, start_time, context)
         }
     }
 

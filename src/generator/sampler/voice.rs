@@ -309,39 +309,31 @@ impl SamplerVoice {
         }
     }
 
-    /// Set custom loop range in sample frames. Pass `None` to revert to the file's embedded loop points.
-    pub fn set_loop_range_override(&mut self, frames: Option<Range<u64>>) {
-        let normalized = frames.as_ref().map(|r| {
-            let buffer = self.file_source().file_buffer();
-            let frame_count = buffer.frame_count() as f32;
-            (r.start as f32 / frame_count, r.end as f32 / frame_count)
-        });
-        self.file_source_mut().set_loop_range_override(frames);
+    /// Set custom loop range in sample frames. Pass `None` to disable looping.
+    pub fn set_loop_range(&mut self, range: Option<Range<u64>>) {
+        let frame_count = self.file_source().file_buffer().frame_count() as u64;
+        assert!(
+            range.is_none()
+                || range
+                    .as_ref()
+                    .is_some_and(|r| r.start < frame_count && r.end <= frame_count),
+            "Invalid loop range: {:?} not in range {:?}",
+            range,
+            0..frame_count
+        );
+
+        let repeat_count = if range.is_some() { usize::MAX } else { 0 };
+        self.file_source_mut().set_loop_range(range.clone());
+        self.file_source_mut().set_repeat(repeat_count);
+
         if let Some(grain_pool) = &mut self.grain_pool {
             // Update grain pool's normalized loop
-            grain_pool.set_loop_range(normalized);
-        }
-    }
-
-    /// Disable looping for this voice entirely.
-    pub fn disable_loop(&mut self) {
-        self.file_source_mut().disable_looping();
-        // Update grain pool's normalized loop
-        if let Some(grain_pool) = &mut self.grain_pool {
-            grain_pool.set_loop_range(None);
-        }
-    }
-
-    /// Re-enable looping, reverting to the file's embedded loop (if any).
-    pub fn reset_loop(&mut self) {
-        // Compute normalized embedded loop range for the grain pool before borrowing mutably
-        let normalized = self.file_source().file_buffer().loop_range().map(|r| {
-            let total = self.file_source().file_buffer().frame_count() as f32;
-            (r.start as f32 / total, r.end as f32 / total)
-        });
-        self.file_source_mut().reset_looping();
-        // Update grain pool's normalized loop
-        if let Some(grain_pool) = &mut self.grain_pool {
+            let normalized = range.map(|r| {
+                (
+                    r.start as f32 / frame_count as f32,
+                    r.end as f32 / frame_count as f32,
+                )
+            });
             grain_pool.set_loop_range(normalized);
         }
     }

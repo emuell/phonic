@@ -45,10 +45,8 @@ pub enum StreamedFileSourceMessage {
     Kill,
     /// Override the loop range in sample frames. Pass `None` to revert to the embedded loop.
     SetLoopRange(Option<(u64, u64)>),
-    /// Disable looping entirely (clears loop range and sets repeat count to zero).
-    DisableLooping,
-    /// Re-enable looping, reverting to the file's embedded loop (if any).
-    ResetLooping,
+    /// Set the repeat count. Pass `usize::MAX` to repeat forever, `0` to disable looping.
+    SetRepeat(usize),
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -118,9 +116,19 @@ impl StreamedFileSource {
         };
 
         // Spawn the worker and kick-start the decoding. The buffer will start filling now.
+        let loop_range_override = options.loop_range.map(|(start, end)| start..end);
         let stream_thread = StreamThread::spawn({
             let shared_state = worker_state.clone();
-            move |sender| StreamThread::new(sender, decoder, buffer, shared_state, repeat)
+            move |sender| {
+                StreamThread::new(
+                    sender,
+                    decoder,
+                    buffer,
+                    shared_state,
+                    repeat,
+                    loop_range_override,
+                )
+            }
         });
         // Start stream thread and block until it started running
         stream_thread.sender.send(StreamedFileSourceMessage::Read)?;
@@ -153,20 +161,12 @@ impl StreamedFileSource {
             .try_send(StreamedFileSourceMessage::SetLoopRange(range));
     }
 
-    /// Disable looping entirely. Clears any range override and sets the repeat count to zero.
-    pub fn disable_looping(&self) {
+    /// Set the repeat count. Pass `usize::MAX` to repeat forever, `0` to disable looping.
+    pub fn set_repeat(&self, repeat: usize) {
         let _ = self
             .stream_thread
             .sender
-            .try_send(StreamedFileSourceMessage::DisableLooping);
-    }
-
-    /// Re-enable looping, reverting to the file's embedded loop (if any).
-    pub fn reset_looping(&self) {
-        let _ = self
-            .stream_thread
-            .sender
-            .try_send(StreamedFileSourceMessage::ResetLooping);
+            .try_send(StreamedFileSourceMessage::SetRepeat(repeat));
     }
 
     pub(crate) fn total_samples(&self) -> Option<u64> {
@@ -510,14 +510,12 @@ struct StreamThread {
     samples_written: u64,
     /// Are we in the middle of automatic read loop?
     is_reading: bool,
-    /// Number of times we should repeat the source
+    /// Initial repeat count — never changes, gates whether loop-range clamping is active.
     repeat: usize,
-    /// Whether looping is enabled (false when `disable_looping` was called).
-    loop_range_enabled: bool,
+    /// Remaining repeat count — decremented on each loop.
+    repeat_count: usize,
     /// Loop range in frames
     loop_range: Option<Range<u64>>,
-    /// Original embedded loop range in frames, restored on `reset_looping`.
-    original_loop_range: Option<Range<u64>>,
 }
 
 impl StreamThread {
@@ -532,6 +530,7 @@ impl StreamThread {
         output: SpscRb<f32>,
         shared_state: SharedStreamThreadState,
         repeat: usize,
+        loop_range_override: Option<Range<u64>>,
     ) -> Self {
         const DEFAULT_MAX_FRAMES: u64 = 8 * 1024;
 
@@ -545,19 +544,19 @@ impl StreamThread {
 
         let input_spec = decoder.signal_spec();
 
-        let loop_range_enabled = true;
-        let mut loop_range = None;
-        if let Some(loop_info) = decoder.loops().first() {
-            // TODO: for now we only support forward loops
-            let loop_start = loop_info.start as u64;
-            let loop_end = loop_info.end as u64;
-            if loop_end > loop_start {
-                loop_range = Some(loop_start..loop_end);
+        let mut loop_range = loop_range_override.filter(|r| r.end > r.start);
+        if loop_range.is_none() {
+            if let Some(loop_info) = decoder.loops().first() {
+                // TODO: for now we only support forward loops
+                let loop_start = loop_info.start as u64;
+                let loop_end = loop_info.end as u64;
+                if loop_end > loop_start {
+                    loop_range = Some(loop_start..loop_end);
+                }
             }
         }
 
-        let original_loop_range = loop_range.clone();
-
+        let repeat_count = repeat;
         let samples_written = 0;
         let samples_to_write = 0..0;
         let samples_to_skip = 0;
@@ -582,9 +581,8 @@ impl StreamThread {
             samples_to_skip,
             is_reading,
             repeat,
-            loop_range_enabled,
+            repeat_count,
             loop_range,
-            original_loop_range,
         }
     }
 
@@ -640,8 +638,7 @@ impl StreamThread {
                 StreamedFileSourceMessage::Stop => self.on_stop(),
                 StreamedFileSourceMessage::Kill => self.on_stop_forced(),
                 StreamedFileSourceMessage::SetLoopRange(range) => self.on_set_loop_range(range),
-                StreamedFileSourceMessage::DisableLooping => self.on_disable_looping(),
-                StreamedFileSourceMessage::ResetLooping => self.on_reset_looping(),
+                StreamedFileSourceMessage::SetRepeat(repeat) => self.on_set_repeat(repeat),
             };
             action = match result {
                 Ok(action) => action,
@@ -683,19 +680,15 @@ impl StreamThread {
         &mut self,
         range: Option<(u64, u64)>,
     ) -> Result<StreamThreadAction, Error> {
-        self.loop_range_enabled = true;
-        self.loop_range = range.map(|(start, end)| start..end);
+        self.loop_range = range
+            .map(|(start, end)| start..end)
+            .filter(|r| r.end > r.start);
         Ok(StreamThreadAction::Continue)
     }
 
-    fn on_disable_looping(&mut self) -> Result<StreamThreadAction, Error> {
-        self.loop_range_enabled = false;
-        Ok(StreamThreadAction::Continue)
-    }
-
-    fn on_reset_looping(&mut self) -> Result<StreamThreadAction, Error> {
-        self.loop_range_enabled = true;
-        self.loop_range = self.original_loop_range.clone();
+    fn on_set_repeat(&mut self, repeat: usize) -> Result<StreamThreadAction, Error> {
+        self.repeat = repeat;
+        self.repeat_count = repeat;
         Ok(StreamThreadAction::Continue)
     }
 
@@ -765,8 +758,8 @@ impl StreamThread {
         let samples_in_packet = &self.input_packet.samples()[self.samples_to_write.clone()];
         let mut samples_to_write_now = samples_in_packet;
 
-        // Don't write past the loop end
-        if self.loop_range_enabled {
+        // Don't write past the loop end (only when looping is active)
+        if self.repeat > 0 {
             if let Some(loop_range) = &self.loop_range {
                 let channel_count = self.input_spec.channels.count() as u64;
                 let remaining_samples_in_loop =
@@ -781,14 +774,14 @@ impl StreamThread {
             self.samples_written += written as u64;
             self.samples_to_write.start += written;
 
-            if self.loop_range_enabled {
-                if let Some(loop_range) = &self.loop_range {
+            if self.repeat > 0 {
+                if let Some(loop_range) = self.loop_range.as_ref() {
                     let channel_count = self.input_spec.channels.count() as u64;
                     if self.samples_written >= loop_range.end * channel_count {
                         if self.continue_on_loop_boundary() {
                             // continue playing from loop start
                         } else {
-                            // reached end of file
+                            // reached end of loop
                             return Ok(StreamThreadAction::Continue);
                         }
                     }
@@ -810,10 +803,10 @@ impl StreamThread {
     }
 
     fn continue_on_loop_boundary(&mut self) -> bool {
-        if self.loop_range_enabled && self.repeat > 0 {
+        if self.repeat_count > 0 {
             // continue reading at the loop start
-            if self.repeat != usize::MAX {
-                self.repeat -= 1;
+            if self.repeat_count != usize::MAX {
+                self.repeat_count -= 1;
             }
             // seek to loop_start
             let channel_count = self.input_spec.channels.count() as u64;
