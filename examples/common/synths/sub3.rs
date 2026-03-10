@@ -6,6 +6,7 @@
 //! - 4 different OSC types (Sine, Triangle, Saw, Pulse)
 //! - Moog Ladder filter with Drive and Key Tracking.
 //! - 2 LFOs and 2 AHDSR Envelopes (Modulation & Amplitude).
+#![allow(unused)]
 
 use phonic::{
     four_cc::FourCC,

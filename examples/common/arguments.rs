@@ -1,3 +1,5 @@
+//! Argument parser and related helpers for phonic examples.
+
 use std::{path::PathBuf, sync::mpsc::SyncSender};
 
 use arg::{parse_args, Args};

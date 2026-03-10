@@ -37,8 +37,8 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 // -------------------------------------------------------------------------------------------------
 
 // Common example code
-#[path = "./common/arguments.rs"]
-mod arguments;
+mod common;
+use common::arguments;
 
 // -------------------------------------------------------------------------------------------------
 

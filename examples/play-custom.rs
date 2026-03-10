@@ -21,8 +21,8 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 // Common example code
-#[path = "./common/arguments.rs"]
-mod arguments;
+mod common;
+use common::arguments;
 
 // -------------------------------------------------------------------------------------------------
 

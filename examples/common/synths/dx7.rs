@@ -4,6 +4,7 @@
 //! - 32 Algorithms (routing configurations).
 //! - Custom AudioNode for the FM matrix calculation.
 //! - Feedback loop.
+#![allow(unused)]
 
 use phonic::{
     four_cc::FourCC,

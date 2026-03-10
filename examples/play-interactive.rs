@@ -28,12 +28,9 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 // -------------------------------------------------------------------------------------------------
 
 // Common example code
-#[path = "./common/arguments.rs"]
-mod arguments;
-
-// FunDSP synth example
-#[path = "./common/synths/sub3.rs"]
-mod sub3_synth;
+mod common;
+use common::arguments;
+use common::synths::sub3 as sub3_synth;
 
 // -------------------------------------------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 //! Simple Fundsp organ synth with 6 drawbars, percussion, click and vibrato.
 //! To be wrapped into a [`FunDspGenerator`].
+#![allow(unused)]
 
 use phonic::{
     four_cc::FourCC,

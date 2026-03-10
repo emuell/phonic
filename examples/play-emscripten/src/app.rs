@@ -119,13 +119,8 @@ pub struct ModulationRoutingUpdate {
 // -------------------------------------------------------------------------------------------------
 
 // FunDSP synth impls
-
-#[path = "../../common/synths/dx7.rs"]
-mod dx7;
-#[path = "../../common/synths/organ.rs"]
-mod organ;
-#[path = "../../common/synths/sub3.rs"]
-mod sub3;
+#[path = "../../common/synths/mod.rs"]
+mod synths;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SynthType {
@@ -137,9 +132,9 @@ enum SynthType {
 impl SynthType {
     fn info(&self) -> SynthInfo {
         match self {
-            SynthType::Sub3 => SynthInfo::new("sub3", sub3::parameters()),
-            SynthType::Dx7 => SynthInfo::new("dx7", dx7::parameters()),
-            SynthType::Organ => SynthInfo::new("organ", organ::parameters()),
+            SynthType::Sub3 => SynthInfo::new("sub3", synths::sub3::parameters()),
+            SynthType::Dx7 => SynthInfo::new("dx7", synths::dx7::parameters()),
+            SynthType::Organ => SynthInfo::new("organ", synths::organ::parameters()),
         }
     }
 
@@ -155,28 +150,28 @@ impl SynthType {
         match self {
             Self::Sub3 => FunDspGenerator::with_parameters(
                 "sub3_synth",
-                sub3::parameters(),
+                synths::sub3::parameters(),
                 None,
-                sub3::modulation_config(),
-                sub3::voice_factory,
+                synths::sub3::modulation_config(),
+                synths::sub3::voice_factory,
                 options,
                 sample_rate,
             ),
             Self::Organ => FunDspGenerator::with_parameters(
                 "organ_synth",
-                organ::parameters(),
+                synths::organ::parameters(),
                 None,
-                organ::modulation_config(),
-                organ::voice_factory,
+                synths::organ::modulation_config(),
+                synths::organ::voice_factory,
                 options,
                 sample_rate,
             ),
             Self::Dx7 => FunDspGenerator::with_parameters(
                 "dx7_synth",
-                dx7::parameters(),
+                synths::dx7::parameters(),
                 None,
                 ModulationConfig::default(), // no modulation
-                dx7::voice_factory,
+                synths::dx7::voice_factory,
                 options,
                 sample_rate,
             ),
@@ -185,33 +180,33 @@ impl SynthType {
 
     fn modulation_config(&self) -> Option<ModulationConfig> {
         match self {
-            Self::Sub3 => Some(sub3::modulation_config()),
-            Self::Organ => Some(organ::modulation_config()),
+            Self::Sub3 => Some(synths::sub3::modulation_config()),
+            Self::Organ => Some(synths::organ::modulation_config()),
             Self::Dx7 => None,
         }
     }
 
     fn randomize_modulation(&self) -> Vec<(FourCC, FourCC, f32, bool)> {
         match self {
-            Self::Sub3 => sub3::randomize_modulation(),
-            Self::Organ => organ::randomize_modulation(),
+            Self::Sub3 => synths::sub3::randomize_modulation(),
+            Self::Organ => synths::organ::randomize_modulation(),
             Self::Dx7 => Vec::new(),
         }
     }
 
     fn parameters(&self) -> &[&dyn Parameter] {
         match self {
-            SynthType::Sub3 => sub3::parameters(),
-            SynthType::Dx7 => dx7::parameters(),
-            SynthType::Organ => organ::parameters(),
+            SynthType::Sub3 => synths::sub3::parameters(),
+            SynthType::Dx7 => synths::dx7::parameters(),
+            SynthType::Organ => synths::organ::parameters(),
         }
     }
 
     fn randomize(&self) -> Vec<(FourCC, f32)> {
         match self {
-            Self::Sub3 => sub3::randomize(),
-            Self::Organ => organ::randomize(),
-            Self::Dx7 => dx7::randomize(),
+            Self::Sub3 => synths::sub3::randomize(),
+            Self::Organ => synths::organ::randomize(),
+            Self::Dx7 => synths::dx7::randomize(),
         }
     }
 }
