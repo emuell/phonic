@@ -2,8 +2,8 @@ use std::{
     collections::HashMap,
     fmt,
     sync::{
-        atomic::{self, AtomicBool, AtomicUsize, Ordering},
-        mpsc::{sync_channel, SyncSender},
+        atomic::{self, AtomicBool, AtomicUsize},
+        mpsc::{sync_channel, RecvTimeoutError, SyncSender},
         Arc, Mutex,
     },
     thread,
@@ -96,7 +96,7 @@ impl Drop for PlayingSource {
     fn drop(&mut self) {
         // NB: this only works when Self is not clone or copy, so we can ensure that an object
         // isn't created temporarily and then dropped again!!
-        self.is_playing.store(false, Ordering::Relaxed);
+        self.is_playing.store(false, atomic::Ordering::Relaxed);
     }
 }
 
@@ -251,14 +251,18 @@ pub struct Player {
     config: PlayerConfig,
     output_device: Box<dyn OutputDevice>,
     playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
+    playback_status_running: Arc<AtomicBool>,
     playback_status_sender: SyncSender<PlaybackStatusEvent>,
+    playback_status_thread: Option<thread::JoinHandle<()>>,
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
+    collector_thread: Option<thread::JoinHandle<()>>,
     mixers: DashMap<MixerId, PlayerMixerInfo>,
     effects: DashMap<EffectId, PlayerEffectInfo>,
     main_mixer_measurement_state: Option<SharedCpuLoadState>,
     main_mixer_metering_state: Option<SharedAudioLevelState>,
     main_mixer_panic_handler: Arc<Mutex<Option<PanicHandler>>>,
+    main_mixer_dropped: Arc<atomic::AtomicBool>,
 }
 
 impl Player {
@@ -292,16 +296,25 @@ impl Player {
         // Memorize the sink
         let mut output_device = Box::new(output_device);
 
-        // Create a proxy for the playback status channel, so we can trap stop messages
+        // Create a playback status proxy channel and thread, so we can intercept stop messages
         let playing_sources = Arc::new(DashMap::with_capacity(1024));
-        let playback_status_sender =
-            Self::handle_playback_events(playback_status_sender.into(), playing_sources.clone());
+        let playback_status_running = Arc::new(AtomicBool::new(true));
+        let playback_status_sender = playback_status_sender.into();
+        let (playback_status_sender, playback_status_thread) = Self::handle_playback_events(
+            playback_status_sender,
+            Arc::clone(&playing_sources),
+            Arc::clone(&playback_status_running),
+        );
+        let playback_status_thread = Some(playback_status_thread);
 
         // Create audio garbage collector and thread
         let collector = Collector::new();
         let collector_handle = collector.handle();
         let collector_running = Arc::new(AtomicBool::new(true));
-        Self::handle_drop_collects(collector, collector_running.clone());
+        let collector_thread = Some(Self::handle_drop_collects(
+            collector,
+            Arc::clone(&collector_running),
+        ));
 
         // Create a mixer source and add it to the audio sink
         let mut main_mixer = MixedSource::new(
@@ -351,12 +364,14 @@ impl Player {
 
         // wrap main mixer into a GuardedSource
         let main_mixer_panic_handler = Arc::new(Mutex::new(None));
+        let main_mixer_dropped = Arc::new(atomic::AtomicBool::new(false));
 
         let guarded_main_mixer = GuardedSource::new(
             measured_main_mixer,
             "Player Main-Mixer",
             Arc::clone(&main_mixer_panic_handler),
-        );
+        )
+        .with_drop_signal(Arc::clone(&main_mixer_dropped));
 
         // Assign the wrapped main mixer as sink source
         if config.enforce_stereo_playback && output_device.channel_count() != 2 {
@@ -372,11 +387,15 @@ impl Player {
             config,
             output_device,
             playing_sources,
+            playback_status_running,
             playback_status_sender,
+            playback_status_thread,
             collector_handle,
             collector_running,
+            collector_thread,
             mixers,
             effects,
+            main_mixer_dropped,
             main_mixer_panic_handler,
             main_mixer_measurement_state,
             main_mixer_metering_state,
@@ -454,12 +473,6 @@ impl Player {
     /// Only available when audio metering is enabled in the player's [`PlayerConfig`].
     pub fn audio_level_state(&self) -> Option<SharedAudioLevelState> {
         self.main_mixer_metering_state.as_ref().map(Arc::clone)
-    }
-
-    /// Get a copy of our playback status sender channel.
-    /// Should be used by custom audio sources only.
-    pub fn playback_status_sender(&self) -> SyncSender<PlaybackStatusEvent> {
-        self.playback_status_sender.clone()
     }
 
     /// Sets or replaces a panic handler for the player's main mixer.
@@ -1122,50 +1135,64 @@ impl Player {
     fn handle_playback_events(
         playback_sender: Option<SyncSender<PlaybackStatusEvent>>,
         playing_sources: Arc<DashMap<PlaybackId, PlayingSource>>,
-    ) -> SyncSender<PlaybackStatusEvent> {
+        running: Arc<AtomicBool>,
+    ) -> (SyncSender<PlaybackStatusEvent>, thread::JoinHandle<()>) {
         // use a relatively big bounded channel for playback status tracking
         const DEFAULT_PLAYBACK_EVENTS_CAPACITY: usize = 2048;
         let (playback_sender_proxy, playback_receiver_proxy) =
             sync_channel(DEFAULT_PLAYBACK_EVENTS_CAPACITY);
 
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("audio_player_messages".to_string())
-            .spawn(move || loop {
-                if let Ok(event) = playback_receiver_proxy.recv() {
-                    if let PlaybackStatusEvent::Stopped { id, .. } = event {
-                        playing_sources.remove(&id);
-                    }
-                    if let Some(sender) = &playback_sender {
-                        // NB: send and not try_send: block until sender queue is free
-                        if let Err(err) = sender.send(event) {
-                            log::warn!("Failed to send file status message: {err}");
+            .spawn(move || {
+                while running.load(atomic::Ordering::Acquire) {
+                    match playback_receiver_proxy.recv_timeout(Duration::from_millis(100)) {
+                        Ok(event) => {
+                            if let PlaybackStatusEvent::Stopped { id, .. } = event {
+                                playing_sources.remove(&id);
+                            }
+                            if let Some(sender) = &playback_sender {
+                                // NB: send and not try_send: block until sender queue is free
+                                if let Err(err) = sender.send(event) {
+                                    log::warn!("Failed to send file status message: {err}");
+                                }
+                            }
                         }
-                    }
-                } else {
-                    log::info!("Playback event loop stopped");
-                    break;
+                        Err(RecvTimeoutError::Timeout) => {
+                            // Check if we're still running
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            // Stop
+                            break;
+                        }
+                    };
                 }
+                log::info!("Playback event loop stopped");
             })
             .expect("Failed to spawn audio message thread");
 
-        playback_sender_proxy
+        (playback_sender_proxy, handle)
     }
 
-    fn handle_drop_collects(mut collector: Collector, running: Arc<AtomicBool>) {
+    fn handle_drop_collects(
+        mut collector: Collector,
+        running: Arc<AtomicBool>,
+    ) -> thread::JoinHandle<()> {
         std::thread::Builder::new()
             .name("audio_player_drops".to_string())
             .spawn(move || {
-                while running.load(atomic::Ordering::Relaxed) {
+                while running.load(atomic::Ordering::Acquire) {
                     collector.collect();
                     thread::sleep(Duration::from_millis(100));
                 }
-                log::info!("Audio collector loop stopped");
                 collector.collect();
                 if collector.try_cleanup().is_err() {
-                    log::warn!("Failed to cleanup collector");
+                    log::warn!("Failed to cleanup collector. Some handes will be leaked...");
                 }
+                log::info!("Audio collector loop stopped");
             })
-            .expect("Failed to spawn audio message thread");
+            .expect("Failed to spawn audio message thread")
     }
 
     fn mixer_event_queue(&self, mixer_id: MixerId) -> Result<Arc<ArrayQueue<MixerMessage>>, Error> {
@@ -1256,11 +1283,40 @@ impl Player {
 
 impl Drop for Player {
     fn drop(&mut self) {
-        log::info!("Dropping player...");
-        // stop collector thread
+        // Replace mixer source in output with an empty source to drop it
+        log::info!("Releasing player's main mixer...");
+        self.output_device.stop();
+
+        // Wait for the main mixer to be fully dropped
+        let mut waited_ms = 0_usize;
+        while !self.main_mixer_dropped.load(atomic::Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(100));
+            waited_ms += 100;
+            if waited_ms >= 5000 {
+                log::warn!("Timed out waiting for player's main mixer to drop");
+                break;
+            }
+        }
+
+        // Stop playback status thread
+        log::info!("Stopping player's playback status thread...");
+        self.playback_status_running
+            .store(false, atomic::Ordering::Release);
+        if let Some(handle) = self.playback_status_thread.take() {
+            let _ = handle.join();
+        }
+
+        // Stop collector thread (drop handle, collect all remaining objects)
+        log::info!("Stopping player's collector thread...");
+        self.collector_handle = Collector::new().handle();
         self.collector_running
-            .store(false, atomic::Ordering::Relaxed);
-        // stop playback thread and release mixer source
+            .store(false, atomic::Ordering::Release);
+        if let Some(handle) = self.collector_thread.take() {
+            let _ = handle.join();
+        }
+
+        // Close/pause the stream, if supported by the output
+        log::info!("Closing outout device...");
         self.output_device.close();
     }
 }

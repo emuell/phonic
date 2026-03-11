@@ -1,7 +1,10 @@
 use std::{
     any::Any,
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use panic_message::panic_message;
@@ -24,6 +27,7 @@ pub struct GuardedSource<InputSource: Source + 'static> {
     source_name: &'static str,
     handler: Arc<Mutex<Option<PanicHandler>>>,
     panicked: bool,
+    drop_signal: Option<Arc<AtomicBool>>,
 }
 
 impl<InputSource: Source + 'static> GuardedSource<InputSource> {
@@ -33,11 +37,28 @@ impl<InputSource: Source + 'static> GuardedSource<InputSource> {
         handler: Arc<Mutex<Option<PanicHandler>>>,
     ) -> Self {
         let panicked = false;
+        let drop_signal = None;
         Self {
             source,
             source_name,
             handler,
             panicked,
+            drop_signal,
+        }
+    }
+
+    /// Add flag that will be atomically set to `true` when this source is dropped.
+    pub fn with_drop_signal(mut self, drop_signal: Arc<AtomicBool>) -> Self {
+        self.drop_signal = Some(drop_signal);
+        self
+    }
+}
+
+impl<InputSource: Source + 'static> Drop for GuardedSource<InputSource> {
+    fn drop(&mut self) {
+        // Set drop signal if we got one
+        if let Some(signal) = &self.drop_signal {
+            signal.store(true, Ordering::Release);
         }
     }
 }
