@@ -28,31 +28,6 @@ pub type DefaultOutputDevice = web::WebOutput;
 
 // -------------------------------------------------------------------------------------------------
 
-/// Available audio host drivers for cpal output devices.
-///
-/// Represents different audio backends available on various platforms.
-/// The default variant uses the system-preferred audio host.
-#[cfg(feature = "cpal-output")]
-#[derive(Debug, Clone, Copy)]
-pub enum AudioHostId {
-    /// System default audio host
-    Default,
-    /// Windows: Audio Stream Input/Output (ASIO)
-    #[cfg(target_os = "windows")]
-    Asio,
-    /// Windows: Windows Audio Session API (WASAPI)
-    #[cfg(target_os = "windows")]
-    Wasapi,
-    /// Linux: Advanced Linux Sound Architecture
-    #[cfg(target_os = "linux")]
-    Alsa,
-    /// Linux: JACK Audio Connection Kit
-    #[cfg(target_os = "linux")]
-    Jack,
-}
-
-// -------------------------------------------------------------------------------------------------
-
 /// Platform-agnostic audio output device interface, abstracts platform-specific audio backends
 /// for [`Player`](crate::Player).
 pub trait OutputDevice: Send {

@@ -58,7 +58,7 @@ assert_no_alloc = { version = "^1.1", features = [
 fundsp = { version = "^0.23", optional = true, default-features = false, features = [
     "std",
 ] }
-cpal = { version = "^0.16", optional = true, features = ["jack", "asio"] }
+cpal = { version = "^0.17", optional = true, features = ["jack", "asio"] }
 hound = { version = "^3.5", optional = true }
 
 # Target specific dependencies
