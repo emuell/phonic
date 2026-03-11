@@ -14,6 +14,7 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
 	{
 		"label": "Build & Debug play-file",
 		"build": {
@@ -25,6 +26,20 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
+	{
+		"label": "Build & Debug play-device",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-device", "--features", "fundsp"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-device",
+		"args": ["$ZED_WORKTREE_ROOT/assets/altijd synth bit.wav"],
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+
 	{
 		"label": "Build & Debug play-interactive",
 		"build": {
@@ -36,6 +51,7 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
 	{
 		"label": "Build & Debug play-grains",
 		"build": {
@@ -47,6 +63,7 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
 	{
 		"label": "Build & Debug play-multi-threaded",
 		"build": {
@@ -65,6 +82,7 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
 	{
 		"label": "Build & Debug play-sequence",
 		"build": {
@@ -76,6 +94,7 @@
 		"request": "launch",
 		"adapter": "CodeLLDB"
 	},
+
 	{
 		"label": "Build & Debug play-synth",
 		"build": {
