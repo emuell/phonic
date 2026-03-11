@@ -176,9 +176,9 @@ pub mod outputs {
     //! Default [`OutputDevice`](super::OutputDevice) implementations.
 
     #[cfg(feature = "cpal-output")]
-    pub use super::output::cpal::CpalOutput;
-    #[cfg(feature = "cpal-output")]
-    pub use super::output::AudioHostId;
+    pub use super::output::cpal::{
+        CpalDeviceId, CpalOutput, CpalOutputConfig, CpalOutputDeviceDriver,
+    };
 
     #[cfg(feature = "web-output")]
     pub use super::output::web::WebOutput;

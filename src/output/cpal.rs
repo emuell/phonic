@@ -18,7 +18,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use crate::{
     error::Error,
-    output::{AudioHostId, OutputDevice},
+    output::OutputDevice,
     source::{empty::EmptySource, Source, SourceTime},
     utils::{
         buffer::clear_buffer,
@@ -28,14 +28,71 @@ use crate::{
 
 // -------------------------------------------------------------------------------------------------
 
+/// Prefered cpal device config when using the default/auto config.
 const PREFERRED_SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
-const PREFERRED_SAMPLE_RATE: cpal::SampleRate = cpal::SampleRate(44100);
+const PREFERRED_SAMPLE_RATE: cpal::SampleRate = 44100;
 const PREFERRED_CHANNELS: cpal::ChannelCount = 2;
-const PREFERRED_BUFFER_SIZE: cpal::BufferSize = if cfg!(debug_assertions) {
-    cpal::BufferSize::Default
-} else {
-    cpal::BufferSize::Fixed(2048)
-};
+
+// -------------------------------------------------------------------------------------------------
+
+/// Available audio backends for [`CpalOutput`].
+///
+/// Represents different audio backends available on various platforms.
+/// The default variant uses the system-preferred audio host.
+#[cfg(feature = "cpal-output")]
+#[derive(Debug, Clone, Copy)]
+pub enum CpalOutputDeviceDriver {
+    /// System's default audio host
+    Default,
+    /// Windows: Audio Stream Input/Output (ASIO)
+    #[cfg(target_os = "windows")]
+    Asio,
+    /// Windows: Windows Audio Session API (WASAPI)
+    #[cfg(target_os = "windows")]
+    Wasapi,
+    /// Linux: Advanced Linux Sound Architecture
+    #[cfg(target_os = "linux")]
+    Alsa,
+    /// macOS: CoreAudio
+    #[cfg(target_os = "macos")]
+    CoreAudio,
+    /// Windows, Linux & macOS: JACK Audio Connection Kit
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    Jack,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Unique device id for a [`CpalOutput`] device.
+pub type CpalDeviceId = cpal::DeviceId;
+
+// -------------------------------------------------------------------------------------------------
+
+/// Configuration for a [`CpalOutput`] device.
+///
+/// Use with [`CpalOutput::open_with_config`] to select a specific audio driver, device,
+/// sample rate and buffer size from a UI or configuration file.
+pub struct CpalOutputConfig {
+    /// Audio host/driver to use. Defaults to [`OutputDeviceDriver::Default`].
+    pub driver: CpalOutputDeviceDriver,
+    /// Id of the output device to open. `None` selects the driver's default device.
+    pub device_id: Option<CpalDeviceId>,
+    /// Desired sample rate in Hz. `None` uses the preferred rate (44100) or device default.
+    pub sample_rate: Option<u32>,
+    /// Audio buffer size in frames. `None` uses the platform default buffer size.
+    pub buffer_size: Option<u32>,
+}
+
+impl Default for CpalOutputConfig {
+    fn default() -> Self {
+        Self {
+            driver: CpalOutputDeviceDriver::Default,
+            device_id: None,
+            sample_rate: None,
+            buffer_size: None,
+        }
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -53,74 +110,79 @@ pub struct CpalOutput {
 }
 
 impl CpalOutput {
+    /// Open an audio output device using the default configuration.
     pub fn open() -> Result<Self, Error> {
-        Self::open_with_host(AudioHostId::Default)
+        Self::open_with_config(CpalOutputConfig::default())
     }
 
-    pub fn open_with_host(hostid: AudioHostId) -> Result<Self, Error> {
-        let host = match hostid {
-            AudioHostId::Default => cpal::default_host(),
-            #[cfg(target_os = "windows")]
-            AudioHostId::Asio => cpal::host_from_id(cpal::HostId::Asio)
-                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
-            #[cfg(target_os = "windows")]
-            AudioHostId::Wasapi => cpal::host_from_id(cpal::HostId::Wasapi)
-                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
-            #[cfg(target_os = "linux")]
-            AudioHostId::Alsa => cpal::host_from_id(cpal::HostId::Alsa)
-                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
-            #[cfg(target_os = "linux")]
-            AudioHostId::Jack => cpal::host_from_id(cpal::HostId::Jack)
-                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+    /// Open an audio output device using the given configuration.
+    ///
+    /// Use [`CpalOutput::available_drivers`], [`CpalOutput::available_devices`] and
+    /// [`CpalOutput::supported_sample_rates`] to enumerate available options dynamically.
+    pub fn open_with_config(config: CpalOutputConfig) -> Result<Self, Error> {
+        let host = Self::open_host(config.driver)?;
+
+        // Find device by name or use the host default.
+        let device = if let Some(device_id) = &config.device_id {
+            host.output_devices()
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?
+                .find(|d| d.id().ok().as_ref() == Some(device_id))
+                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
+        } else {
+            host.default_output_device()
+                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
         };
 
-        // Open the default output device.
-        let device = host
-            .default_output_device()
-            .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?;
-
-        if let Ok(name) = device.name() {
-            log::info!("Using audio device: {name}");
+        if let Ok(description) = device.description() {
+            log::info!("Using audio device: {description}");
         }
 
-        // Get the default device config, so we know what sample format and sample rate
-        // the device supports.
-        let supported = Self::preferred_output_config(&device)?;
+        // Get the preferred stream config for the requested (or default) sample rate.
+        let output_config = Self::select_output_config(&device, config.sample_rate)?;
+
         // Shared playback position counter
         let playback_pos = Arc::new(AtomicU64::new(0));
-
-        // default volume
+        // Default volume
         let volume = 1.0;
 
-        // channel to send and receive callback messages
+        // Channel to send and receive callback messages
         const MESSAGE_QUEUE_SIZE: usize = 16;
         let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
 
-        let stream_handle = Stream::spawn({
-            let config = cpal::StreamConfig {
-                buffer_size: PREFERRED_BUFFER_SIZE,
-                ..supported.config()
-            };
-            let sample_format = supported.sample_format();
-            let playback_pos = Arc::clone(&playback_pos);
-            move |stream_sender| {
-                Stream::open(
-                    device,
-                    config,
-                    sample_format,
-                    playback_pos,
-                    volume,
-                    callback_receiver,
-                    stream_sender,
-                )
-                .expect("Failed to open audio stream")
-            }
-        });
+        // Channel to send stream messages (pause/resume/close)
+        const STREAM_MESSAGE_QUEUE_SIZE: usize = 32;
+        let (stream_sender, stream_receiver) = sync_channel(STREAM_MESSAGE_QUEUE_SIZE);
+
+        // Try opening the stream
+        let stream = Stream::open(
+            device,
+            cpal::StreamConfig {
+                buffer_size: match config.buffer_size {
+                    Some(frames) => cpal::BufferSize::Fixed(frames),
+                    None => cpal::BufferSize::Default,
+                },
+                ..output_config.config()
+            },
+            output_config.sample_format(),
+            Arc::clone(&playback_pos),
+            volume,
+            callback_receiver,
+            stream_sender.clone(),
+        )?;
+
+        // Run the stream on a new thread
+        let stream_handle = StreamThreadHandle {
+            sender: stream_sender,
+            thread: thread::Builder::new()
+                .name("audio_output".to_string())
+                .spawn(move || stream.process_messages(stream_receiver))
+                .expect("failed to spawn audio thread"),
+        };
 
         let is_running = false;
-        let channel_count = supported.channels();
-        let sample_rate = supported.sample_rate();
-        let stream_sender = stream_handle.sender();
+        let channel_count = output_config.channels();
+        let sample_rate = output_config.sample_rate();
+        let stream_sender = stream_handle.sender.clone();
 
         Ok(Self {
             is_running,
@@ -134,20 +196,140 @@ impl CpalOutput {
         })
     }
 
-    fn preferred_output_config(
-        device: &cpal::Device,
-    ) -> Result<cpal::SupportedStreamConfig, Error> {
-        for s in device.supported_output_configs()? {
-            let rates = s.min_sample_rate()..=s.max_sample_rate();
-            if s.channels() == PREFERRED_CHANNELS
-                && s.sample_format() == PREFERRED_SAMPLE_FORMAT
-                && rates.contains(&PREFERRED_SAMPLE_RATE)
-            {
-                return Ok(s.with_sample_rate(PREFERRED_SAMPLE_RATE));
+    /// Returns all audio drivers available on this platform.
+    ///
+    /// Always includes [`OutputDeviceDriver::Default`], followed by any named drivers that are
+    /// currently available (e.g. ASIO, WASAPI on Windows; ALSA, JACK on Linux).
+    pub fn available_drivers() -> Vec<CpalOutputDeviceDriver> {
+        let hosts = cpal::available_hosts();
+        let mut drivers = vec![CpalOutputDeviceDriver::Default];
+        #[cfg(target_os = "windows")]
+        if hosts.contains(&cpal::HostId::Asio) {
+            drivers.push(CpalOutputDeviceDriver::Asio);
+        }
+        #[cfg(target_os = "windows")]
+        if hosts.contains(&cpal::HostId::Wasapi) {
+            drivers.push(CpalOutputDeviceDriver::Wasapi);
+        }
+        #[cfg(target_os = "linux")]
+        if hosts.contains(&cpal::HostId::Alsa) {
+            drivers.push(CpalOutputDeviceDriver::Alsa);
+        }
+        #[cfg(target_os = "macos")]
+        if hosts.contains(&cpal::HostId::CoreAudio) {
+            drivers.push(CpalOutputDeviceDriver::CoreAudio);
+        }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+        if hosts.contains(&cpal::HostId::Jack) {
+            drivers.push(CpalOutputDeviceDriver::Jack);
+        }
+        drivers
+    }
+
+    /// Returns `(id, name)`s of all output devices available for the given driver.
+    pub fn available_devices(
+        driver: CpalOutputDeviceDriver,
+    ) -> Result<Vec<(cpal::DeviceId, String)>, Error> {
+        let host = Self::open_host(driver)?;
+        let mut devices = Vec::new();
+        for device in host
+            .output_devices()
+            .map_err(|err| Error::OutputDeviceError(Box::new(err)))?
+        {
+            match (device.id(), device.description()) {
+                (Ok(id), Ok(description)) => {
+                    devices.push((id, description.to_string()));
+                }
+                (Ok(id), Err(_)) => {
+                    devices.push((id.clone(), id.to_string()));
+                }
+                (Err(err), _) => {
+                    log::warn!("Failed to query audio device id {err}")
+                }
             }
         }
+        Ok(devices)
+    }
 
-        Ok(device.default_output_config()?)
+    /// Returns unique sample rates supported by an output device, sorted ascending.
+    ///
+    /// Pass `device_name = None` to query the driver's default device.
+    pub fn supported_sample_rates(
+        driver: CpalOutputDeviceDriver,
+        device_id: Option<CpalDeviceId>,
+    ) -> Result<Vec<u32>, Error> {
+        let host = Self::open_host(driver)?;
+        let device = if let Some(device_id) = &device_id {
+            host.output_devices()
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?
+                .find(|d| d.id().ok().as_ref() == Some(device_id))
+                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
+        } else {
+            host.default_output_device()
+                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
+        };
+        let mut rates: Vec<u32> = device
+            .supported_output_configs()?
+            .flat_map(|s| [s.min_sample_rate(), s.max_sample_rate()])
+            .collect();
+        rates.sort_unstable();
+        rates.dedup();
+        Ok(rates)
+    }
+
+    fn open_host(driver: CpalOutputDeviceDriver) -> Result<cpal::Host, Error> {
+        Ok(match driver {
+            CpalOutputDeviceDriver::Default => cpal::default_host(),
+            #[cfg(target_os = "windows")]
+            CpalOutputDeviceDriver::Asio => cpal::host_from_id(cpal::HostId::Asio)
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+            #[cfg(target_os = "windows")]
+            CpalOutputDeviceDriver::Wasapi => cpal::host_from_id(cpal::HostId::Wasapi)
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+            #[cfg(target_os = "linux")]
+            CpalOutputDeviceDriver::Alsa => cpal::host_from_id(cpal::HostId::Alsa)
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+            #[cfg(target_os = "macos")]
+            CpalOutputDeviceDriver::CoreAudio => cpal::host_from_id(cpal::HostId::CoreAudio)
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+            CpalOutputDeviceDriver::Jack => cpal::host_from_id(cpal::HostId::Jack)
+                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?,
+        })
+    }
+
+    fn select_output_config(
+        device: &cpal::Device,
+        sample_rate: Option<u32>,
+    ) -> Result<cpal::SupportedStreamConfig, Error> {
+        let target_rate = sample_rate.unwrap_or(PREFERRED_SAMPLE_RATE);
+        // Get supported configs and sort them in terms of their priority of use as a default stream format.
+        let mut configs = device.supported_output_configs()?.collect::<Vec<_>>();
+        configs.sort_by(|a, b| b.cmp_default_heuristics(a));
+        // Match preferred 'rate + format + channels' first, then 'rate + channels' then 'rate' only
+        let supports_rate = |s: &cpal::SupportedStreamConfigRange| {
+            (s.min_sample_rate()..=s.max_sample_rate()).contains(&target_rate)
+        };
+        let best_match = configs
+            .iter()
+            .find(|s| {
+                supports_rate(s)
+                    && s.channels() == PREFERRED_CHANNELS
+                    && s.sample_format() == PREFERRED_SAMPLE_FORMAT
+            })
+            .or_else(|| {
+                configs
+                    .iter()
+                    .find(|s| supports_rate(s) && s.channels() == PREFERRED_CHANNELS)
+            })
+            .or_else(|| configs.iter().find(|s| supports_rate(s)));
+        match best_match {
+            Some(s) => Ok(s.with_sample_rate(target_rate)),
+            None => {
+                log::warn!("Found no matching audio device config which fits the prefered one. Using the device's default config instead...");
+                Ok(device.default_output_config()?)
+            }
+        }
     }
 
     fn send_to_callback(&self, msg: CallbackMessage) {
@@ -169,7 +351,7 @@ impl OutputDevice for CpalOutput {
     }
 
     fn sample_rate(&self) -> u32 {
-        self.sample_rate.0
+        self.sample_rate
     }
 
     fn sample_position(&self) -> u64 {
@@ -235,12 +417,6 @@ struct StreamThreadHandle {
     thread: JoinHandle<()>,
 }
 
-impl StreamThreadHandle {
-    pub fn sender(&self) -> SyncSender<StreamMessage> {
-        self.sender.clone()
-    }
-}
-
 // -------------------------------------------------------------------------------------------------
 
 #[derive(PartialEq)]
@@ -291,7 +467,7 @@ impl Stream {
             callback_receiver,
             source: Box::new(EmptySource::new(
                 config.channels as usize,
-                config.sample_rate.0,
+                config.sample_rate,
             )),
             playback_pos,
             playback_pos_instant: Instant::now(),
@@ -300,7 +476,7 @@ impl Stream {
                 &config,
             )),
             state: CallbackState::Paused,
-            volume: ExponentialSmoothedValue::new(volume, config.sample_rate.0),
+            volume: ExponentialSmoothedValue::new(volume, config.sample_rate),
         };
 
         log::info!("Opening output stream: {:?}", &config);
@@ -361,45 +537,6 @@ impl Stream {
         Ok(Self { device, stream })
     }
 
-    pub fn build_output_stream<T, F>(
-        device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        mut writer: F,
-    ) -> Result<cpal::Stream, cpal::BuildStreamError>
-    where
-        T: cpal::SizedSample,
-        F: FnMut(&mut [T]) + Send + 'static,
-    {
-        device.build_output_stream(
-            config,
-            move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
-                writer(output);
-            },
-            |err| {
-                log::error!("Audio output error: {err}");
-            },
-            None,
-        )
-    }
-
-    fn spawn<F>(factory: F) -> StreamThreadHandle
-    where
-        F: FnOnce(SyncSender<StreamMessage>) -> Self + Send + 'static,
-    {
-        const MESSAGE_QUEUE_SIZE: usize = 32;
-        let (send, receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
-        StreamThreadHandle {
-            sender: send.clone(),
-            thread: thread::Builder::new()
-                .name("audio_output".to_string())
-                .spawn(move || {
-                    let this = factory(send);
-                    this.process_messages(receiver);
-                })
-                .expect("failed to spawn audio thread"),
-        }
-    }
-
     fn process_messages(self, receiver: Receiver<StreamMessage>) {
         while let Ok(msg) = receiver.recv() {
             match msg {
@@ -424,6 +561,27 @@ impl Stream {
                 }
             }
         }
+    }
+
+    fn build_output_stream<T, F>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        mut writer: F,
+    ) -> Result<cpal::Stream, cpal::BuildStreamError>
+    where
+        T: cpal::SizedSample,
+        F: FnMut(&mut [T]) + Send + 'static,
+    {
+        device.build_output_stream(
+            config,
+            move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
+                writer(output);
+            },
+            |err| {
+                log::error!("Audio output error: {err}");
+            },
+            None,
+        )
     }
 }
 
