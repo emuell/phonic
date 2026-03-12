@@ -40,9 +40,10 @@ const PREFERRED_CHANNELS: cpal::ChannelCount = 2;
 /// Represents different audio backends available on various platforms.
 /// The default variant uses the system-preferred audio host.
 #[cfg(feature = "cpal-output")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum CpalOutputDeviceDriver {
     /// System's default audio host
+    #[default]
     Default,
     /// Windows: Audio Stream Input/Output (ASIO)
     #[cfg(target_os = "windows")]
@@ -72,8 +73,9 @@ pub type CpalDeviceId = cpal::DeviceId;
 ///
 /// Use with [`CpalOutput::open_with_config`] to select a specific audio driver, device,
 /// sample rate and buffer size from a UI or configuration file.
+#[derive(Debug, Default)]
 pub struct CpalOutputConfig {
-    /// Audio host/driver to use. Defaults to [`OutputDeviceDriver::Default`].
+    /// Audio host/driver to use. Defaults to [`CpalOutputDeviceDriver::Default`].
     pub driver: CpalOutputDeviceDriver,
     /// Id of the output device to open. `None` selects the driver's default device.
     pub device_id: Option<CpalDeviceId>,
@@ -81,17 +83,6 @@ pub struct CpalOutputConfig {
     pub sample_rate: Option<u32>,
     /// Audio buffer size in frames. `None` uses the platform default buffer size.
     pub buffer_size: Option<u32>,
-}
-
-impl Default for CpalOutputConfig {
-    fn default() -> Self {
-        Self {
-            driver: CpalOutputDeviceDriver::Default,
-            device_id: None,
-            sample_rate: None,
-            buffer_size: None,
-        }
-    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -198,7 +189,7 @@ impl CpalOutput {
 
     /// Returns all audio drivers available on this platform.
     ///
-    /// Always includes [`OutputDeviceDriver::Default`], followed by any named drivers that are
+    /// Always includes [`CpalOutputDeviceDriver::Default`], followed by any named drivers that are
     /// currently available (e.g. ASIO, WASAPI on Windows; ALSA, JACK on Linux).
     pub fn available_drivers() -> Vec<CpalOutputDeviceDriver> {
         let hosts = cpal::available_hosts();
