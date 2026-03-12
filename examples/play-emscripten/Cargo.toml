@@ -13,6 +13,6 @@ phonic = { path = "../..", default-features = false, features = [
 ] }
 emscripten_rs_sys = { version = "^0.1" }
 strum = { version = "*", default-features = false }
-rand = { version = "*", default-features = false }
+rand = { version = "*", default-features = false, features = ["thread_rng"]  }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }

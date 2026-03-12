@@ -23,7 +23,7 @@ log = { version = "^0.4", features = [
     "release_max_level_info",
 ] }
 panic-message = { version = "^0.3" }
-strum = { version = "^0.27", default-features = false, features = ["derive"] }
+strum = { version = "^0.28", default-features = false, features = ["derive"] }
 four-cc = { version = "^0.4", default-features = false }
 num_cpus = { version = "^1.16" }
 crossbeam-queue = { version = "^0.3", default-features = false, features = [
