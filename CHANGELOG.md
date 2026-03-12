@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.16.0 - 2025/03/12
+
+- [breaking] replaced `Parameter::with_display` with a new const `Parameter::with_formatter` function
+- add new `process_message` function to `Generator` to allow applying properties which can't or should not be expressed as parameters (similar to `EffectMessage`)
+- [breaking] removed `DcFilterEffect`, moved dc-filter as parameter to `GainEffect`
+- add new `PanningEffect` utility with stereo panning and width parameters
+- add new `DelayEffect` with new TPT SVF filters in the delay path 
+- add new `GateEffect`, a simple noise gate
+- add fold distortion mode to `DistortionEffect` and use dynamic drive gain compensation
+- add `loop_range` option to `FilePlaybackOptions` and allow changing sample loop ranges in `Sampler`
+- add new public `AudioFileBuffer` and `AudioFileInfo` tools to ease loading raw sample buffers
+- add optional mixer value metering (peaks + RMS, using a similar interface as CPU load measurement) 
+- update cpal to v0.17, enable Jack for all platforms and allow querying, selecting custom CPAL device configs
+  
 ## v0.15.0 - 2025/02/19
 
 - add concurrent sub-mixer processing using a new channel-synced audio worker thread pool impl
