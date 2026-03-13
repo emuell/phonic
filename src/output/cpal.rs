@@ -90,13 +90,11 @@ pub struct CpalOutputConfig {
 /// Audio output device impl using [cpal](https://github.com/RustAudio/cpal).
 pub struct CpalOutput {
     is_running: bool,
-    channel_count: cpal::ChannelCount,
-    sample_rate: cpal::SampleRate,
-    volume: f32,
+    stream_config: cpal::StreamConfig,
     playback_pos: Arc<AtomicU64>,
+    volume: f32,
     callback_sender: SyncSender<CallbackMessage>,
     stream_sender: SyncSender<StreamMessage>,
-    #[allow(unused)]
     stream_handle: StreamThreadHandle,
 }
 
@@ -114,73 +112,99 @@ impl CpalOutput {
         let host = Self::open_host(config.driver)?;
 
         // Find device by name or use the host default.
-        let device = if let Some(device_id) = &config.device_id {
-            host.output_devices()
-                .map_err(|err| Error::OutputDeviceError(Box::new(err)))?
-                .find(|d| d.id().ok().as_ref() == Some(device_id))
-                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
-        } else {
-            host.default_output_device()
-                .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?
+        let open_device = || -> Result<cpal::Device, Error> {
+            if let Some(device_id) = &config.device_id {
+                Ok(host
+                    .output_devices()
+                    .map_err(|err| Error::OutputDeviceError(Box::new(err)))?
+                    .find(|d| d.id().ok().as_ref() == Some(device_id))
+                    .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?)
+            } else {
+                Ok(host
+                    .default_output_device()
+                    .ok_or(cpal::DefaultStreamConfigError::DeviceNotAvailable)?)
+            }
         };
 
+        let device = open_device()?;
         if let Ok(description) = device.description() {
             log::info!("Using audio device: {description}");
         }
 
         // Get the preferred stream config for the requested (or default) sample rate.
-        let output_config = Self::select_output_config(&device, config.sample_rate)?;
+        let supported_stream_config = Self::select_stream_config(&device, config.sample_rate)?;
 
         // Shared playback position counter
         let playback_pos = Arc::new(AtomicU64::new(0));
         // Default volume
         let volume = 1.0;
 
-        // Channel to send and receive callback messages
-        const MESSAGE_QUEUE_SIZE: usize = 16;
-        let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
-
         // Channel to send stream messages (pause/resume/close)
         const STREAM_MESSAGE_QUEUE_SIZE: usize = 32;
         let (stream_sender, stream_receiver) = sync_channel(STREAM_MESSAGE_QUEUE_SIZE);
 
-        // Try opening the stream
-        let stream = Stream::open(
-            device,
-            cpal::StreamConfig {
-                buffer_size: match config.buffer_size {
-                    Some(frames) => cpal::BufferSize::Fixed(frames),
-                    None => cpal::BufferSize::Default,
-                },
-                ..output_config.config()
-            },
-            output_config.sample_format(),
-            Arc::clone(&playback_pos),
-            volume,
-            callback_receiver,
-            stream_sender.clone(),
-        )?;
+        // Try opening the stream with the given buffer size
+        const MESSAGE_QUEUE_SIZE: usize = 16;
+        let try_open_stream = |device: cpal::Device,
+                               buffer_size: Option<u32>|
+         -> Result<
+            (Stream, SyncSender<CallbackMessage>, cpal::StreamConfig),
+            Error,
+        > {
+            let (callback_sender, callback_receiver) = sync_channel(MESSAGE_QUEUE_SIZE);
+            let stream_config = cpal::StreamConfig {
+                channels: supported_stream_config.channels(),
+                sample_rate: supported_stream_config.sample_rate(),
+                buffer_size: buffer_size
+                    .map(cpal::BufferSize::Fixed)
+                    .unwrap_or(cpal::BufferSize::Default),
+            };
+            let sample_format = supported_stream_config.sample_format();
+            let stream = Stream::open(
+                device,
+                stream_config.clone(),
+                sample_format,
+                Arc::clone(&playback_pos),
+                volume,
+                callback_receiver,
+                stream_sender.clone(),
+            )?;
+            Ok((stream, callback_sender, stream_config))
+        };
 
-        // Run the stream on a new thread
+        let (stream, callback_sender, stream_config) =
+            match try_open_stream(device, config.buffer_size) {
+                Ok(result) => result,
+                Err(err) if config.buffer_size.is_some() => {
+                    log::warn!(
+                        "Failed to open audio stream with fixed buffer size ({err}), \
+                     retrying with default buffer size..."
+                    );
+                    let fallback_device = open_device()?;
+                    try_open_stream(fallback_device, None)?
+                }
+                Err(err) => return Err(err),
+            };
+
+        // Move the stream to a new thread
         let stream_handle = StreamThreadHandle {
             sender: stream_sender,
-            thread: thread::Builder::new()
-                .name("audio_output".to_string())
-                .spawn(move || stream.process_messages(stream_receiver))
-                .expect("failed to spawn audio thread"),
+            thread: Some(
+                thread::Builder::new()
+                    .name("audio_output".to_string())
+                    .spawn(move || stream.process_messages(stream_receiver))
+                    .expect("failed to spawn audio thread"),
+            ),
         };
 
         let is_running = false;
-        let channel_count = output_config.channels();
-        let sample_rate = output_config.sample_rate();
         let stream_sender = stream_handle.sender.clone();
 
         Ok(Self {
             is_running,
-            channel_count,
-            sample_rate,
-            volume,
+            stream_config,
             playback_pos,
+            volume,
             stream_sender,
             callback_sender,
             stream_handle,
@@ -268,6 +292,15 @@ impl CpalOutput {
         Ok(rates)
     }
 
+    /// Returns the actual buffer size the device was opened with,
+    /// or `None` if the platform default is being used.
+    pub fn buffer_size(&self) -> Option<u32> {
+        match self.stream_config.buffer_size {
+            cpal::BufferSize::Fixed(n) => Some(n),
+            cpal::BufferSize::Default => None,
+        }
+    }
+
     fn open_host(driver: CpalOutputDeviceDriver) -> Result<cpal::Host, Error> {
         Ok(match driver {
             CpalOutputDeviceDriver::Default => cpal::default_host(),
@@ -289,7 +322,7 @@ impl CpalOutput {
         })
     }
 
-    fn select_output_config(
+    fn select_stream_config(
         device: &cpal::Device,
         sample_rate: Option<u32>,
     ) -> Result<cpal::SupportedStreamConfig, Error> {
@@ -338,11 +371,11 @@ impl CpalOutput {
 
 impl OutputDevice for CpalOutput {
     fn channel_count(&self) -> usize {
-        self.channel_count as usize
+        self.stream_config.channels as usize
     }
 
     fn sample_rate(&self) -> u32 {
-        self.sample_rate
+        self.stream_config.sample_rate
     }
 
     fn sample_position(&self) -> u64 {
@@ -397,6 +430,9 @@ impl OutputDevice for CpalOutput {
 
     fn close(&mut self) {
         self.send_to_stream(StreamMessage::Close);
+        if let Some(handle) = self.stream_handle.thread.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -404,8 +440,7 @@ impl OutputDevice for CpalOutput {
 
 struct StreamThreadHandle {
     sender: SyncSender<StreamMessage>,
-    #[allow(dead_code)]
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
 }
 
 // -------------------------------------------------------------------------------------------------
