@@ -292,10 +292,14 @@ impl Effect for ChorusEffect {
         self.delay_buffer_left = InterpolatedDelayLine::new(max_buffer_size);
         self.delay_buffer_right = InterpolatedDelayLine::new(max_buffer_size);
 
+        let cutoff = self
+            .filter_freq
+            .target_value()
+            .clamp(20.0, sample_rate as f32 / 2.0);
         self.filter_coefficients = SvfFilterCoefficients::new(
             self.filter_type.value(),
             sample_rate,
-            self.filter_freq.target_value(),
+            cutoff,
             self.filter_resonance.target_value(),
         )?;
 
@@ -325,7 +329,10 @@ impl Effect for ChorusEffect {
             // Filter the inputs
             let (filtered_left, filtered_right) =
                 if self.filter_freq.value_need_ramp() || self.filter_resonance.value_need_ramp() {
-                    let cutoff = self.filter_freq.next_value();
+                    let cutoff = self
+                        .filter_freq
+                        .next_value()
+                        .clamp(20.0, self.sample_rate as f32 / 2.0);
                     let resonance = self.filter_resonance.next_value();
                     self.filter_coefficients
                         .set(

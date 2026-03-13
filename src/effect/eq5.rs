@@ -177,7 +177,9 @@ impl Eq5Effect {
                 4 => BiquadFilterType::Highshelf,
                 _ => BiquadFilterType::Bell,
             };
-            let cutoff = self.frequencies[i].current_value();
+            let cutoff = self.frequencies[i]
+                .current_value()
+                .clamp(20.0, self.sample_rate as f32 / 2.0);
             let q = self.bandwidths[i].current_value();
             let gain = self.gains[i].current_value();
             self.filter_coeffs[i].set(filter_type, self.sample_rate, cutoff, q, gain)?;
@@ -197,7 +199,9 @@ impl Eq5Effect {
                 0 | 4 => self.bandwidths[i].next_value(),
                 _ => self.bandwidths[i].next_value().max(0.001).recip(),
             };
-            let cutoff = self.frequencies[i].next_value();
+            let cutoff = self.frequencies[i]
+                .next_value()
+                .clamp(20.0, self.sample_rate as f32 / 2.0);
             let gain = self.gains[i].next_value();
             self.filter_coeffs[i].set(filter_type, self.sample_rate, cutoff, q, gain)?;
         }

@@ -106,6 +106,7 @@ impl FilterEffect {
         filter.filter_type.set_value(filter_type);
         filter.cutoff.init_value(cutoff);
         filter.q.init_value(q);
+        let cutoff = cutoff.clamp(20.0, 44100.0 / 2.0);
         filter
             .filter_coefficients
             .set(filter_type.into(), 44100, cutoff, q, 0.0)
@@ -147,12 +148,12 @@ impl Effect for FilterEffect {
         self.channel_count = channel_count;
 
         // make sure cutoff is still valid
+        let cutoff = self
+            .filter_coefficients
+            .cutoff()
+            .clamp(20.0, self.sample_rate as f32 / 2.0);
         self.filter_coefficients
-            .set_cutoff(
-                self.filter_coefficients
-                    .cutoff()
-                    .clamp(20.0, sample_rate as f32 / 2.0),
-            )
+            .set_cutoff(cutoff)
             .expect("Failed to set filter parameters");
         self.filters.resize_with(channel_count, BiquadFilter::new);
 

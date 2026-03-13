@@ -303,10 +303,14 @@ impl Effect for DelayEffect {
         self.delay_right = InterpolatedDelayLine::new(max_delay_samples + 4);
 
         // Init filter
+        let cutoff = self
+            .filter_cutoff
+            .target_value()
+            .clamp(20.0, sample_rate as f32 / 2.0);
         self.filter_coefficients = SvfFilterCoefficients::new(
             self.filter_type.value(),
             sample_rate,
-            self.filter_cutoff.target_value(),
+            cutoff,
             Self::FILTER_RESONANCE,
         )?;
 

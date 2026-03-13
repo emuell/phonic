@@ -159,6 +159,7 @@ impl ReverbEffect {
     }
 
     fn update_filter_coefs(&mut self, cutoff: f32) {
+        let cutoff = cutoff.clamp(20.0, self.sample_rate as f32 / 2.0);
         if let Err(err) = self
             .biquad_a_coefficients
             .set(
