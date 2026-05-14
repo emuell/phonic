@@ -25,6 +25,7 @@ pub mod empty;
 #[cfg(feature = "fundsp")]
 pub mod fundsp;
 pub mod sampler;
+pub mod sequencer;
 
 // -------------------------------------------------------------------------------------------------
 

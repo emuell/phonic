@@ -221,9 +221,16 @@ pub mod generators {
             GrainOverlapMode, GrainPlaybackDirection, GrainWindowMode, GranularParameters, Sampler,
             SamplerMessage,
         },
+        sequencer::{
+            metronome::Metronome,
+            pattern::{Pattern, PatternEvent},
+            Sequencer, SequencerPlayback, SequencerTransport,
+        },
         GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
         GeneratorPlaybackMessage,
     };
+    #[cfg(feature = "midi")]
+    pub use super::generator::sequencer::midi_file::MidiFile;
 
     #[cfg(feature = "fundsp")]
     pub use super::generator::fundsp::FunDspGenerator;
