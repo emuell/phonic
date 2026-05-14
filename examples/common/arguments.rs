@@ -28,14 +28,14 @@ pub struct Arguments {
     /// Set logging level to \"debug\", \"info\", \"warn\" or \"error\".
     /// By default \"debug\" in dev builds and \"warn\" in release builds.
     pub log_level: Option<log::Level>,
+    /// Positional arguments.
+    pub positional: Vec<String>,
 }
 
 /// Parse common example arguments and apply the log-level arg to the logger
 #[allow(unused)]
 pub fn parse() -> Arguments {
-    // Parse args
     let args = parse_args::<Arguments>();
-
     create_logger(args.log_level);
     args
 }

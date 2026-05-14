@@ -96,6 +96,18 @@
 	},
 
 	{
+		"label": "Build & Debug play-midi",
+		"build": {
+			"command": "cargo",
+			"args": ["build", "--example", "play-midi", "--features", "midi"]
+		},
+		"program": "$ZED_WORKTREE_ROOT/target/debug/examples/play-midi",
+		"sourceLanguages": ["rust"],
+		"request": "launch",
+		"adapter": "CodeLLDB"
+	},
+
+	{
 		"label": "Build & Debug play-synth",
 		"build": {
 			"command": "cargo",
