@@ -33,7 +33,7 @@ pub(crate) trait EventProcessor {
         let sample_time = event.sample_time();
         let insert_pos = events
             .make_contiguous()
-            .partition_point(|e| e.sample_time() < sample_time);
+            .partition_point(|e| e.sample_time() <= sample_time);
         events.insert(insert_pos, event);
     }
 
