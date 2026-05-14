@@ -19,7 +19,7 @@ use crate::{
             },
             lfo::{Lfo, LfoWaveform},
         },
-        smoothing::SigmoidSmoothedValue,
+        smoothing::SpringSmoothedValue,
     },
     Error, Parameter, ParameterScaling,
 };
@@ -89,7 +89,7 @@ pub struct DelayEffect {
     sample_rate: u32,
     // Parameters
     mode: EnumParameterValue<DelayEffectMode>,
-    delay_time: SmoothedParameterValue<SigmoidSmoothedValue>,
+    delay_time: SmoothedParameterValue<SpringSmoothedValue>,
     feedback: SmoothedParameterValue,
     filter_cutoff: SmoothedParameterValue,
     filter_type: EnumParameterValue<DelayEffectFilterType>,
@@ -183,7 +183,7 @@ impl DelayEffect {
 
             mode: EnumParameterValue::from_description(Self::MODE),
             delay_time: SmoothedParameterValue::from_description(Self::DELAY_TIME)
-                .with_smoother(SigmoidSmoothedValue::default().with_duration(44100 / 2)),
+                .with_smoother(SpringSmoothedValue::default().with_duration(20000)),
             feedback: SmoothedParameterValue::from_description(Self::FEEDBACK),
             filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
             filter_cutoff: SmoothedParameterValue::from_description(Self::FILTER_CUTOFF),

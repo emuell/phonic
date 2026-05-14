@@ -16,7 +16,7 @@ use crate::{
             filters::svf::{SvfFilter, SvfFilterCoefficients, SvfFilterType},
             lfo::{Lfo, LfoWaveform},
         },
-        smoothing::LinearSmoothedValue,
+        smoothing::{LinearSmoothedValue, SpringSmoothedValue},
     },
     Error, Parameter, ParameterScaling,
 };
@@ -56,7 +56,7 @@ pub struct ChorusEffect {
     phase: SmoothedParameterValue<LinearSmoothedValue>,
     depth: SmoothedParameterValue,
     feedback: SmoothedParameterValue,
-    delay: SmoothedParameterValue<LinearSmoothedValue>,
+    delay: SmoothedParameterValue<SpringSmoothedValue>,
     wet_mix: SmoothedParameterValue,
     filter_type: EnumParameterValue<ChorusEffectFilterType>,
     filter_freq: SmoothedParameterValue,
@@ -152,7 +152,7 @@ impl ChorusEffect {
             depth: SmoothedParameterValue::from_description(Self::DEPTH),
             feedback: SmoothedParameterValue::from_description(Self::FEEDBACK),
             delay: SmoothedParameterValue::from_description(Self::DELAY)
-                .with_smoother(LinearSmoothedValue::default().with_step(0.01)),
+                .with_smoother(SpringSmoothedValue::default().with_duration(1000)),
             wet_mix: SmoothedParameterValue::from_description(Self::WET_MIX),
             filter_type: EnumParameterValue::from_description(Self::FILTER_TYPE),
             filter_freq: SmoothedParameterValue::from_description(Self::FILTER_FREQ),

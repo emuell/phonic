@@ -415,24 +415,23 @@ impl From<f32> for LinearSmoothedValue {
 
 // -------------------------------------------------------------------------------------------------
 
-/// Sigmoid smoothed value for ramping using a sigmoid function for smooth, non-linear transitions.
-/// Uses an S-shaped curve for acceleration and deceleration, providing control over ramp duration.
+// -------------------------------------------------------------------------------------------------
+
+/// Second-order spring smoother. Starts from rest (no velocity discontinuity at ramp onset
+/// unlike exponential), then decelerates smoothly into target (no velocity discontinuity at
+/// ramp end, unlike linear) and does not overshoot at critical damping.
 #[derive(Debug, Clone)]
-pub struct SigmoidSmoothedValue {
-    initial: f32,
+pub struct SpringSmoothedValue {
     current: f32,
+    velocity: f32,
     target: f32,
-    t: f32,
-    step: f32,
+    omega: f32, // Frequency in rad/sample at 44100 Hz reference rate.
     sample_rate_comp: f32,
 }
 
-impl SigmoidSmoothedValue {
-    pub const DEFAULT_DURATION: usize = 1000;
-
-    const SIGMOID_T_RANGE_MIN: f32 = -5.0;
-    const SIGMOID_T_RANGE_MAX: f32 = 5.0;
-
+#[allow(unused)]
+impl SpringSmoothedValue {
+    const DEFAULT_DURATION: usize = 4410; // ~100 ms at 44100 Hz.
     const UNINITIALIZED_SAMPLE_RATE: u32 = 66666;
     const UNINITIALIZED_SAMPLE_RATE_COMP: f32 = 44100.0 / Self::UNINITIALIZED_SAMPLE_RATE as f32;
 
@@ -440,27 +439,22 @@ impl SigmoidSmoothedValue {
         Self::from_duration(value, Self::DEFAULT_DURATION, sample_rate)
     }
 
+    /// `duration` is samples at 44100 Hz after which current is within ~3% of target.
     pub const fn from_duration(value: f32, duration: usize, sample_rate: u32) -> Self {
         assert!(duration > 0, "Invalid duration");
+        // The factor 5.5 satisfies `(1 + 5.5)*e^(-5.5) ~= 0.027` for the critically-damped envelope.
+        Self::from_omega(value, 5.5 / duration as f32, sample_rate)
+    }
+
+    pub const fn from_omega(value: f32, omega: f32, sample_rate: u32) -> Self {
+        assert!(omega > 0.0, "Invalid omega");
         assert!(sample_rate > 0, "Invalid sample rate");
-
-        let range = Self::SIGMOID_T_RANGE_MAX - Self::SIGMOID_T_RANGE_MIN;
-        let sample_rate_comp = 44100.0 / sample_rate as f32;
-
-        let initial = value;
-        let current = value;
-        let target = value;
-
-        let t = Self::SIGMOID_T_RANGE_MAX;
-        let step = range / duration as f32 * sample_rate_comp;
-
-        SigmoidSmoothedValue {
-            initial,
-            current,
-            target,
-            t,
-            step,
-            sample_rate_comp,
+        Self {
+            current: value,
+            velocity: 0.0,
+            target: value,
+            omega,
+            sample_rate_comp: 44100.0 / sample_rate as f32,
         }
     }
 
@@ -470,14 +464,20 @@ impl SigmoidSmoothedValue {
     }
 
     pub fn duration(&self) -> usize {
-        let range = Self::SIGMOID_T_RANGE_MAX - Self::SIGMOID_T_RANGE_MIN;
-        (range / self.step) as usize
+        (5.5 / self.omega).round() as usize
     }
 
     pub fn set_duration(&mut self, duration: usize) {
         assert!(duration > 0, "Invalid duration");
-        let range = Self::SIGMOID_T_RANGE_MAX - Self::SIGMOID_T_RANGE_MIN;
-        self.step = range / (duration as f32 * self.sample_rate_comp);
+        self.omega = 5.5 / duration as f32;
+    }
+
+    pub fn omega(&self) -> f32 {
+        self.omega
+    }
+
+    pub fn velocity(&self) -> f32 {
+        self.velocity
     }
 
     pub fn reset(&mut self) {
@@ -485,7 +485,7 @@ impl SigmoidSmoothedValue {
     }
 }
 
-impl SmoothedValue for SigmoidSmoothedValue {
+impl SmoothedValue for SpringSmoothedValue {
     #[inline(always)]
     fn current(&self) -> f32 {
         self.current
@@ -496,56 +496,50 @@ impl SmoothedValue for SigmoidSmoothedValue {
         self.target
     }
 
-    #[inline(always)]
     fn need_ramp(&self) -> bool {
         debug_assert!(
             self.sample_rate_comp != Self::UNINITIALIZED_SAMPLE_RATE_COMP,
-            "Call 'set_sample_rate' for default constructed smoothed values before using them!"
+            "Call 'set_sample_rate' for default constructed SpringSmoothedValue before using it!"
         );
-        self.t < Self::SIGMOID_T_RANGE_MAX
+        const EPSILON: f32 = f32::EPSILON * 100.0;
+        self.velocity.abs() > EPSILON || (self.target - self.current).abs() > EPSILON
     }
 
     fn ramp(&mut self) {
         debug_assert!(
             self.sample_rate_comp != Self::UNINITIALIZED_SAMPLE_RATE_COMP,
-            "Call 'set_sample_rate' for default constructed smoothed values before using them!"
+            "Call 'set_sample_rate' for default constructed SpringSmoothedValue before using it!"
         );
-        if self.t < Self::SIGMOID_T_RANGE_MAX {
-            let sigmoid_coeff = 1.0 / (1.0 + (-self.t).exp());
-            self.current = self.initial + sigmoid_coeff * (self.target - self.initial);
-            self.t += self.step;
-        }
+        let omega = self.omega * self.sample_rate_comp;
+        let k = omega * omega;
+        let d = 2.0 * omega;
+        self.velocity += (self.target - self.current) * k - self.velocity * d;
+        self.current += self.velocity;
     }
 
     fn init(&mut self, value: f32) {
-        self.target = value;
         self.current = value;
-        self.initial = value;
-        self.t = Self::SIGMOID_T_RANGE_MAX;
+        self.velocity = 0.0;
+        self.target = value;
     }
 
     fn set_target(&mut self, value: f32) {
-        self.initial = self.current;
+        // preserve velocity for seamless redirection
         self.target = value;
-        if self.current != self.target {
-            self.t = Self::SIGMOID_T_RANGE_MIN;
-        }
     }
 
     fn set_sample_rate(&mut self, sample_rate: u32) {
-        let duration = self.duration();
         self.sample_rate_comp = 44100.0 / sample_rate as f32;
-        self.set_duration(duration);
     }
 }
 
-impl Default for SigmoidSmoothedValue {
+impl Default for SpringSmoothedValue {
     fn default() -> Self {
         Self::new(0.0, Self::UNINITIALIZED_SAMPLE_RATE)
     }
 }
 
-impl From<f32> for SigmoidSmoothedValue {
+impl From<f32> for SpringSmoothedValue {
     fn from(value: f32) -> Self {
         let mut s = Self::default();
         s.init(value);
@@ -670,51 +664,65 @@ mod tests {
     }
 
     #[test]
-    fn test_sigmoid_smoothed_value() {
+    fn test_spring_smoothed_value() {
         // Test new
-        let val = SigmoidSmoothedValue::new(0.0, 44100);
+        let val = SpringSmoothedValue::new(0.0, 44100);
         assert_eq!(val.current(), 0.0);
         assert_eq!(val.target(), 0.0);
+        assert!(!val.need_ramp());
 
         // Test init
-        let mut val = SigmoidSmoothedValue::new(0.0, 44100);
+        let mut val = SpringSmoothedValue::new(0.0, 44100);
         val.init(1.0);
         assert_eq!(val.current(), 1.0);
         assert_eq!(val.target(), 1.0);
         assert!(!val.need_ramp());
 
-        // Test set_target
-        let mut val = SigmoidSmoothedValue::new(0.0, 44100);
+        // Test set_target with same value does not trigger ramp
+        let mut val = SpringSmoothedValue::new(0.0, 44100);
+        val.set_target(0.0);
+        assert!(!val.need_ramp());
+
+        // Test set_target triggers ramp and moves toward target
+        let mut val = SpringSmoothedValue::new(0.0, 44100);
         val.set_target(1.0);
-        assert_eq!(val.target(), 1.0);
         assert!(val.need_ramp());
         val.ramp();
-        assert!(val.current() > 0.0 && val.current() < 1.0);
+        assert!(val.current() > 0.0);
 
-        // Test ramp pattern
-        let mut val = SigmoidSmoothedValue::new(0.0, 44100);
+        // Test settles within ~3% of target after duration samples
+        let duration = 4410usize;
+        let mut val = SpringSmoothedValue::from_duration(0.0, duration, 44100);
         val.set_target(1.0);
-        let default_step = (SigmoidSmoothedValue::SIGMOID_T_RANGE_MAX
-            - SigmoidSmoothedValue::SIGMOID_T_RANGE_MIN)
-            / SigmoidSmoothedValue::DEFAULT_DURATION as f32;
-        let total_ramps = ((SigmoidSmoothedValue::SIGMOID_T_RANGE_MAX
-            - SigmoidSmoothedValue::SIGMOID_T_RANGE_MIN)
-            / default_step) as usize;
-        for _ in 0..total_ramps {
+        for _ in 0..duration {
             val.ramp();
         }
-        assert!((val.current() - val.target()).abs() < 0.01); // should reach target
+        assert!((val.current() - 1.0).abs() < 0.05);
 
-        // Test set_duration
-        let mut val = SigmoidSmoothedValue::new(0.0, 44100);
+        // Test no overshoot (critical damping)
+        let mut val = SpringSmoothedValue::from_duration(0.0, duration, 44100);
+        val.set_target(1.0);
+        let mut max_val = 0.0f32;
+        for _ in 0..(duration * 4) {
+            val.ramp();
+            max_val = max_val.max(val.current());
+        }
+        assert!(max_val <= 1.0 + 1e-4, "overshoot detected: {max_val}");
+
+        // Test velocity is preserved across set_target (seamless redirect)
+        let mut val = SpringSmoothedValue::from_duration(0.0, duration, 44100);
+        val.set_target(1.0);
+        for _ in 0..200 {
+            val.ramp();
+        }
+        let velocity_before = val.velocity();
+        assert!(velocity_before > 0.0);
+        val.set_target(0.5);
+        assert_eq!(val.velocity(), velocity_before);
+
+        // Test duration round-trips
+        let mut val = SpringSmoothedValue::new(0.0, 44100);
         val.set_duration(2000);
         assert_eq!(val.duration(), 2000);
-        val.set_target(1.0);
-        assert_eq!(val.target(), 1.0);
-        // After setting duration, step is adjusted
-        let expected_step = (SigmoidSmoothedValue::SIGMOID_T_RANGE_MAX
-            - SigmoidSmoothedValue::SIGMOID_T_RANGE_MIN)
-            / 2000.0;
-        assert!((val.step - expected_step).abs() < 0.001);
     }
 }
