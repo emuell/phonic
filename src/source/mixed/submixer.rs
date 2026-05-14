@@ -16,8 +16,6 @@ pub(crate) use thread_pool::{SubMixerProcessingResult, SubMixerThreadPool};
 
 // -------------------------------------------------------------------------------------------------
 
-// -------------------------------------------------------------------------------------------------
-
 /// Wraps a sub-mixer with silence detection for auto-bypass optimization.
 ///
 /// Tracks silence duration to determine if the sub-mixer is producing audible output,
