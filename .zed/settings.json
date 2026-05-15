@@ -7,8 +7,8 @@
 		"rust-analyzer": {
 			"initialization_options": {
 				"cargo": {
-				    "autoreload": true,
-					"features": ["cpal-output", "wav-output", "fundsp"],
+					"autoreload": true,
+					"features": ["cpal-output", "wav-output", "fundsp", "midi"]
 				},
 				"check": {
 					"command": "clippy"

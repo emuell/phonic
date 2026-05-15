@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use phonic::{
     effects::ReverbEffect,
-    generators::{AhdsrParameters, MidiFile, Sampler, Sequencer},
+    generators::{AhdsrParameters, MidiFile, Sampler},
     Error, GeneratorPlaybackOptions,
 };
 
@@ -45,23 +45,23 @@ fn main() -> Result<(), Error> {
 
     // Create player
     let mut player = arguments::new_player(&args, None)?;
-    let sample_rate = player.output_sample_rate();
 
     // Stop playback until all events are pre-scheduled
     player.stop();
 
     // Start 1 second after player starts
-    let start_time = player.output_sample_frame_position() + sample_rate as u64;
+    let start_time =
+        player.output_sample_frame_position() + player.transport().seconds_to_samples(1.0) as u64;
 
     // Create a sampler with enough voices for typical polyphonic MIDI playback
-    let mut generator = player.play_generator(
+    let sampler_handle = player.add_generator(
         Sampler::from_file(
             &sample_path,
             GeneratorPlaybackOptions::default()
                 .volume_db(-6.0)
                 .voices(24),
             player.output_channel_count(),
-            sample_rate,
+            player.output_sample_rate(),
         )?
         .with_ahdsr(AhdsrParameters::new(
             Duration::from_millis(1),
@@ -70,36 +70,35 @@ fn main() -> Result<(), Error> {
             0.7,
             Duration::from_millis(500),
         )?)?,
-        start_time,
+        None,
     )?;
 
-    // Parse the MIDI file and pre-schedule all events upfront
-    let mut sequence = MidiFile::from_path(&midi_path, start_time, sample_rate)?;
-    sequence.run_until(u64::MAX, &mut generator);
+    // Create a new midi file sequencer and set player's tempo from the file's initial tempo
+    let midi_file = MidiFile::from_path(&midi_path)?;
+    if let Some(bpm) = midi_file.bpm() {
+        player.set_transport_bpm(bpm);
+    }
 
-    // Stop the generator one second after the last MIDI event
-    let stop_time = start_time + sequence.duration_samples() + sample_rate as u64;
-    generator.stop(stop_time)?;
+    // Add sequencer to the player, using the sampler as event sink and start playing it
+    let midi_file_handle = player.play_sequencer(midi_file, sampler_handle.clone(), start_time)?;
 
-    // Add a reverb effect to the master output
-    let _ = player.add_effect(ReverbEffect::with_parameters(0.5, 0.2), None)?;
+    // Add a reverb effect to the player's main mixer
+    let _reverb_handle = player.add_effect(ReverbEffect::with_parameters(0.5, 0.2), None)?;
 
     // Print player graph
+    println!("\nPlaying '{}' with sample '{}'...", midi_path, sample_path);
     println!("\nPlayer Graph:\n{}", player);
-    println!(
-        "\nPlaying '{}' through '{}' ({:.1}s)...",
-        midi_path,
-        sample_path,
-        sequence.duration_samples() as f64 / sample_rate as f64
-    );
 
     // Start playback
     player.start();
 
-    // Wait for playback to finish
-    while player.is_running() && generator.is_playing() {
+    // Wait for sequencer playback to finish
+    while player.is_running() && midi_file_handle.is_playing() {
         std::thread::sleep(Duration::from_millis(100));
     }
+
+    // Wait until sampler's AHDSR fades out
+    std::thread::sleep(Duration::from_millis(1000));
 
     Ok(())
 }

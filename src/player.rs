@@ -17,6 +17,7 @@ use dashmap::DashMap;
 use crate::{
     effect::Effect,
     error::Error,
+    generator::sequencer::Sequencer,
     output::OutputDevice,
     source::{
         amplified::AmplifiedSource,
@@ -36,7 +37,7 @@ use crate::{
         synth::SynthSource,
         Source,
     },
-    Generator,
+    Generator, Transport,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -57,10 +58,13 @@ pub type EffectId = usize;
 /// Unique ID for individual sounds played in a generator.
 pub type NotePlaybackId = usize;
 
+/// Unique ID for a sequencer registered with the player.
+pub type SequencerId = usize;
+
 // Playback handles for sources.
 pub use handles::{
-    EffectHandle, FilePlaybackHandle, GeneratorPlaybackHandle, MixerHandle, SourcePlaybackHandle,
-    SynthPlaybackHandle,
+    EffectHandle, FilePlaybackHandle, GeneratorPlaybackHandle, MixerHandle, SequencerHandle,
+    SourcePlaybackHandle, SynthPlaybackHandle,
 };
 
 /// A callback function to handle panics occurring within the player's main mixer.
@@ -84,7 +88,7 @@ pub enum EffectMovement {
 // -------------------------------------------------------------------------------------------------
 
 /// Player internal info about a currently playing source.
-struct PlayingSource {
+pub(super) struct PlayingSource {
     is_playing: Arc<AtomicBool>,
     is_transient: bool,
     playback_message_queue: PlaybackMessageQueue,
@@ -102,9 +106,17 @@ impl Drop for PlayingSource {
 
 // -------------------------------------------------------------------------------------------------
 
+/// Player internal info about a registered sequencer.
+#[derive(Debug, Clone)]
+pub(super) struct PlayerSequencerInfo {
+    mixer_id: MixerId,
+}
+
+// -------------------------------------------------------------------------------------------------
+
 /// Player internal info about an instantiated mixer.
 #[derive(Debug, Clone)]
-struct PlayerMixerInfo {
+pub(super) struct PlayerMixerInfo {
     parent_id: MixerId,
     event_queue: Arc<ArrayQueue<MixerMessage>>,
 }
@@ -113,7 +125,7 @@ struct PlayerMixerInfo {
 
 /// Player internal info about an instantiated effect.
 #[derive(Debug, Copy, Clone)]
-struct PlayerEffectInfo {
+pub(super) struct PlayerEffectInfo {
     mixer_id: MixerId,
     effect_name: &'static str,
 }
@@ -257,6 +269,8 @@ pub struct Player {
     collector_handle: Handle,
     collector_running: Arc<AtomicBool>,
     collector_thread: Option<thread::JoinHandle<()>>,
+    transport: Transport,
+    sequencers: Arc<DashMap<SequencerId, PlayerSequencerInfo>>,
     mixers: DashMap<MixerId, PlayerMixerInfo>,
     effects: DashMap<EffectId, PlayerEffectInfo>,
     main_mixer_measurement_state: Option<SharedCpuLoadState>,
@@ -383,6 +397,9 @@ impl Player {
             output_device.play(guarded_main_mixer.into_box());
         }
 
+        let transport = Transport::new(output_device.sample_rate(), 120.0, 4);
+        let sequencers = Arc::new(DashMap::new());
+
         Self {
             config,
             output_device,
@@ -393,7 +410,9 @@ impl Player {
             collector_handle,
             collector_running,
             collector_thread,
+            transport,
             mixers,
+            sequencers,
             effects,
             main_mixer_dropped,
             main_mixer_panic_handler,
@@ -505,6 +524,43 @@ impl Player {
     /// `start` function to start it again. Use function `stop_all_sources` to drop all sources.
     pub fn stop(&mut self) {
         self.output_device.pause();
+    }
+
+    /// Get the current global transport (BPM, time signature, sample rate) as applied to all
+    /// sequencers that get added to the player.
+    pub fn transport(&self) -> Transport {
+        self.transport
+    }
+
+    /// Set the global BPM tempo. This will change BPMs in all currently playing mixer-driven
+    /// sequencers as well.
+    ///
+    /// Panics when `bpm` is <=0.
+    pub fn set_transport_bpm(&mut self, bpm: f64) {
+        assert!(bpm > 0.0, "Invalid BPM in player: {bpm}");
+        self.transport = Transport::new(
+            self.transport.sample_rate(),
+            bpm,
+            self.transport.beats_per_bar(),
+        );
+        self.send_transport_change();
+    }
+
+    /// Set the global time signature as beats per bar. This will change signatures in all
+    /// currently playing mixer-driven sequencers as well.
+    ///
+    /// Panic when `beats_per_bar` is 0.
+    pub fn set_transport_beats_per_bar(&mut self, beats_per_bar: usize) {
+        assert!(
+            beats_per_bar > 0,
+            "Invalid beats/bar count in player: {beats_per_bar}"
+        );
+        self.transport = Transport::new(
+            self.transport.sample_rate(),
+            self.transport.beats_per_minute(),
+            beats_per_bar,
+        );
+        self.send_transport_change();
     }
 
     /// Play a newly created or cloned file source.
@@ -765,6 +821,90 @@ impl Player {
         }
         // remove from playing sources (outside of the `playing_sources.get` dashmap lock!)
         self.playing_sources.remove(&playback_id);
+        Ok(())
+    }
+
+    /// Play a sequencer driven automatically by the same mixer that owns `generator`.
+    ///
+    /// The mixer calls [`run_until`](crate::generators::Sequencer::run_until) every audio block
+    /// and propagates transport changes. The player's current [`Transport`] is enforced
+    /// immediately on registration - any transport previously set on the sequencer is overridden.
+    ///
+    /// `start_time` controls when the sequencer activates. Pass `None` to start immediately,
+    /// or a specific sample-frame position to defer the first [`reset`](crate::generators::Sequencer::reset)
+    /// and event emission until the mixer reaches that position.
+    ///
+    /// Returns a [`SequencerHandle`] that can be used to query exhaustion status or stop the
+    /// sequencer early via [`SequencerHandle::stop`] or [`stop_sequencer`](Self::stop_sequencer).
+    pub fn play_sequencer<S: Sequencer + 'static, T: Into<Option<u64>>>(
+        &mut self,
+        sequencer: S,
+        generator: GeneratorPlaybackHandle,
+        start_time: T,
+    ) -> Result<SequencerHandle, Error> {
+        let start_time = start_time.into();
+        let playback_id = generator.id();
+        let mixer_id = self
+            .playing_sources
+            .get(&playback_id)
+            .map(|s| s.mixer_id)
+            .ok_or(Error::GeneratorNotFoundError(playback_id))?;
+        let mixer_event_queue = self.mixer_event_queue(mixer_id)?;
+        let sequencer_id = Self::unique_sequencer_id();
+        let is_playing = Arc::new(AtomicBool::new(true));
+        let sequencer = Owned::new(&self.collector_handle, sequencer.into_box());
+        if mixer_event_queue
+            .push(MixerMessage::AddSequencer {
+                sequencer_id,
+                sequencer,
+                playback_id,
+                is_playing: Arc::clone(&is_playing),
+                transport: self.transport,
+                start_time,
+            })
+            .is_err()
+        {
+            return Err(Self::mixer_event_queue_error("play_sequencer"));
+        }
+        self.sequencers
+            .insert(sequencer_id, PlayerSequencerInfo { mixer_id });
+        Ok(SequencerHandle::new(
+            is_playing,
+            sequencer_id,
+            mixer_id,
+            Arc::clone(&self.sequencers),
+            mixer_event_queue,
+        ))
+    }
+
+    /// Stop and eject a sequencer that was previously registered via [`play_sequencer`](Self::play_sequencer).
+    ///
+    /// Pass `None` to stop immediately, or `Some(sample_time)` to schedule the stop at a
+    /// specific audio frame.
+    ///
+    /// Prefer [`SequencerHandle::stop`] when you have the handle - this variant is for cases
+    /// where only the [`SequencerId`] is available. Returns `Err` if the ID is not found.
+    pub fn stop_sequencer(
+        &mut self,
+        sequencer_id: SequencerId,
+        sample_time: impl Into<Option<u64>>,
+    ) -> Result<(), Error> {
+        let sample_time = sample_time.into();
+        let mixer_id = self
+            .sequencers
+            .remove(&sequencer_id)
+            .map(|(_, info)| info.mixer_id)
+            .ok_or(Error::SequencerNotFoundError(sequencer_id))?;
+        let queue = self.mixer_event_queue(mixer_id)?;
+        if queue
+            .push(MixerMessage::StopSequencer {
+                sequencer_id,
+                sample_time,
+            })
+            .is_err()
+        {
+            return Err(Self::mixer_event_queue_error("stop_sequencer"));
+        }
         Ok(())
     }
 
@@ -1045,6 +1185,20 @@ impl Player {
         Ok(())
     }
 
+    fn send_transport_change(&self) {
+        let transport = self.transport;
+        for entry in self.mixers.iter() {
+            if entry
+                .value()
+                .event_queue
+                .push(MixerMessage::SetTransport { transport })
+                .is_err()
+            {
+                log::warn!("Mixer's event queue is full. Failed to send SetTransport event.");
+            }
+        }
+    }
+
     fn add_or_play_generator<G: Generator + 'static, T: Into<Option<u64>>>(
         &mut self,
         generator: G,
@@ -1271,12 +1425,14 @@ impl Player {
     }
 
     fn unique_mixer_id() -> MixerId {
-        // ensure mixer and effect id's don't clash
         Self::unique_id()
     }
 
     fn unique_effect_id() -> EffectId {
-        // ensure mixer and effect id's don't clash
+        Self::unique_id()
+    }
+
+    fn unique_sequencer_id() -> SequencerId {
         Self::unique_id()
     }
 }

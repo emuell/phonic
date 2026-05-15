@@ -20,6 +20,11 @@
 //!   to create a custom synth via [fundsp](https://github.com/SamiPerttu/fundsp), or create your
 //!   own custom generator.
 //!
+//! - **[`Sequencer`](generators::Sequencer)** drives a [`Generator`] with timed note events
+//!   according to a musical timeline. Use [`Pattern`](generators::Pattern) for programmatic
+//!   step-sequences, [`Metronome`](generators::Metronome) for a click track, or
+//!   [`MidiFile`](generators::MidiFile) to play back a MIDI file or create custom ones.
+//!
 //! - **[`Effect`]** applies DSP effects to audio signals in a mixer and describes its automatable
 //!   properties via [`Parameter`]s. Phonic comes with a basic set of [`effects`], but you can
 //!   create your own custom ones too.
@@ -36,9 +41,9 @@
 //! use std::time::Duration;
 //!
 //! use phonic::{
-//!     DefaultOutputDevice, Player, FilePlaybackOptions, Error,
+//!     DefaultOutputDevice, FilePlaybackOptions, GeneratorPlaybackOptions, Player, Error,
 //!     effects::{ChorusEffect, ReverbEffect, CompressorEffect},
-//!     generators::Sampler, GeneratorPlaybackOptions,
+//!     generators::{Sampler, Pattern, PatternEvent, IntoPatternRow}
 //! };
 //!
 //! fn main() -> Result<(), Error> {
@@ -98,9 +103,22 @@
 //!     // can also pass it to other threads (e.g. a MIDI thread) to trigger events from there.
 //!     generator.note_on(60, Some(1.0), None, None)?;
 //!
+//!     // Or drive the generator with a sequencer, here a two-note Pattern at 120 BPM:
+//!     player.set_transport_bpm(120.0);
+//!     let start_time = player.output_sample_frame_position();
+//!     let pattern = Pattern::new(
+//!         vec![
+//!             PatternEvent::note_on(60).into_row(1.0), // C4, one beat
+//!             PatternEvent::note_off().into_row(0.5),  // rest, half a beat
+//!             PatternEvent::note_on(64).into_row(1.0), // E4, one beat
+//!         ],
+//!         1, // play once
+//!     );
+//!     let sequencer = player.play_sequencer(pattern, generator.clone(), start_time)?;
+//!
 //!     // The player's audio output stream runs on a separate thread. Keep the
-//!     // main thread running here, until all files finished playing.
-//!     while file.is_playing() || some_other_file.is_playing() {
+//!     // main thread running here, until all files and sequencers finished playing.
+//!     while file.is_playing() || some_other_file.is_playing() || sequencer.is_playing() {
 //!         std::thread::sleep(Duration::from_millis(100));
 //!     }
 //!
@@ -133,6 +151,7 @@ mod output;
 mod parameter;
 mod player;
 mod source;
+mod transport;
 
 // public, flat re-exports (common types and traits)
 pub use error::Error;
@@ -144,8 +163,10 @@ pub use output::OutputDevice;
 pub use player::{
     EffectHandle, EffectId, EffectMovement, FilePlaybackHandle, GeneratorPlaybackHandle,
     MixerHandle, MixerId, NotePlaybackId, PanicHandler, PlaybackId, Player, PlayerConfig,
-    SourcePlaybackHandle, SynthPlaybackHandle,
+    SequencerHandle, SequencerId, SourcePlaybackHandle, SynthPlaybackHandle,
 };
+
+pub use transport::Transport;
 
 pub use effect::{Effect, EffectMessage, EffectMessagePayload, EffectTime};
 
@@ -215,6 +236,11 @@ pub mod generators {
 
     pub use super::modulation::{ModulationConfig, ModulationSource, ModulationTarget};
 
+    pub use crate::Transport;
+
+    #[cfg(feature = "midi")]
+    pub use super::generator::sequencer::midi_file::MidiFile;
+
     pub use super::generator::{
         empty::EmptyGenerator,
         sampler::{
@@ -223,14 +249,13 @@ pub mod generators {
         },
         sequencer::{
             metronome::Metronome,
-            pattern::{Pattern, PatternEvent},
-            Sequencer, SequencerEventSink, SequencerTransport,
+            pattern::{IntoPatternRow, Pattern, PatternEvent, PatternRow},
+            Sequencer, SequencerEventSink, SequencerNoopEventSink,
         },
         GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
         GeneratorPlaybackMessage,
     };
-    #[cfg(feature = "midi")]
-    pub use super::generator::sequencer::midi_file::MidiFile;
+    pub use crate::{SequencerHandle, SequencerId};
 
     #[cfg(feature = "fundsp")]
     pub use super::generator::fundsp::FunDspGenerator;

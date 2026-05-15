@@ -11,9 +11,11 @@ pub enum Error {
     MediaFileProbeError,
     MediaFileSeekError,
     AudioDecodingError(Box<dyn error::Error + Send + Sync>),
+    MidiDecodingError(Box<dyn error::Error + Send + Sync>),
     OutputDeviceError(Box<dyn error::Error + Send + Sync>),
     ResamplingError(Box<dyn error::Error + Send + Sync>),
     GeneratorNotFoundError(usize),
+    SequencerNotFoundError(usize),
     EffectNotFoundError(usize),
     MixerNotFoundError(usize),
     ParameterError(String),
@@ -31,10 +33,14 @@ impl fmt::Display for Error {
             Self::MediaFileProbeError => write!(f, "Audio file failed to probe"),
             Self::MediaFileSeekError => write!(f, "Audio file failed to seek"),
             Self::AudioDecodingError(err)
+            | Self::MidiDecodingError(err)
             | Self::OutputDeviceError(err)
             | Self::ResamplingError(err) => err.fmt(f),
             Self::GeneratorNotFoundError(playback_id) => {
                 write!(f, "Generator with id {playback_id} not found")
+            }
+            Self::SequencerNotFoundError(sequencer_id) => {
+                write!(f, "Sequencer with id {sequencer_id} not found")
             }
             Self::MixerNotFoundError(mixer_id) => write!(f, "Mixer with id {mixer_id} not found"),
             Self::EffectNotFoundError(effect_id) => {

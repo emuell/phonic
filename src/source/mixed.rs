@@ -1,4 +1,11 @@
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use basedrop::Owned;
 use crossbeam_queue::ArrayQueue;
@@ -6,9 +13,10 @@ use four_cc::FourCC;
 
 use crate::{
     effect::EffectMessage,
-    generator::GeneratorPlaybackMessage,
+    generator::sequencer::{Sequencer, SequencerEventSink},
+    generator::{unique_note_id, GeneratorPlaybackMessage},
     parameter::ParameterValueUpdate,
-    player::{EffectId, EffectMovement},
+    player::{EffectId, EffectMovement, SequencerId},
     source::{
         amplified::AmplifiedSourceMessage, file::FilePlaybackMessage, panned::PannedSourceMessage,
         playback::PlaybackMessageQueue, Source, SourceTime,
@@ -17,7 +25,7 @@ use crate::{
         buffer::{add_buffers, clear_buffer},
         event::{Event, EventProcessor},
     },
-    GeneratorPlaybackEvent, MixerId, PlaybackId,
+    GeneratorPlaybackEvent, MixerId, NotePlaybackId, PlaybackId, Transport,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -39,6 +47,93 @@ pub(crate) struct PlayingSource {
     source: Owned<Box<dyn Source>>,
     start_time: u64,
     stop_time: Option<u64>,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Internal struct that holds a mixer's sequencer and .
+struct MixerSequencer {
+    sequencer_id: SequencerId,
+    playback_id: PlaybackId,
+    sequencer: Owned<Box<dyn Sequencer>>,
+    is_playing: Arc<AtomicBool>,
+    started: bool,
+    start_time: u64,
+    last_run_time: u64,
+    stop_time: Option<u64>,
+}
+
+/// SequencerEventSink that writes events into a pre-allocated scratch buffer.
+struct MixerSequencerSink<'a> {
+    playback_id: PlaybackId,
+    events: &'a mut Vec<MixerEvent>,
+}
+
+impl SequencerEventSink for MixerSequencerSink<'_> {
+    fn note_on_with_context(
+        &mut self,
+        note: u8,
+        volume: Option<f32>,
+        panning: Option<f32>,
+        context: Option<crate::PlaybackStatusContext>,
+        start_time: u64,
+    ) -> Option<NotePlaybackId> {
+        let note_id = unique_note_id();
+        self.events.push(MixerEvent::TriggerGeneratorEvent {
+            playback_id: self.playback_id,
+            event: GeneratorPlaybackEvent::NoteOn {
+                note_id,
+                note,
+                volume,
+                panning,
+                context,
+            },
+            sample_time: start_time,
+        });
+        Some(note_id)
+    }
+
+    fn note_off(&mut self, note_id: NotePlaybackId, stop_time: u64) {
+        self.events.push(MixerEvent::TriggerGeneratorEvent {
+            playback_id: self.playback_id,
+            event: GeneratorPlaybackEvent::NoteOff { note_id },
+            sample_time: stop_time,
+        });
+    }
+
+    fn set_speed(
+        &mut self,
+        note_id: NotePlaybackId,
+        speed: f64,
+        glide: Option<f32>,
+        sample_time: u64,
+    ) {
+        self.events.push(MixerEvent::TriggerGeneratorEvent {
+            playback_id: self.playback_id,
+            event: GeneratorPlaybackEvent::SetSpeed {
+                note_id,
+                speed,
+                glide,
+            },
+            sample_time,
+        });
+    }
+
+    fn set_volume(&mut self, note_id: NotePlaybackId, volume: f32, sample_time: u64) {
+        self.events.push(MixerEvent::TriggerGeneratorEvent {
+            playback_id: self.playback_id,
+            event: GeneratorPlaybackEvent::SetVolume { note_id, volume },
+            sample_time,
+        });
+    }
+
+    fn set_panning(&mut self, note_id: NotePlaybackId, panning: f32, sample_time: u64) {
+        self.events.push(MixerEvent::TriggerGeneratorEvent {
+            playback_id: self.playback_id,
+            event: GeneratorPlaybackEvent::SetPanning { note_id, panning },
+            sample_time,
+        });
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -155,6 +250,26 @@ pub(crate) enum MixerMessage {
         event: GeneratorPlaybackEvent,
         sample_time: u64,
     },
+    // Sequencers
+    AddSequencer {
+        sequencer_id: SequencerId,
+        sequencer: Owned<Box<dyn Sequencer>>,
+        playback_id: PlaybackId,
+        transport: Transport,
+        is_playing: Arc<AtomicBool>,
+        start_time: Option<u64>,
+    },
+    StopSequencer {
+        sequencer_id: SequencerId,
+        sample_time: Option<u64>,
+    },
+    ResetSequencer {
+        sequencer_id: SequencerId,
+        sample_time: u64,
+    },
+    SetTransport {
+        transport: Transport,
+    },
     // Mixers
     AddMixer {
         mixer_id: MixerId,
@@ -198,6 +313,9 @@ pub(crate) enum MixerMessage {
 /// A [`Source`] which converts and mixes other sources together.
 pub struct MixedSource {
     playing_sources: VecDeque<PlayingSource>,
+    transport: Option<Transport>,
+    sequencers: Vec<MixerSequencer>,
+    sequencer_events: Vec<MixerEvent>,
     mixers: Vec<(MixerId, Owned<SubMixerProcessor>)>,
     effects: Vec<(EffectId, Owned<EffectProcessor>)>,
     effects_bypassed: bool,
@@ -241,8 +359,18 @@ impl MixedSource {
         // create thread pool processing results buffer
         let thread_pool_results = Vec::new();
 
+        let transport = None;
+
+        const SEQUENCERS_CAPACITY: usize = 16;
+        let sequencers = Vec::with_capacity(SEQUENCERS_CAPACITY);
+        const PENDING_SEQUENCER_EVENTS_CAPACITY: usize = 1024;
+        let sequencer_events = Vec::with_capacity(PENDING_SEQUENCER_EVENTS_CAPACITY);
+
         Self {
             playing_sources,
+            transport,
+            sequencers,
+            sequencer_events,
             mixers,
             events,
             effects,
@@ -412,6 +540,90 @@ impl MixedSource {
                         sample_time,
                     });
                 }
+                // Sequencers
+                MixerMessage::AddSequencer {
+                    sequencer_id,
+                    mut sequencer,
+                    playback_id,
+                    transport,
+                    is_playing,
+                    start_time,
+                } => {
+                    let started = false;
+                    let start_time = start_time.unwrap_or(time.pos_in_frames);
+                    let last_run_time = 0;
+                    let stop_time = None;
+                    // Enforce transport immediately so BPM/sample_rate are correct at activation
+                    sequencer.set_transport(transport, start_time);
+                    self.transport = Some(transport);
+                    // Add to sequencers
+                    self.sequencers.push(MixerSequencer {
+                        sequencer_id,
+                        playback_id,
+                        sequencer,
+                        is_playing,
+                        start_time,
+                        last_run_time,
+                        started,
+                        stop_time,
+                    });
+                }
+                MixerMessage::StopSequencer {
+                    sequencer_id,
+                    sample_time,
+                } => {
+                    if let Some(stop_time) = sample_time {
+                        // Stop when reaching given sample time
+                        if let Some(mixer_sequencer) = self
+                            .sequencers
+                            .iter_mut()
+                            .find(|s| s.sequencer_id == sequencer_id)
+                        {
+                            mixer_sequencer.stop_time = Some(stop_time);
+                        }
+                    } else {
+                        // Stop immedeately
+                        if let Some(mixer_sequencer) = self
+                            .sequencers
+                            .iter_mut()
+                            .find(|s| s.sequencer_id == sequencer_id)
+                        {
+                            let mut sink = MixerSequencerSink {
+                                playback_id: mixer_sequencer.playback_id,
+                                events: &mut self.sequencer_events,
+                            };
+                            mixer_sequencer
+                                .sequencer
+                                .stop(time.pos_in_frames, &mut sink);
+                            mixer_sequencer.is_playing.store(false, Ordering::Relaxed);
+                        }
+                        self.sequencers.retain(|s| s.sequencer_id != sequencer_id);
+                    }
+                }
+                MixerMessage::ResetSequencer {
+                    sequencer_id,
+                    sample_time,
+                } => {
+                    if let Some(sequencer) = self
+                        .sequencers
+                        .iter_mut()
+                        .find(|s| s.sequencer_id == sequencer_id)
+                    {
+                        sequencer.is_playing.store(true, Ordering::Relaxed);
+                        sequencer.start_time = sample_time;
+                        sequencer.last_run_time = 0;
+                        sequencer.started = false;
+                        sequencer.stop_time = None;
+                    }
+                }
+                MixerMessage::SetTransport { transport } => {
+                    for sequencer in &mut self.sequencers {
+                        sequencer
+                            .sequencer
+                            .set_transport(transport, time.pos_in_frames);
+                    }
+                    self.transport = Some(transport);
+                }
                 // Mixers
                 MixerMessage::AddMixer {
                     mixer_id,
@@ -496,6 +708,81 @@ impl MixedSource {
                 }
             }
         }
+    }
+
+    // Drive sequencers, accumulate events into a scratch buffer, then schedule events.
+    fn process_sequencers(&mut self, output: &mut [f32], time: &SourceTime) {
+        if self.sequencers.is_empty() {
+            return;
+        }
+
+        let target_sample_time = time.pos_in_frames + (output.len() / self.channel_count) as u64;
+
+        self.sequencer_events.clear();
+        for mixer_sequencer in &mut self.sequencers {
+            if let Some(stop_time) = mixer_sequencer.stop_time {
+                if time.pos_in_frames >= stop_time {
+                    let mut sink = MixerSequencerSink {
+                        playback_id: mixer_sequencer.playback_id,
+                        events: &mut self.sequencer_events,
+                    };
+                    mixer_sequencer.sequencer.stop(stop_time, &mut sink);
+                    mixer_sequencer.is_playing.store(false, Ordering::Relaxed);
+                    continue;
+                }
+            }
+            if mixer_sequencer.sequencer.is_playing() {
+                // Apply pending sequencer starts
+                if !mixer_sequencer.started && target_sample_time > mixer_sequencer.start_time {
+                    mixer_sequencer.sequencer.reset(mixer_sequencer.start_time);
+                    mixer_sequencer.last_run_time = time.pos_in_frames;
+                    mixer_sequencer.started = true;
+                }
+                if mixer_sequencer.started {
+                    // Check if the reference time changed (due to a discontinuity in the audio stream)
+                    if mixer_sequencer.last_run_time != time.pos_in_frames {
+                        mixer_sequencer.sequencer.reset(time.pos_in_frames);
+                        mixer_sequencer.last_run_time = time.pos_in_frames;
+                        // log::warn!("Sequence reference time change - applied a reset");
+                    }
+                    // Run the sequencer
+                    let mut sink = MixerSequencerSink {
+                        playback_id: mixer_sequencer.playback_id,
+                        events: &mut self.sequencer_events,
+                    };
+                    mixer_sequencer
+                        .sequencer
+                        .run_until(target_sample_time, &mut sink);
+                    mixer_sequencer.last_run_time = target_sample_time;
+                    if !mixer_sequencer.sequencer.is_playing() {
+                        mixer_sequencer.is_playing.store(false, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+
+        // Swap out to avoid double-borrow of `self` without allocating.
+        let mut sequencer_events = std::mem::take(&mut self.sequencer_events);
+        for event in sequencer_events.drain(..) {
+            self.insert_event(event);
+        }
+        self.sequencer_events = sequencer_events;
+
+        // TODO: ? Stop sequencers when their generator is exhausted
+        // for sequencer in &mut self.sequencers {
+        //     let generator_is_exhausted = self
+        //         .playing_sources
+        //         .iter()
+        //         .find(|p| p.playback_id == sequencer.playback_id)
+        //         .map(|p| p.source.is_exhausted())
+        //         .unwrap_or(true);
+        //     if generator_is_exhausted {
+        //         sequencer.generator_is_exhausted = true;
+        //     }
+        // }
+
+        // Drain sequencers that finished playback
+        self.sequencers.retain(|s| s.sequencer.is_playing());
     }
 
     // Process all sub-mixers. This is using the thread pool if enabled, else processes
@@ -660,7 +947,10 @@ impl Source for MixedSource {
         // Process all pending messages
         self.process_messages(time);
 
-        // Return early and avoid touching the buffer if there's nothing to do
+        // Process/drive all sequencer
+        self.process_sequencers(output, time);
+
+        // Return early and avoid touching the buffer if there's nothing else to do
         if self.playing_sources.is_empty()
             && self.effects.is_empty()
             && self.mixers.is_empty()
