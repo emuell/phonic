@@ -41,7 +41,7 @@ impl SequencerTransport {
 // -------------------------------------------------------------------------------------------------
 
 /// Trait for triggering note events from a sequencer into a generator.
-pub trait SequencerPlayback {
+pub trait SequencerEventSink {
     /// Trigger a note on event.
     /// Returns a NotePlaybackId that can be used to control this specific note instance.
     fn note_on(
@@ -74,7 +74,7 @@ pub trait SequencerPlayback {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A musical sequence that emits timed note events into a [`SequencerPlayback`] target.
+/// A musical sequence that emits timed note events into a [`SequencerEventSink`] target.
 ///
 /// Call [`run_until`](Sequencer::run_until) with the current sample time to fire any events that
 /// are due. This can be done periodically from a background thread for live/looping sequences, or
@@ -85,7 +85,7 @@ pub trait Sequencer: Send + Sync {
 
     /// Process events up to the given sample time, using the given playback interface
     /// to trigger events.
-    fn run_until(&mut self, sample_time: u64, context: &mut dyn SequencerPlayback);
+    fn run_until(&mut self, sample_time: u64, event_sink: &mut dyn SequencerEventSink);
 
     /// Reset the sequencer to (re)start playback, starting at the given sample time.
     fn reset(&mut self, sample_time: u64);
@@ -100,7 +100,7 @@ pub mod midi_file;
 
 // -------------------------------------------------------------------------------------------------
 
-impl SequencerPlayback for GeneratorPlaybackHandle {
+impl SequencerEventSink for GeneratorPlaybackHandle {
     fn note_on(
         &mut self,
         note: u8,

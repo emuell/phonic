@@ -224,7 +224,7 @@ pub mod generators {
         sequencer::{
             metronome::Metronome,
             pattern::{Pattern, PatternEvent},
-            Sequencer, SequencerPlayback, SequencerTransport,
+            Sequencer, SequencerEventSink, SequencerTransport,
         },
         GeneratorMessage, GeneratorMessagePayload, GeneratorPlaybackEvent,
         GeneratorPlaybackMessage,

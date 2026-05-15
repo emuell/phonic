@@ -2,7 +2,7 @@
 
 use crate::{utils::speed_from_note, NotePlaybackId};
 
-use super::{Sequencer, SequencerPlayback, SequencerTransport};
+use super::{Sequencer, SequencerEventSink, SequencerTransport};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -63,7 +63,7 @@ impl PatternEvent {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A pattern sequencer that plays notes or triggers note parameter changes
+/// A sequencer that plays notes from a predefined, static pattern.
 pub struct Pattern {
     notes: Vec<PatternEvent>,
     start_time: u64,
@@ -96,7 +96,7 @@ impl Pattern {
 }
 
 impl Sequencer for Pattern {
-    fn run_until(&mut self, sample_time: u64, context: &mut dyn SequencerPlayback) {
+    fn run_until(&mut self, sample_time: u64, event_sink: &mut dyn SequencerEventSink) {
         if self.finished || sample_time < self.start_time {
             return;
         }
@@ -126,33 +126,33 @@ impl Sequencer for Pattern {
                 if event.note == PatternEvent::NOTE_OFF_NOTE {
                     // Just stop the previous note, if any
                     if let Some(prev_note_id) = self.note_id {
-                        context.note_off(prev_note_id, current_time);
+                        event_sink.note_off(prev_note_id, current_time);
                     }
                 } else if event.glide.is_none() || self.note_id.is_none() {
                     // Play a new note with all optional parameters
                     let note_id =
-                        context.note_on(event.note, event.volume, event.panning, current_time);
+                        event_sink.note_on(event.note, event.volume, event.panning, current_time);
 
                     // Stop previous note if any
                     if let Some(prev_note_id) = self.note_id {
-                        context.note_off(prev_note_id, current_time);
+                        event_sink.note_off(prev_note_id, current_time);
                     }
 
                     self.note_id = Some(note_id);
                 } else {
                     // Modify existing playback (glide mode)
                     if let Some(note_id) = self.note_id {
-                        context.set_speed(
+                        event_sink.set_speed(
                             note_id,
                             speed_from_note(event.note),
                             event.glide,
                             current_time,
                         );
                         if let Some(vol) = event.volume {
-                            context.set_volume(note_id, vol, current_time);
+                            event_sink.set_volume(note_id, vol, current_time);
                         }
                         if let Some(pan) = event.panning {
-                            context.set_panning(note_id, pan, current_time);
+                            event_sink.set_panning(note_id, pan, current_time);
                         }
                     }
                 }

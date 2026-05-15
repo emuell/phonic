@@ -2,7 +2,7 @@
 
 use super::{
     pattern::{Pattern, PatternEvent},
-    Sequencer, SequencerPlayback, SequencerTransport,
+    Sequencer, SequencerEventSink, SequencerTransport,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -34,8 +34,8 @@ impl Metronome {
 }
 
 impl Sequencer for Metronome {
-    fn run_until(&mut self, sample_time: u64, context: &mut dyn SequencerPlayback) {
-        self.pattern.run_until(sample_time, context);
+    fn run_until(&mut self, sample_time: u64, event_sink: &mut dyn SequencerEventSink) {
+        self.pattern.run_until(sample_time, event_sink);
     }
 
     fn is_exhausted(&self) -> bool {

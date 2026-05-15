@@ -63,15 +63,13 @@ fn main() -> Result<(), Error> {
     )?;
 
     // Sequencer timing
-    const BPM: f64 = 120.0;
-    const BEATS_PER_BAR: usize = 4;
     const BARS_TO_PLAY: usize = 4;
-
     let samples_per_sec = player.output_sample_rate() as u64;
-    let transport = SequencerTransport::new(player.output_sample_rate(), BPM, BEATS_PER_BAR);
     let output_start_time = player.output_sample_frame_position() + samples_per_sec;
 
-    // Schedule metronome beats using the Metronome sequencer
+    let transport = SequencerTransport::new(player.output_sample_rate(), 120.0, 4);
+    
+    // Schedule metronome beats
     let mut metro_seq = Metronome::new(BARS_TO_PLAY, output_start_time, transport);
     metro_seq.run_until(u64::MAX, &mut metronome);
     metronome.stop(

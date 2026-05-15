@@ -1,10 +1,10 @@
-//! MIDI file sequencer — plays a Standard MIDI File through a [`SequencerPlayback`] target.
+//! MIDI file sequencer - plays a Standard MIDI File through a [`SequencerEventSink`] target.
 
 use std::{collections::HashMap, path::Path};
 
 use crate::{Error, NotePlaybackId};
 
-use super::{Sequencer, SequencerPlayback};
+use super::{Sequencer, SequencerEventSink};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -20,7 +20,7 @@ enum MidiFileEventKind {
 
 // -------------------------------------------------------------------------------------------------
 
-/// A sequencer that reads a Standard MIDI File and emits note events into a [`SequencerPlayback`]
+/// A sequencer that reads a Standard MIDI File and emits note events into a [`SequencerEventSink`]
 /// target.
 ///
 /// Create via [`MidiFile::from_path`] or [`MidiFile::from_bytes`], then drive it the same way as
@@ -73,7 +73,7 @@ impl MidiFile {
 // -------------------------------------------------------------------------------------------------
 
 impl Sequencer for MidiFile {
-    fn run_until(&mut self, sample_time: u64, context: &mut dyn SequencerPlayback) {
+    fn run_until(&mut self, sample_time: u64, event_sink: &mut dyn SequencerEventSink) {
         if self.finished {
             return;
         }
@@ -89,14 +89,14 @@ impl Sequencer for MidiFile {
                 MidiFileEventKind::NoteOn { channel, note, volume } => {
                     // Stop any currently playing instance of this (channel, note) first
                     if let Some(prev_id) = self.active_notes.remove(&(channel, note)) {
-                        context.note_off(prev_id, abs_time);
+                        event_sink.note_off(prev_id, abs_time);
                     }
-                    let note_id = context.note_on(note, Some(volume), None, abs_time);
+                    let note_id = event_sink.note_on(note, Some(volume), None, abs_time);
                     self.active_notes.insert((channel, note), note_id);
                 }
                 MidiFileEventKind::NoteOff { channel, note } => {
                     if let Some(note_id) = self.active_notes.remove(&(channel, note)) {
-                        context.note_off(note_id, abs_time);
+                        event_sink.note_off(note_id, abs_time);
                     }
                 }
             }
@@ -105,7 +105,7 @@ impl Sequencer for MidiFile {
         }
 
         if self.cursor >= self.events.len() {
-            // Stop any notes still ringing — MIDI end-of-track implies all notes off
+            // Stop any notes still ringing - MIDI end-of-track implies all notes off
             let last_time = self
                 .events
                 .last()
@@ -113,7 +113,7 @@ impl Sequencer for MidiFile {
                     self.base_sample_time.saturating_add(e.sample_offset)
                 });
             for (_, note_id) in self.active_notes.drain() {
-                context.note_off(note_id, last_time);
+                event_sink.note_off(note_id, last_time);
             }
             self.finished = true;
         }
@@ -215,7 +215,7 @@ fn parse_midi_events(bytes: &[u8], sample_rate: u32) -> Result<Vec<MidiFileEvent
                                 kind: MidiFileEventKind::NoteOff { channel: ch, note },
                             });
                         }
-                        // CC 120 (All Sound Off) and CC 123 (All Notes Off) — both used by
+                        // CC 120 (All Sound Off) and CC 123 (All Notes Off) - both used by
                         // many sequencers to stop sounding notes instead of individual NoteOffs
                         MidiMessage::Controller { controller, .. }
                             if controller.as_int() == 120 || controller.as_int() == 123 =>
@@ -253,7 +253,7 @@ fn parse_midi_events(bytes: &[u8], sample_rate: u32) -> Result<Vec<MidiFileEvent
     // track is preserved when two events share the same absolute time.
     all_events.sort_by_key(|e| e.sample_offset);
 
-    // Verify NoteOn/NoteOff balance — every NoteOn must have a matching NoteOff.
+    // Verify NoteOn/NoteOff balance - every NoteOn must have a matching NoteOff.
     let mut balance: HashMap<(u8, u8), i32> = HashMap::new();
     for event in &all_events {
         match event.kind {
