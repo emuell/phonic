@@ -38,7 +38,7 @@ use std::{time::Duration, sync::mpsc::sync_channel};
 
 use phonic::{
     DefaultOutputDevice, Player, PlaybackStatusEvent, Error,
-    FilePlaybackOptions, SynthPlaybackOptions
+    FilePlaybackOptions
 };
 
 fn main() -> Result<(), Error> {
@@ -117,8 +117,9 @@ use std::time::Duration;
 
 use phonic::{
     DefaultOutputDevice, Player, Error, FilePlaybackOptions,
-    effects::{ChorusEffect, ReverbEffect}, ParameterValueUpdate, FourCC,
+    effects::{ChorusEffect, ReverbEffect}, ParameterValueUpdate,
     generators::Sampler, GeneratorPlaybackOptions,
+    four_cc::FourCC,
 };
 
 fn main() -> Result<(), Error> {
@@ -178,6 +179,75 @@ fn main() -> Result<(), Error> {
     // Wait until all files and generators finished playing
     while some_file.is_playing() || another_file.is_playing() || generator.is_playing() {
         std::thread::sleep(Duration::from_millis(500));
+    }
+
+    Ok(())
+}
+```
+
+#### Pattern Sequencer Playback
+
+Play a melodic pattern through the sampler generator using the built-in pattern sequencer.
+
+```rust no_run
+use std::time::Duration;
+
+use phonic::{
+    DefaultOutputDevice, Player, Error,
+    GeneratorPlaybackOptions, generators::{IntoPatternRow, Pattern, PatternEvent, Sampler},
+};
+
+fn main() -> Result<(), Error> {
+    // Create a player with the default output device.
+    let mut player = Player::new(DefaultOutputDevice::open()?, None);
+
+    // Set global transport BPM which all played sequencers use by default
+    player.set_transport_bpm(120.0);
+
+    // Schedule playback 1 second from now
+    let start_time =
+        player.output_sample_frame_position() + player.transport().seconds_to_samples(1.0) as u64;
+
+    // Create a sampler with multiple voices for polyphonic playback
+    let sampler = player.add_generator(
+        Sampler::from_file(
+            "PATH_TO/some_sample.wav",
+            GeneratorPlaybackOptions::default().voices(8),
+            player.output_channel_count(),
+            player.output_sample_rate(),
+        )?,
+        None,
+    )?;
+
+    // Create a melodic `Pattern` which plays the sampler. You can also create & use your
+    // own `Sequencer` impl here to do more fancy or other kind of note event emitting here. 
+    let sequencer = player.play_sequencer(
+        Pattern::new(
+            vec![
+                // C4, play for 1 beat
+                PatternEvent::note_on(60).into_row(1.0),
+                // E4, 1 beat
+                PatternEvent::note_on(64).into_row(1.0),
+                [ // C-maj chord, 2 beats
+                    PatternEvent::note_on(60),
+                    PatternEvent::note_on(64),
+                    PatternEvent::note_on(67),
+                ].into_row(2.0),
+                [ // stop all chord notes
+                    PatternEvent::note_off(),
+                    PatternEvent::note_off(),
+                    PatternEvent::note_off(),
+                ].into_row(1.0),
+            ],
+            0, // play once, no repeat
+        ),
+        sampler,
+        start_time,
+    )?;
+
+    // Wait until sequence playback finished
+    while player.is_running() && sequencer.is_playing() {
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     Ok(())
