@@ -1,17 +1,17 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use emscripten_rs_sys::emscripten_request_animation_frame_loop;
 use serde::Serialize;
 
 use phonic::{
     effects,
     four_cc::FourCC,
-    generators::{FunDspGenerator, ModulationConfig, ModulationSource, ModulationTarget},
-    sources::PreloadedFileSource,
-    utils::{db_to_linear, speed_from_note},
-    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, FilePlaybackOptions, Generator,
-    GeneratorPlaybackHandle, GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter,
-    ParameterPolarity, ParameterType, ParameterValueUpdate, Player,
+    generators::{
+        FunDspGenerator, Metronome, ModulationConfig, ModulationSource, ModulationTarget, Sampler,
+    },
+    utils::db_to_linear,
+    DefaultOutputDevice, Effect, EffectHandle, EffectId, Error, Generator, GeneratorPlaybackHandle,
+    GeneratorPlaybackOptions, MixerHandle, NotePlaybackId, Parameter, ParameterPolarity,
+    ParameterType, ParameterValueUpdate, Player, SequencerHandle,
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -222,16 +222,15 @@ thread_local!(pub static APP: RefCell<Option<App>> = const { RefCell::new(None) 
 
 pub struct App {
     player: Player,
-    playback_beat_counter: u32,
-    playback_start_time: u64,
     metronome_enabled: bool,
+    metronome_generator: GeneratorPlaybackHandle,
+    metronome_sequencer: Option<SequencerHandle>,
     voice_count: usize,
     active_synth: SynthType,
     synth_handle: GeneratorPlaybackHandle,
     synth_modulation_sources: Vec<ModulationSource>,
     synth_modulation_targets: Vec<ModulationTarget>,
     playing_notes: HashMap<u8, NotePlaybackId>,
-    samples: Vec<PreloadedFileSource>,
     synth_mixer: MixerHandle,
     active_effects: HashMap<EffectId, (EffectHandle, Vec<Box<dyn Parameter>>)>,
 }
@@ -244,15 +243,10 @@ impl App {
 
         println!("Creating audio player...");
         let mut player = Player::new(output, None);
-        let sample_rate = player.output_sample_rate();
 
         // lower master volume a bit
         player.set_output_volume(db_to_linear(-3.0));
 
-        // start playback in a second from now
-        let playback_start_time =
-            player.output_sample_frame_position() + player.output_sample_rate() as u64;
-        let playback_beat_counter = 0;
         let metronome_enabled = true;
 
         println!("Creating synths...");
@@ -261,37 +255,42 @@ impl App {
         // create and add the initial synth (Sub3)
         let voice_count = 8;
         let active_synth = SynthType::Sub3;
-        let synth_generator = active_synth.create_generator(sample_rate, voice_count)?;
+        let synth_generator =
+            active_synth.create_generator(player.output_sample_rate(), voice_count)?;
         let synth_modulation_sources = synth_generator.modulation_sources();
         let synth_modulation_targets = synth_generator.modulation_targets();
         let synth_handle = player.add_generator(synth_generator, synth_mixer.id())?;
         let active_effects = HashMap::new();
 
-        println!("Preloading sample files...");
-        let mut samples = Vec::new();
-        for sample in ["./assets/cowbell.wav", "./assets/bass.wav"] {
-            match PreloadedFileSource::from_file(
-                sample,
-                FilePlaybackOptions::default(),
-                sample_rate,
-            ) {
-                Ok(sample) => samples.push(sample),
-                Err(err) => return Err(err),
-            }
-        }
+        println!("Creating metronome...");
+        let metronome_generator = player.add_generator(
+            Sampler::from_file(
+                "./assets/cowbell.wav",
+                GeneratorPlaybackOptions::default().voices(2),
+                player.output_channel_count(),
+                player.output_sample_rate(),
+            )?,
+            None,
+        )?;
+        let start_time =
+            player.output_sample_frame_position() + player.transport().seconds_to_samples(1.0);
+        let metronome_sequencer = if metronome_enabled {
+            Some(player.play_sequencer(
+                Metronome::new(usize::MAX),
+                metronome_generator.clone(),
+                start_time,
+            )?)
+        } else {
+            None
+        };
 
         let playing_notes = HashMap::new();
 
-        println!("Start running...");
-        unsafe {
-            emscripten_request_animation_frame_loop(Some(Self::run_frame), std::ptr::null_mut())
-        };
-
         Ok(Self {
             player,
-            playback_start_time,
-            playback_beat_counter,
             metronome_enabled,
+            metronome_generator,
+            metronome_sequencer,
             voice_count,
             synth_mixer,
             active_synth,
@@ -299,7 +298,6 @@ impl App {
             synth_modulation_sources,
             synth_modulation_targets,
             playing_notes,
-            samples,
             active_effects,
         })
     }
@@ -323,8 +321,8 @@ impl App {
             // Remove the old synth
             self.player.remove_generator(self.synth_handle.id())?;
             // Create and add the new synth
-            let sample_rate = self.player.output_sample_rate();
-            let synth_generator = new_synth_type.create_generator(sample_rate, self.voice_count)?;
+            let synth_generator = new_synth_type
+                .create_generator(self.player.output_sample_rate(), self.voice_count)?;
             self.synth_modulation_sources = synth_generator.modulation_sources();
             self.synth_modulation_targets = synth_generator.modulation_targets();
             self.synth_handle = self
@@ -343,10 +341,9 @@ impl App {
             // Remove old generator
             self.player.remove_generator(self.synth_handle.id())?;
             // Recreate the active synth with the new voice count
-            let sample_rate = self.player.output_sample_rate();
             let synth_generator = self
                 .active_synth
-                .create_generator(sample_rate, voice_count)?;
+                .create_generator(self.player.output_sample_rate(), voice_count)?;
             // Extract modulation info before adding to player
             self.synth_modulation_sources = synth_generator.modulation_sources();
             self.synth_modulation_targets = synth_generator.modulation_targets();
@@ -359,7 +356,21 @@ impl App {
 
     // Set metronome enabled state
     pub fn set_metronome_enabled(&mut self, enabled: bool) {
+        if self.metronome_enabled == enabled {
+            return;
+        }
         self.metronome_enabled = enabled;
+        if enabled {
+            if let Ok(handle) = self.player.play_sequencer(
+                Metronome::new(usize::MAX),
+                self.metronome_generator.clone(),
+                None,
+            ) {
+                self.metronome_sequencer = Some(handle);
+            }
+        } else if let Some(handle) = self.metronome_sequencer.take() {
+            let _ = handle.stop(None);
+        }
     }
 
     // Get parameters for the active synth
@@ -683,92 +694,5 @@ impl App {
             ),
             None,
         )
-    }
-
-    // Animation frame callback which drives the player
-    extern "C" fn run_frame(_time: f64, _user_data: *mut std::ffi::c_void) -> bool {
-        APP.with_borrow_mut(|app| {
-            // is a player running?
-            if let Some(app) = app {
-                app.run();
-                true // continue running
-            } else {
-                false // stop running
-            }
-        })
-    }
-
-    // Schedule samples for playback
-    fn run(&mut self) {
-        // time consts
-        const BEATS_PER_MIN: f64 = 120.0;
-        const BEATS_PER_BAR: u32 = 4;
-
-        // calculate metronome speed and signature
-        let sample_rate = self.player.output_sample_rate();
-        let samples_per_sec = self.player.output_sample_rate();
-        let samples_per_beat = samples_per_sec as f64 * 60.0 / BEATS_PER_MIN;
-
-        // schedule playback 0.5 seconds ahead of the players current time
-        let preroll_time = (samples_per_sec as u64) / 2;
-        let output_sample_time = self.player.output_sample_frame_position();
-
-        // Calculate when the currently tracked beat is supposed to happen
-        let mut next_beats_sample_time = (self.playback_start_time as f64
-            + self.playback_beat_counter as f64 * samples_per_beat)
-            as u64;
-
-        // If we are lagging behind (the beat time is in the past): skip beats
-        if next_beats_sample_time < output_sample_time {
-            let elapsed = output_sample_time.saturating_sub(self.playback_start_time);
-            // Calculate the beat index that corresponds to the next beat in the future
-            let next_beat_index = (elapsed as f64 / samples_per_beat).ceil() as u32;
-            if next_beat_index > self.playback_beat_counter {
-                // println!("Skipping beats: {} -> {}", self.playback_beat_counter, next_beat_index);
-                self.playback_beat_counter = next_beat_index;
-                // Recalculate time for the new counter
-                next_beats_sample_time = (self.playback_start_time as f64
-                    + self.playback_beat_counter as f64 * samples_per_beat)
-                    as u64;
-            }
-        }
-
-        // schedule next sample when it's due within the preroll time, else do nothing
-        if next_beats_sample_time < output_sample_time + preroll_time {
-            // println!("Scheduling metronome sample to: {next_beats_sample_time}");
-
-            if self.metronome_enabled {
-                // play an octave higher every new bar start
-                let sample_speed = speed_from_note(
-                    if self.playback_beat_counter.is_multiple_of(BEATS_PER_BAR) {
-                        72
-                    } else {
-                        60
-                    },
-                );
-                // select a new sample every 2 bars
-                let sample_index = (self.playback_beat_counter / (2 * BEATS_PER_BAR)) as usize
-                    % self.samples.len();
-                // clone the preloaded sample
-                let sample = self.samples[sample_index]
-                    .clone(
-                        FilePlaybackOptions::default().speed(sample_speed),
-                        sample_rate,
-                    )
-                    .unwrap();
-
-                // play it at the new beat's time
-                if let Ok(playback_handle) = self
-                    .player
-                    .play_file_source(sample, Some(next_beats_sample_time))
-                {
-                    // and stop it again (fade out) before the next beat starts
-                    let _ = playback_handle.stop(next_beats_sample_time + samples_per_beat as u64);
-                }
-            }
-
-            // advance beat counter
-            self.playback_beat_counter += 1;
-        }
     }
 }
